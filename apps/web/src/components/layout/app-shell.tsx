@@ -11,7 +11,6 @@ import { LeftSidebar } from "./left-sidebar";
 import { SqlExecutor } from "@/components/sql/sql-executor";
 import { DatasetViewer } from "@/components/dataset/dataset-viewer";
 import { SampleQuestionsModal } from "@/components/sample-questions/sample-questions-modal";
-import { WorkflowBuilder } from "@/components/automations/workflow-builder";
 import {
   Sheet,
   SheetContent,
@@ -127,9 +126,6 @@ export const AppShell = React.memo(function AppShell({ children }: { children: R
 
       {/* Sample Questions modal — triggered from user menu */}
       <SampleQuestionsModal open={sampleQuestionsOpen} onOpenChange={setSampleQuestionsOpen} />
-
-      {/* Workflow Builder — triggered from message bubble */}
-      <WorkflowBuilder />
     </div>
   );
 });

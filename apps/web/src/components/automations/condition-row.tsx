@@ -24,14 +24,13 @@ interface ConditionRowProps {
 
 const needsColumn = (type: string, resultShape: ResultShape) =>
   type === "column_expression" ||
-  type === "slope" ||
   (type === "threshold" && resultShape !== "scalar");
 
 const needsOperator = (type: string) =>
-  type === "threshold" || type === "column_expression" || type === "row_count" || type === "slope";
+  type === "threshold" || type === "column_expression" || type === "row_count";
 
 const needsValue = (type: string) =>
-  type === "threshold" || type === "column_expression" || type === "row_count" || type === "slope";
+  type === "threshold" || type === "column_expression" || type === "row_count";
 
 export function ConditionRow({ condition, onChange, onRemove, columns, resultShape }: ConditionRowProps) {
   const availableTypes = getAvailableTypes(resultShape);
@@ -58,7 +57,6 @@ export function ConditionRow({ condition, onChange, onRemove, columns, resultSha
                 value: null,
                 change_percent: null,
                 scope: null,
-                slope_window: v === "slope" ? 5 : null,
               })
             }
           >
@@ -144,27 +142,6 @@ export function ConditionRow({ condition, onChange, onRemove, columns, resultSha
             </div>
           )}
 
-          {/* Slope window */}
-          {condition.type === "slope" && (
-            <div className="flex items-center gap-1">
-              <Input
-                type="number"
-                placeholder="5"
-                className="w-[60px]"
-                min={2}
-                max={50}
-                value={condition.slope_window ?? 5}
-                onChange={(e) =>
-                  onChange({
-                    ...condition,
-                    slope_window: e.target.value ? Number(e.target.value) : 5,
-                  })
-                }
-              />
-              <span className="text-xs text-muted-foreground">runs</span>
-            </div>
-          )}
-
           {/* Scope selector for column_expression on tabular */}
           {condition.type === "column_expression" && resultShape === "tabular" && (
             <Select
@@ -204,14 +181,13 @@ export function ConditionRow({ condition, onChange, onRemove, columns, resultSha
 }
 
 function getAvailableTypes(resultShape: ResultShape) {
-  // All condition types are available for all result shapes.
-  // row_count works universally (count of result rows).
-  // slope and change_detection compare across runs.
+  // Phase C1: four condition types — no slope (deferred to a hypothetical future
+  // migration). `row_count` works universally; `change_detection` compares across
+  // runs; `threshold` for scalar/tabular results; `column_expression` for rows.
   const types = [
     { value: "threshold", label: "Value" },
     { value: "row_count", label: "Row Count" },
     { value: "change_detection", label: "Change %" },
-    { value: "slope", label: "Slope / Trend" },
   ];
   if (resultShape === "tabular" || resultShape === "single_row") {
     types.push({ value: "column_expression", label: "Column Condition" });
@@ -227,8 +203,6 @@ function getConditionHint(type: string): string {
       return "Compare the number of result rows against a threshold.";
     case "change_detection":
       return "Fire when value changes by more than N% from the previous run.";
-    case "slope":
-      return "Compute the rate of change (linear slope) across recent runs. Use to detect trends.";
     case "column_expression":
       return "Check a column value across rows (any row or all rows must match).";
     default:

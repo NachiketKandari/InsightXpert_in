@@ -3,7 +3,8 @@
 import React from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { LogOut, Activity, Sun, Moon, Settings, ListChecks, ChevronsUpDown } from "lucide-react";
+import { LogOut, Activity, Sun, Moon, Settings, ListChecks, ChevronsUpDown, Zap } from "lucide-react";
+import { AUTOMATIONS_ENABLED } from "@/lib/automations/feature-flag";
 import { logout } from "@/lib/auth-api";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { useClientConfig } from "@/hooks/use-client-config";
@@ -110,6 +111,14 @@ export const UserMenu = React.memo(function UserMenu() {
               <Link href="/admin">
                 <Settings className="size-4" />
                 Admin Panel
+              </Link>
+            </DropdownMenuItem>
+          )}
+          {AUTOMATIONS_ENABLED && (
+            <DropdownMenuItem asChild>
+              <Link href="/automations">
+                <Zap className="size-4" />
+                Automations
               </Link>
             </DropdownMenuItem>
           )}

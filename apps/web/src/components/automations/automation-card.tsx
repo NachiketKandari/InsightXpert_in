@@ -13,7 +13,6 @@ import {
   XCircle,
   AlertTriangle,
   Timer,
-  Pencil,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -69,7 +68,6 @@ export function AutomationCard({ automation, onDelete }: AutomationCardProps) {
   const runNow = useAutomationStore((s) => s.runNow);
   const startTestTrigger = useAutomationStore((s) => s.startTestTrigger);
   const stopTestTrigger = useAutomationStore((s) => s.stopTestTrigger);
-  const openWorkflowBuilderForEdit = useAutomationStore((s) => s.openWorkflowBuilderForEdit);
   const testState = useAutomationStore((s) => s.activeTestTriggers[automation.id]);
 
   const [expanded, setExpanded] = useState(false);
@@ -214,19 +212,6 @@ export function AutomationCard({ automation, onDelete }: AutomationCardProps) {
               <Timer className="size-3" />
             </Button>
           )}
-
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={(e) => {
-              e.stopPropagation();
-              openWorkflowBuilderForEdit(automation);
-            }}
-            className="h-7 px-2 gap-1 text-xs"
-            title="Edit automation"
-          >
-            <Pencil className="size-3" />
-          </Button>
 
           <Button
             variant="ghost"

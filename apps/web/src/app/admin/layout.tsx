@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { useClientConfig } from "@/hooks/use-client-config";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { cn } from "@/lib/utils";
+import { AUTOMATIONS_ENABLED } from "@/lib/automations/feature-flag";
 
 const TABS: { href: string; label: string }[] = [
   { href: "/admin/overview", label: "Overview" },
@@ -23,6 +24,10 @@ const TABS: { href: string; label: string }[] = [
   { href: "/admin/conversations", label: "Conversations" },
   { href: "/admin/prompts", label: "Prompts" },
   { href: "/admin/rag", label: "RAG" },
+  // Phase C1: Automations tab appears only when the flag is on.
+  ...(AUTOMATIONS_ENABLED
+    ? [{ href: "/admin/automations", label: "Automations" }]
+    : []),
 ];
 
 function AdminGuard({ children }: { children: React.ReactNode }) {

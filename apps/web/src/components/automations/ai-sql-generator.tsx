@@ -1,25 +1,36 @@
 "use client";
 
+// Phase C1: emits SQL via callback (de-coupled from the old workflow-builder store).
+
 import { useState } from "react";
 import { Loader2, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { useAutomationStore } from "@/stores/automation-store";
+import { generateSql } from "@/lib/automations/api";
 
-export function AiSqlGenerator() {
+interface AiSqlGeneratorProps {
+  onGenerated: (sql: string, prompt: string) => void;
+}
+
+export function AiSqlGenerator({ onGenerated }: AiSqlGeneratorProps) {
   const [prompt, setPrompt] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const isGenerating = useAutomationStore((s) => s.isGeneratingSQL);
-  const generateSQL = useAutomationStore((s) => s.generateSQL);
+  const [isGenerating, setIsGenerating] = useState(false);
 
   const handleGenerate = async () => {
     if (!prompt.trim() || isGenerating) return;
     setError(null);
+    setIsGenerating(true);
     try {
-      await generateSQL(prompt.trim());
-      setPrompt("");
-    } catch {
-      setError("Failed to generate SQL. Try a different prompt.");
+      const result = await generateSql(prompt.trim());
+      if (result?.sql) {
+        onGenerated(result.sql, prompt.trim());
+        setPrompt("");
+      } else {
+        setError("Failed to generate SQL. Try a different prompt.");
+      }
+    } finally {
+      setIsGenerating(false);
     }
   };
 
@@ -47,7 +58,7 @@ export function AiSqlGenerator() {
         ) : (
           <>
             <Sparkles className="size-3.5 mr-1.5" />
-            Generate Block
+            Generate SQL
           </>
         )}
       </Button>
