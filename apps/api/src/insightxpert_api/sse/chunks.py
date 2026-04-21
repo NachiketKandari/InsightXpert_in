@@ -1,12 +1,26 @@
-"""SSE chunk taxonomy — the wire contract between pipeline and UI.
+"""SSE chunk taxonomy — the wire contract between pipeline/agents and UI.
 
-Inherits the public-backend taxonomy (``status``, ``sql``, ``tool_call``, ``tool_result``,
-``answer``, ``error``, ``metrics``) and extends it with events that expose the text-to-SQL
-pipeline's internals, making the "which signals pulled which columns" transparency possible.
+Unified four-tier envelope (spec §8):
+  - Tier-1: lifecycle (status, error, metrics)
+  - Tier-2: generic tool call/result (tool_call, tool_result)
+  - Tier-3: pipeline transparency (profile_loaded, schema_linking_started,
+    candidate_sqls_generated, literals_extracted, semantic_matches,
+    join_paths_added, linked_schema_final, sql_generated, sql_executing,
+    rows_returned, answer_generated)
+  - Tier-4: orchestration transparency (stats_context, orchestrator_plan,
+    agent_trace, enrichment_trace, insight, clarification)
 
-Payload shapes here are the SOURCE OF TRUTH for the generated TypeScript types in
-``packages/types``. Keep fields precise; avoid ``dict[str, Any]`` unless the shape is genuinely
-open-ended (it never should be).
+Every chunk is strictly ``{type, data, conversation_id, timestamp}`` on the
+wire. Legacy flat shapes (top-level ``sql`` / ``answer`` / ``tool_name``) are
+gone; everything lives inside ``data``.
+
+Payload shapes here are the SOURCE OF TRUTH for the generated TypeScript types
+in ``packages/types``. Keep fields precise; avoid ``dict[str, Any]`` unless the
+shape is genuinely open-ended.
+
+The ``ChunkType`` enum exposes lowercase member names (``ChunkType.sql_generated``)
+that match the wire value, plus UPPER_CASE aliases (``ChunkType.SQL_GENERATED``)
+retained for Phase A emitter/test call-sites.
 """
 
 from __future__ import annotations
@@ -22,16 +36,42 @@ from pydantic import BaseModel, Field
 class ChunkType(str, Enum):
     """Closed set of SSE chunk types. FE chunk renderers dispatch on this value."""
 
-    # --- inherited from public backend ------------------------------------
+    # --- Tier-1: lifecycle -----------------------------------------------
+    status = "status"
+    error = "error"
+    metrics = "metrics"
+
+    # --- Tier-2: generic tool protocol -----------------------------------
+    tool_call = "tool_call"
+    tool_result = "tool_result"
+
+    # --- Tier-3: pipeline transparency -----------------------------------
+    profile_loaded = "profile_loaded"
+    schema_linking_started = "schema_linking_started"
+    candidate_sqls_generated = "candidate_sqls_generated"
+    literals_extracted = "literals_extracted"
+    semantic_matches = "semantic_matches"
+    join_paths_added = "join_paths_added"
+    linked_schema_final = "linked_schema_final"
+    sql_generated = "sql_generated"
+    sql_executing = "sql_executing"
+    rows_returned = "rows_returned"
+    answer_generated = "answer_generated"
+
+    # --- Tier-4: orchestration transparency ------------------------------
+    stats_context = "stats_context"
+    orchestrator_plan = "orchestrator_plan"
+    agent_trace = "agent_trace"
+    enrichment_trace = "enrichment_trace"
+    insight = "insight"
+    clarification = "clarification"
+
+    # --- UPPER_CASE aliases (backward-compatible; same values) -----------
     STATUS = "status"
-    SQL = "sql"
-    TOOL_CALL = "tool_call"
-    TOOL_RESULT = "tool_result"
-    ANSWER = "answer"
     ERROR = "error"
     METRICS = "metrics"
-
-    # --- pipeline-internal events (v1 new) --------------------------------
+    TOOL_CALL = "tool_call"
+    TOOL_RESULT = "tool_result"
     PROFILE_LOADED = "profile_loaded"
     SCHEMA_LINKING_STARTED = "schema_linking_started"
     CANDIDATE_SQLS_GENERATED = "candidate_sqls_generated"
@@ -46,7 +86,7 @@ class ChunkType(str, Enum):
 
 
 # ---------------------------------------------------------------------------
-# Payload shapes, one class per chunk type.
+# Tier-1: lifecycle payloads
 # ---------------------------------------------------------------------------
 
 
@@ -59,33 +99,38 @@ class ErrorPayload(BaseModel):
     detail: str | None = None
 
 
-class SQLPayload(BaseModel):
-    sql: str
-
-
-class ToolCallPayload(BaseModel):
-    tool: str
-    arguments: dict[str, object] = Field(default_factory=dict)
-
-
-class ToolResultPayload(BaseModel):
-    tool: str
-    result: object
-
-
-class AnswerPayload(BaseModel):
-    """Streamed-in-progress natural-language answer token/chunk."""
-
-    text: str
-    final: bool = False
-
-
 class MetricsPayload(BaseModel):
     latency_ms: int
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
     total_tokens: int | None = None
     model: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Tier-2: generic tool protocol
+# ---------------------------------------------------------------------------
+
+
+class ToolCallPayload(BaseModel):
+    tool: str
+    arguments: dict[str, object] = Field(default_factory=dict)
+    llm_reasoning: str | None = None
+    agent: str | None = None
+
+
+class ToolResultPayload(BaseModel):
+    tool: str
+    result: object
+    visualization: str | None = None
+    x_column: str | None = None
+    y_column: str | None = None
+    agent: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Tier-3: pipeline transparency payloads
+# ---------------------------------------------------------------------------
 
 
 class ProfileLoadedPayload(BaseModel):
@@ -101,18 +146,16 @@ class SchemaLinkingStartedPayload(BaseModel):
 
 
 class CandidateSQLsGeneratedPayload(BaseModel):
-    candidates: list[str]  # raw 5 candidate SQLs from the single-prompt linker
+    candidates: list[str]
 
 
 class LiteralsExtractedPayload(BaseModel):
-    """String literals pulled from candidate SQLs + their LSH matches."""
-
     literals: list[str]
-    matches: dict[str, list[str]]  # literal -> ["table.column", ...]
+    matches: dict[str, list[str]]
 
 
 class SemanticMatchPayload(BaseModel):
-    column: str  # "table.column"
+    column: str
     score: float
 
 
@@ -121,9 +164,9 @@ class SemanticMatchesPayload(BaseModel):
 
 
 class JoinEdgePayload(BaseModel):
-    from_: str = Field(alias="from")  # "table.column"
-    to: str  # "table.column"
-    kind: str  # "declared" | "value_verified" | "bridge"
+    from_: str = Field(alias="from")
+    to: str
+    kind: str
 
 
 class JoinPathsAddedPayload(BaseModel):
@@ -131,22 +174,27 @@ class JoinPathsAddedPayload(BaseModel):
 
 
 class LinkedSchemaFinalPayload(BaseModel):
-    """Final schema handed to the SQL generator, with per-column provenance."""
-
     schema_text: str
     linked_tables: list[str]
-    linked_columns: list[str]  # "table.column"
-    column_sources: dict[str, list[str]]  # "table.column" -> ["trial_sql","semantic",...]
+    linked_columns: list[str]
+    column_sources: dict[str, list[str]]
     question_interpretation: str | None = None
 
 
 class SQLGeneratedPayload(BaseModel):
     sql: str
-    iteration: int = 0  # 0 = initial, 1+ = refinement rounds
+    iteration: int = 0
+
+
+# Alias retained to match the plan's naming (``SqlGenerated`` / ``sql_generated``).
+SqlGeneratedPayload = SQLGeneratedPayload
 
 
 class SQLExecutingPayload(BaseModel):
     sql: str
+
+
+SqlExecutingPayload = SQLExecutingPayload
 
 
 class RowsReturnedPayload(BaseModel):
@@ -162,15 +210,81 @@ class AnswerGeneratedPayload(BaseModel):
     text: str
 
 
-# Union used for typing convenience; runtime stores `BaseModel | dict`.
+# ---------------------------------------------------------------------------
+# Tier-4: orchestration transparency payloads
+# ---------------------------------------------------------------------------
+
+
+class StatsContextPayload(BaseModel):
+    content: str
+    groups: list[str] = Field(default_factory=list)
+
+
+class OrchestratorPlanTask(BaseModel):
+    id: str
+    agent: str
+    task: str
+    depends_on: list[str] = Field(default_factory=list)
+    category: str = ""
+
+
+class OrchestratorPlanPayload(BaseModel):
+    reasoning: str
+    tasks: list[OrchestratorPlanTask] = Field(default_factory=list)
+
+
+class AgentTracePayload(BaseModel):
+    task_id: str
+    agent: str
+    category: str
+    task: str
+    depends_on: list[str] = Field(default_factory=list)
+    final_sql: str | None = None
+    final_answer: str | None = None
+    success: bool
+    error: str | None = None
+    duration_ms: int
+    steps: list[dict] = Field(default_factory=list)
+
+
+class EnrichmentTracePayload(BaseModel):
+    source_index: int
+    category: str
+    question: str
+    rationale: str
+    final_sql: str | None = None
+    final_answer: str | None = None
+    success: bool
+    duration_ms: int
+    steps: list[dict] = Field(default_factory=list)
+
+
+class InsightPayload(BaseModel):
+    content: str
+    agent: str
+    save_as_insight: bool = False
+    insight_summary: str | None = None
+    investigation: bool = False
+
+
+class ClarificationPayload(BaseModel):
+    question: str
+    skip_allowed: bool = True
+
+
+# ---------------------------------------------------------------------------
+# Envelope
+# ---------------------------------------------------------------------------
+
 ChunkPayload = Union[
+    # Tier-1
     StatusPayload,
     ErrorPayload,
-    SQLPayload,
+    MetricsPayload,
+    # Tier-2
     ToolCallPayload,
     ToolResultPayload,
-    AnswerPayload,
-    MetricsPayload,
+    # Tier-3
     ProfileLoadedPayload,
     SchemaLinkingStartedPayload,
     CandidateSQLsGeneratedPayload,
@@ -182,11 +296,22 @@ ChunkPayload = Union[
     SQLExecutingPayload,
     RowsReturnedPayload,
     AnswerGeneratedPayload,
+    # Tier-4
+    StatsContextPayload,
+    OrchestratorPlanPayload,
+    AgentTracePayload,
+    EnrichmentTracePayload,
+    InsightPayload,
+    ClarificationPayload,
 ]
 
 
 class ChatChunk(BaseModel):
-    """Envelope sent over the wire as a single ``data:`` line."""
+    """Envelope sent over the wire as a single ``data:`` line.
+
+    Strict envelope: only ``type``, ``data``, ``conversation_id``, ``timestamp``.
+    No top-level flat fields.
+    """
 
     model_config = {"populate_by_name": True}
 
@@ -199,8 +324,7 @@ class ChatChunk(BaseModel):
         """Serialize the chunk to a JSON string (no SSE framing).
 
         ``sse_starlette.EventSourceResponse`` handles the ``data:`` prefix and
-        trailing double newline itself — yielding already-framed strings from
-        ``EventEmitter.stream()`` caused a double-prefix bug (see QA FLAG 2).
+        trailing double newline itself.
         """
         payload = self.model_dump(mode="json", by_alias=True)
         return json.dumps(payload)
