@@ -22,6 +22,22 @@ from insightxpert_api.sse.chunks import ChunkType, ErrorPayload
 # --- /chat/poll -----------------------------------------------------------------
 
 
+def test_chat_poll_last_chunk_is_metrics(authed_client: TestClient, patched_pipeline):
+    """Spec §5.4: a terminal metrics chunk should precede [DONE]. The poll
+    endpoint doesn't include [DONE] in its list; the last chunk should be metrics.
+    """
+    r = authed_client.post(
+        "/api/v1/chat/poll",
+        json={"message": "count rows", "db_id": "california_schools"},
+    )
+    assert r.status_code == 200
+    chunks = r.json()["chunks"]
+    assert chunks, "expected at least one chunk"
+    last = chunks[-1]
+    assert last["type"] == "metrics"
+    assert isinstance(last["data"]["latency_ms"], int)
+
+
 def test_chat_poll_returns_chunks_list(authed_client: TestClient, patched_pipeline):
     r = authed_client.post(
         "/api/v1/chat/poll",

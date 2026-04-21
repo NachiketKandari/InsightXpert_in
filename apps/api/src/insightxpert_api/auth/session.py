@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 import uuid
 from dataclasses import dataclass
 
@@ -27,8 +28,14 @@ class SessionSigner:
         self._ttl = settings.session_ttl_seconds
 
     def issue(self) -> str:
-        """Mint a new token bound to a fresh uuid4."""
-        return self._serializer.dumps({"session_id": str(uuid.uuid4())})
+        """Mint a new token bound to a fresh uuid4.
+
+        Includes ``iat`` (issued-at epoch, float seconds) so rapid re-issue
+        produces a byte-different cookie value. Verifiers treat it as optional
+        for backwards-compat with tokens minted before this change.
+        """
+        payload = {"session_id": str(uuid.uuid4()), "iat": time.time()}
+        return self._serializer.dumps(payload)
 
     def verify(self, token: str) -> SessionClaims | None:
         """Return claims if the token is valid + unexpired, else None."""

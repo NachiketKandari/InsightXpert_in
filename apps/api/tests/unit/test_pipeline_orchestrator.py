@@ -51,7 +51,9 @@ async def test_pipeline_emits_status_per_stage_when_emitter_attached():
     await em.close()
 
     frames = [f async for f in em.stream()]
-    assert frames[-1] == "data: [DONE]\n\n"
+    # EventEmitter now yields raw JSON + the literal "[DONE]" sentinel — the
+    # SSE framing is added by EventSourceResponse, not by the emitter.
+    assert frames[-1] == "[DONE]"
     status_frames = [f for f in frames if '"type": "status"' in f or '"type":"status"' in f]
     assert len(status_frames) == 2  # one per stage
 

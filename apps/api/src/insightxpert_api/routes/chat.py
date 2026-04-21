@@ -6,6 +6,7 @@ All three drive the same pipeline; they differ only in how chunks are surfaced t
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -21,7 +22,7 @@ from ..pipeline.stage import PipelineContext
 from ..services.conversation_store import ConversationStore, get_conversation_store
 from ..services.database_service import DatabaseService
 from ..services.profile_service import ProfileService
-from ..sse.chunks import AnswerGeneratedPayload, ChunkType, ErrorPayload
+from ..sse.chunks import AnswerGeneratedPayload, ChunkType, ErrorPayload, MetricsPayload
 from ..sse.emitter import EventEmitter
 from ..storage import build_store
 
@@ -84,9 +85,11 @@ async def _run_pipeline(
     pipeline: Any,
     ctx: PipelineContext,
     convo_store: ConversationStore,
+    model: str | None = None,
 ) -> None:
     """Drive the pipeline, emit final events, persist the assistant message."""
     emitter = ctx.emitter
+    start = time.monotonic()
     try:
         await pipeline.run_scalar(ctx, None)
         # executor_stage stores `rows` as a dict {columns, rows, execution_time_ms}.
@@ -118,7 +121,14 @@ async def _run_pipeline(
                 ErrorPayload(code="pipeline_failed", detail=str(exc)),
             )
     finally:
+        # Emit a terminal metrics chunk (spec §5.4) before closing. Token counts
+        # require threading the Gemini response through — Slice 1+ territory.
         if emitter is not None:
+            latency_ms = int((time.monotonic() - start) * 1000)
+            await emitter.emit(
+                ChunkType.METRICS,
+                MetricsPayload(latency_ms=latency_ms, model=model),
+            )
             await emitter.close()
 
 
@@ -143,7 +153,9 @@ async def chat_sse(
     )
     # Fire pipeline on a background task so EventSourceResponse can start streaming
     # the emitter's queue before the pipeline finishes.
-    asyncio.create_task(_run_pipeline(pipeline, ctx, convo_store))
+    asyncio.create_task(
+        _run_pipeline(pipeline, ctx, convo_store, model=settings.gemini_chat_model)
+    )
     return EventSourceResponse(emitter.stream())
 
 
@@ -151,12 +163,13 @@ async def _collect_chunks(
     pipeline: Any,
     ctx: PipelineContext,
     convo_store: ConversationStore,
+    model: str | None = None,
 ) -> list[Any]:
     """Run the pipeline to completion, draining the emitter into a list of ChatChunks."""
     emitter = ctx.emitter
     assert emitter is not None
 
-    task = asyncio.create_task(_run_pipeline(pipeline, ctx, convo_store))
+    task = asyncio.create_task(_run_pipeline(pipeline, ctx, convo_store, model=model))
     collected: list[Any] = []
     # Drain the queue until the sentinel (None) is pushed by emitter.close().
     while True:
@@ -187,7 +200,7 @@ async def chat_poll(
         body=body, claims=claims, settings=settings, convo_store=convo_store,
         emitter=emitter, conversation_id=convo.conversation_id,
     )
-    chunks = await _collect_chunks(pipeline, ctx, convo_store)
+    chunks = await _collect_chunks(pipeline, ctx, convo_store, model=settings.gemini_chat_model)
     return ChatPollResponse(
         conversation_id=convo.conversation_id,
         chunks=[c.model_dump(mode="json") for c in chunks],
@@ -213,7 +226,7 @@ async def chat_answer(
         body=body, claims=claims, settings=settings, convo_store=convo_store,
         emitter=emitter, conversation_id=convo.conversation_id,
     )
-    chunks = await _collect_chunks(pipeline, ctx, convo_store)
+    chunks = await _collect_chunks(pipeline, ctx, convo_store, model=settings.gemini_chat_model)
 
     answer = ""
     sqls: list[str] = []
