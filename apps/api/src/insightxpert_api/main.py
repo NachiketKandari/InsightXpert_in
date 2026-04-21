@@ -11,7 +11,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 
 from .config import get_settings
 from .logging import configure_logging, get_logger
-from .routes import auth, health
+from .routes import auth, chat, health
 
 
 @asynccontextmanager
@@ -44,6 +44,7 @@ def create_app() -> FastAPI:
     app.add_middleware(GZipMiddleware, minimum_size=1024)
     app.include_router(health.router)
     app.include_router(auth.router)
+    app.include_router(chat.router)
     return app
 
 
