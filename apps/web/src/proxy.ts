@@ -1,7 +1,8 @@
 // apps/web/src/proxy.ts
 // Renamed from middleware.ts per Next 16 deprecation
-// (https://nextjs.org/docs/messages/middleware-to-proxy). Exported function
-// name stays `middleware` — only the file moved.
+// (https://nextjs.org/docs/messages/middleware-to-proxy). Next 16 requires the
+// exported function to be named `proxy` (or be the default export) to match
+// the new file convention.
 //
 // Redirects unauth requests to /login?next=...; skips static files, the auth
 // pages themselves, and API routes. Identity check is "is the session cookie
@@ -21,7 +22,7 @@ function isPublic(pathname: string): boolean {
   return false;
 }
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
   if (isPublic(pathname)) return NextResponse.next();
 
