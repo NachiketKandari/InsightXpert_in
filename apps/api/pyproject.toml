@@ -1,0 +1,58 @@
+[project]
+name = "insightxpert-api"
+version = "0.1.0"
+description = "insightxpert.ai — FastAPI backend orchestrating the text-to-SQL pipeline"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+  "sse-starlette>=2.1",
+  "pydantic>=2.8",
+  "pydantic-settings>=2.4",
+  "google-genai>=0.2",
+  "google-cloud-storage>=2.18",
+  "itsdangerous>=2.2",
+  "sqlglot>=25.0",
+  "datasketch>=1.6",
+  "numpy>=1.26",
+  "jinja2>=3.1",
+  "python-multipart>=0.0.9",
+  "structlog>=24.4",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=8.3",
+  "pytest-asyncio>=0.24",
+  "httpx>=0.27",
+  "ruff>=0.6",
+  "mypy>=1.11",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/insightxpert_api"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "N", "B", "A", "C4", "SIM", "RUF"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+exclude = ["src/insightxpert_api/vendored/"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

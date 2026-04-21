@@ -1,0 +1,12 @@
+{
+  "name": "@insightxpert/api",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "uv run uvicorn insightxpert_api.main:app --reload --port 8080",
+    "build": "uv sync --frozen",
+    "test": "uv run pytest",
+    "lint": "uv run ruff check .",
+    "typecheck": "uv run mypy src"
+  }
+}
