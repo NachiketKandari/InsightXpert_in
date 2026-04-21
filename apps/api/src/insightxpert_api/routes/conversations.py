@@ -11,8 +11,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 
-from ..auth.dependencies import require_session
-from ..auth.session import SessionClaims
+from ..auth.current_user import CurrentUser, get_current_user
 from ..services.conversation_store import (
     ConversationNotFoundError,
     ConversationStore,
@@ -29,10 +28,10 @@ class ConversationPatch(BaseModel):
 
 @router.get("")
 async def list_conversations(
-    claims: SessionClaims = Depends(require_session),
+    cu: CurrentUser = Depends(get_current_user),
     store: ConversationStore = Depends(get_conversation_store),
 ) -> list[dict[str, Any]]:
-    convos = store.list(claims.session_id)
+    convos = store.list(cu.id)
     convos_sorted = sorted(convos, key=lambda c: c.updated_at, reverse=True)
     return [ConversationStore.to_dict(c) for c in convos_sorted]
 
@@ -40,11 +39,11 @@ async def list_conversations(
 @router.get("/{conversation_id}")
 async def get_conversation(
     conversation_id: str,
-    claims: SessionClaims = Depends(require_session),
+    cu: CurrentUser = Depends(get_current_user),
     store: ConversationStore = Depends(get_conversation_store),
 ) -> dict[str, Any]:
     try:
-        convo = store.get(claims.session_id, conversation_id)
+        convo = store.get(cu.id, conversation_id)
     except ConversationNotFoundError as e:
         raise HTTPException(status_code=404, detail="not_found") from e
     return ConversationStore.to_dict(convo)
@@ -54,15 +53,15 @@ async def get_conversation(
 async def patch_conversation(
     conversation_id: str,
     body: ConversationPatch,
-    claims: SessionClaims = Depends(require_session),
+    cu: CurrentUser = Depends(get_current_user),
     store: ConversationStore = Depends(get_conversation_store),
 ) -> dict[str, Any]:
     try:
         if body.title is not None:
-            store.rename(claims.session_id, conversation_id, body.title)
+            store.rename(cu.id, conversation_id, body.title)
         if body.starred is not None:
-            store.set_starred(claims.session_id, conversation_id, body.starred)
-        convo = store.get(claims.session_id, conversation_id)
+            store.set_starred(cu.id, conversation_id, body.starred)
+        convo = store.get(cu.id, conversation_id)
     except ConversationNotFoundError as e:
         raise HTTPException(status_code=404, detail="not_found") from e
     return ConversationStore.to_dict(convo)
@@ -71,11 +70,11 @@ async def patch_conversation(
 @router.delete("/{conversation_id}", status_code=204)
 async def delete_conversation(
     conversation_id: str,
-    claims: SessionClaims = Depends(require_session),
+    cu: CurrentUser = Depends(get_current_user),
     store: ConversationStore = Depends(get_conversation_store),
 ) -> Response:
     try:
-        store.delete(claims.session_id, conversation_id)
+        store.delete(cu.id, conversation_id)
     except ConversationNotFoundError as e:
         raise HTTPException(status_code=404, detail="not_found") from e
     return Response(status_code=204)
