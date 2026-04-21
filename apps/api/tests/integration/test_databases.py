@@ -81,6 +81,45 @@ def test_profile_404_when_unprofiled(authed_client: TestClient):
     assert r.status_code == 404
 
 
+def test_upload_rejects_path_traversal_db_id(authed_client: TestClient):
+    data = _make_sqlite_bytes()
+    r = authed_client.post(
+        "/api/v1/databases/upload",
+        data={"db_id": "../etc/passwd"},
+        files={"file": ("x.sqlite", io.BytesIO(data), "application/octet-stream")},
+    )
+    assert r.status_code == 400
+    assert r.json()["detail"] == "invalid_db_id"
+
+
+@pytest.mark.parametrize(
+    "bad_db_id",
+    [
+        "../etc/passwd",
+        "foo bar",  # space
+        "UPPERCASE",
+        "",  # empty
+        "a" * 100,  # too long
+        "_leading_underscore",  # must start alnum
+        "-leading-hyphen",  # must start alnum
+    ],
+)
+def test_upload_rejects_invalid_db_id(authed_client: TestClient, bad_db_id: str):
+    data = _make_sqlite_bytes()
+    r = authed_client.post(
+        "/api/v1/databases/upload",
+        data={"db_id": bad_db_id},
+        files={"file": ("x.sqlite", io.BytesIO(data), "application/octet-stream")},
+    )
+    # Empty string hits the Form(...) required check first → 422. Every other
+    # invalid value must reach our validator and get 400 invalid_db_id.
+    if bad_db_id == "":
+        assert r.status_code in (400, 422)
+    else:
+        assert r.status_code == 400
+        assert r.json()["detail"] == "invalid_db_id"
+
+
 @pytest.mark.skipif(
     True,
     reason="Real profile SSE run is covered by test_profiler_stage.py (Gemini-gated)",

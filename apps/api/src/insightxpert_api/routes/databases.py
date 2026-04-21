@@ -16,6 +16,7 @@ pipeline — profiling is the only work here.
 from __future__ import annotations
 
 import asyncio
+import re
 import sqlite3
 from typing import Any
 
@@ -42,6 +43,18 @@ router = APIRouter(prefix="/api/v1/databases", tags=["databases"])
 log = get_logger("databases")
 
 _SQLITE_MAGIC = b"SQLite format 3\x00"
+_DB_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_\-]{0,62}$")
+
+
+def _validate_db_id(db_id: str) -> None:
+    """Validate user-supplied db_id. Lowercase alnum + underscore/hyphen, 1-63 chars.
+
+    Raises HTTPException(400, 'invalid_db_id') on rejection. Applied at write-time
+    endpoints (e.g. upload) so we never persist hostile values like '../etc/passwd'.
+    Read endpoints just 404 on unknown ids — no need to duplicate the check there.
+    """
+    if not _DB_ID_PATTERN.fullmatch(db_id):
+        raise HTTPException(status_code=400, detail="invalid_db_id")
 
 
 class DatabaseListItem(BaseModel):
@@ -95,6 +108,7 @@ async def upload_database(
     claims: SessionClaims = Depends(require_session),
     settings: Settings = Depends(get_settings),
 ) -> UploadResponse:
+    _validate_db_id(db_id)
     max_bytes = settings.max_upload_mb * 1024 * 1024
     data = await file.read()
     if len(data) > max_bytes:
