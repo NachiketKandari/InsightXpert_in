@@ -480,6 +480,20 @@ class NotificationService:
             )
         ]
 
+    def list_all(
+        self,
+        *,
+        unread_only: bool = False,
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        """Admin cross-user feed. Adds user_email to each row."""
+        return [
+            {**self._hydrate(r), "user_email": r.get("user_email")}
+            for r in repository.list_all_notifications(
+                unread_only=unread_only, limit=limit
+            )
+        ]
+
     def unread_count(self, user_id: str) -> int:
         return repository.count_unread(user_id)
 

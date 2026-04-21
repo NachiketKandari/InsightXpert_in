@@ -280,6 +280,40 @@ def list_notifications(
     return [dict(r._mapping) for r in rows]
 
 
+def list_all_notifications(
+    *,
+    unread_only: bool = False,
+    limit: int = 200,
+) -> list[dict[str, Any]]:
+    """Admin view: notifications across all users, newest first.
+
+    Used by the admin notifications modal. Joins users + automations for
+    display metadata (owner email, automation name).
+    """
+    from ..users.table import users as users_table
+
+    stmt = (
+        select(
+            notifications,
+            automations.c.name.label("automation_name"),
+            users_table.c.email.label("user_email"),
+        )
+        .select_from(
+            notifications.outerjoin(
+                automations, notifications.c.automation_id == automations.c.id
+            ).outerjoin(
+                users_table, users_table.c.id == notifications.c.user_id
+            )
+        )
+    )
+    if unread_only:
+        stmt = stmt.where(notifications.c.is_read.is_(False))
+    stmt = stmt.order_by(desc(notifications.c.created_at)).limit(limit)
+    with get_engine().connect() as conn:
+        rows = conn.execute(stmt).all()
+    return [dict(r._mapping) for r in rows]
+
+
 def count_unread(user_id: str) -> int:
     with get_engine().connect() as conn:
         result = conn.execute(

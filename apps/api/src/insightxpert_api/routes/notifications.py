@@ -8,7 +8,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sse_starlette.sse import EventSourceResponse
 
-from ..auth.current_user import CurrentUser, get_current_user
+from ..auth.current_user import CurrentUser, get_current_user, require_admin
 from ..automations import notifications as notif_module
 from ..automations.service import NotificationService
 
@@ -29,6 +29,18 @@ async def list_notifications(
 ):
     return await asyncio.to_thread(
         _svc().list_for_user, user.id, unread_only=unread, limit=limit
+    )
+
+
+@router.get("/all")
+async def list_notifications_admin(
+    _admin: CurrentUser = Depends(require_admin),
+    unread: bool = Query(default=False),
+    limit: int = Query(default=200, ge=1, le=500),
+):
+    """Admin cross-user notifications feed. 403 for non-admin users."""
+    return await asyncio.to_thread(
+        _svc().list_all, unread_only=unread, limit=limit
     )
 
 
