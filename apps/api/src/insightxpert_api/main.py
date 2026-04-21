@@ -21,12 +21,15 @@ from .routes import (
     admin_rag,
     admin_users,
     auth,
+    automations as automations_routes,
     chat,
     client_config,
     conversations,
     databases,
     feedback,
     health,
+    internal as internal_routes,
+    notifications as notifications_routes,
     sql,
 )
 
@@ -54,6 +57,24 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     from .audit.queue import get_queue as _get_audit_queue
     await _get_audit_queue().start()
 
+    # --- automations (C1) --------------------------------------------------
+    app.state.user_notification_emitters = {}
+    app.state.automation_scheduler = None
+    if settings.automations_enabled:
+        from .automations.scheduler import build_scheduler
+
+        scheduler = build_scheduler(
+            app,
+            mode=settings.automations_scheduler_mode,
+            tick_seconds=settings.automations_scheduler_tick_seconds,
+        )
+        await scheduler.start()
+        app.state.automation_scheduler = scheduler
+        log.info(
+            "automations.enabled",
+            mode=settings.automations_scheduler_mode,
+        )
+
     try:
         yield
     finally:
@@ -61,6 +82,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             await _get_audit_queue().stop()
         except Exception:  # noqa: BLE001
             pass
+        sched = getattr(app.state, "automation_scheduler", None)
+        if sched is not None:
+            try:
+                await sched.stop()
+            except Exception:  # noqa: BLE001
+                pass
         log.info("api.stopping")
 
 
@@ -98,6 +125,16 @@ def create_app() -> FastAPI:
     app.include_router(admin_prompts.router)
     app.include_router(admin_rag.router)
     app.include_router(admin_databases.router)
+
+    # Internal scheduler endpoint is always mounted — it returns 503 when
+    # automations are disabled, which external callers can detect.
+    app.include_router(internal_routes.router)
+
+    # User-facing automations + notifications routes only exist when enabled.
+    if settings.automations_enabled:
+        app.include_router(automations_routes.router)
+        app.include_router(automations_routes.templates_router)
+        app.include_router(notifications_routes.router)
     return app
 
 
