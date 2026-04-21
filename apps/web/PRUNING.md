@@ -42,8 +42,8 @@ When Phase B starts: each item below = delete files + remove references + drop d
 
 ## After prune
 
-- [ ] Run `pnpm install` (or `npm`, match `package.json` lockfile).
-- [ ] `pnpm typecheck` — zero errors.
-- [ ] `pnpm lint` — zero errors.
-- [ ] `pnpm build` — succeeds.
+- [ ] Run `npm install` (match `package.json` lockfile).
+- [ ] `npm run typecheck` — zero errors.
+- [ ] `npm run lint` — zero errors.
+- [ ] `npm run build` — succeeds.
 - [ ] Commit the pruned state as the baseline for further work.

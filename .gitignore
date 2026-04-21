@@ -1,6 +1,5 @@
 # deps
 node_modules/
-.pnpm-store/
 **/__pycache__/
 *.pyc
 .venv/
