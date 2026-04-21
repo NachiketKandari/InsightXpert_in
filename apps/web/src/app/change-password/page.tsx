@@ -3,7 +3,15 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 
+import { AppLogo } from "@/components/ui/app-logo";
 import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { changePassword } from "@/lib/auth-api";
@@ -43,53 +51,63 @@ export default function ChangePasswordPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4">
-      <form
-        onSubmit={onSubmit}
-        className="w-full max-w-sm space-y-4 rounded-lg border border-border bg-card p-6 shadow-sm"
-      >
-        <h1 className="text-xl font-semibold">Change password</h1>
-        <p className="text-sm text-muted-foreground">
-          Set a new password for your account. Minimum 12 characters.
-        </p>
-        <div className="space-y-1">
-          <Label htmlFor="current">Current password</Label>
-          <Input
-            id="current"
-            type="password"
-            autoComplete="current-password"
-            value={current}
-            onChange={(e) => setCurrent(e.target.value)}
-            required
-          />
-        </div>
-        <div className="space-y-1">
-          <Label htmlFor="new1">New password</Label>
-          <Input
-            id="new1"
-            type="password"
-            autoComplete="new-password"
-            value={next1}
-            onChange={(e) => setNext1(e.target.value)}
-            required
-          />
-        </div>
-        <div className="space-y-1">
-          <Label htmlFor="new2">Confirm new password</Label>
-          <Input
-            id="new2"
-            type="password"
-            autoComplete="new-password"
-            value={next2}
-            onChange={(e) => setNext2(e.target.value)}
-            required
-          />
-        </div>
-        {error ? <p className="text-sm text-destructive">{error}</p> : null}
-        <Button type="submit" disabled={submitting} className="w-full">
-          {submitting ? "Saving…" : "Save"}
-        </Button>
-      </form>
+    <div className="flex min-h-screen items-center justify-center bg-background p-4">
+      <Card className="w-full max-w-sm glass border-border">
+        <CardHeader className="text-center">
+          <CardTitle className="text-2xl flex items-center justify-center gap-2">
+            <AppLogo className="size-8" />
+            <span>
+              Insight<span className="text-primary dark:text-cyan-accent">Xpert</span>
+            </span>
+          </CardTitle>
+          <CardDescription>
+            Set a new password for your account. Minimum 12 characters.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={onSubmit} className="flex flex-col gap-4">
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="current">Current password</Label>
+              <Input
+                id="current"
+                type="password"
+                autoComplete="current-password"
+                value={current}
+                onChange={(e) => setCurrent(e.target.value)}
+                required
+              />
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="new1">New password</Label>
+              <Input
+                id="new1"
+                type="password"
+                autoComplete="new-password"
+                value={next1}
+                onChange={(e) => setNext1(e.target.value)}
+                required
+              />
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="new2">Confirm new password</Label>
+              <Input
+                id="new2"
+                type="password"
+                autoComplete="new-password"
+                value={next2}
+                onChange={(e) => setNext2(e.target.value)}
+                required
+              />
+            </div>
+            <Button type="submit" className="w-full" disabled={submitting}>
+              {submitting ? "Saving…" : "Save"}
+            </Button>
+            {error ? (
+              <p className="text-sm text-center text-destructive">{error}</p>
+            ) : null}
+          </form>
+        </CardContent>
+      </Card>
     </div>
   );
 }
