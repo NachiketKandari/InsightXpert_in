@@ -154,6 +154,8 @@ async def create_automation(
         return await asyncio.to_thread(_svc().create, body, user.id)
     except AutomationError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.get("")
@@ -190,6 +192,8 @@ async def update_automation(
         )
     except (NotFoundError, ForbiddenError, AutomationError) as exc:
         raise _not_found_or_forbidden(exc)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.delete("/{automation_id}")
