@@ -14,6 +14,7 @@ from .logging import configure_logging, get_logger
 from .routes import (
     admin_audit,
     admin_conversations,
+    admin_databases,
     admin_metrics,
     admin_overview,
     admin_prompts,
@@ -96,6 +97,7 @@ def create_app() -> FastAPI:
     app.include_router(admin_conversations.router)
     app.include_router(admin_prompts.router)
     app.include_router(admin_rag.router)
+    app.include_router(admin_databases.router)
     return app
 
 

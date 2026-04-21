@@ -34,6 +34,11 @@ def list_visible(user_id: str, is_admin: bool) -> list[dict[str, Any]]:
     return repository.list_visible(user_id, is_admin)
 
 
+def list_all_admin() -> list[dict[str, Any]]:
+    """Admin view: all DBs with owner email + share list joined in."""
+    return repository.list_all_admin()
+
+
 def create(
     db_id: str,
     owner_user_id: str | None,

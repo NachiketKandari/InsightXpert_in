@@ -84,6 +84,65 @@ def list_visible(user_id: str, is_admin: bool) -> list[dict[str, Any]]:
     return [dict(r._mapping) for r in rows]
 
 
+def list_all_admin() -> list[dict[str, Any]]:
+    """All DBs with owner email + share list. Admin view only.
+
+    Two queries + in-Python merge keeps the shape obvious: ``databases``
+    LEFT JOIN ``users`` for ``owner_email``, then a grouping query over
+    ``database_shares`` JOIN ``users`` to build ``shared_with`` per DB.
+    """
+    from ..users.table import users as users_table
+
+    with get_engine().connect() as conn:
+        main_rows = conn.execute(
+            select(
+                databases_table.c.db_id,
+                databases_table.c.owner_user_id,
+                databases_table.c.visibility,
+                databases_table.c.size_bytes,
+                databases_table.c.created_at,
+                users_table.c.email.label("owner_email"),
+            ).select_from(
+                databases_table.outerjoin(
+                    users_table,
+                    users_table.c.id == databases_table.c.owner_user_id,
+                )
+            )
+        ).all()
+        share_rows = conn.execute(
+            select(
+                database_shares.c.db_id,
+                database_shares.c.user_id,
+                users_table.c.email,
+            ).select_from(
+                database_shares.outerjoin(
+                    users_table, users_table.c.id == database_shares.c.user_id
+                )
+            )
+        ).all()
+
+    shares_by_db: dict[str, list[dict[str, Any]]] = {}
+    for sr in share_rows:
+        shares_by_db.setdefault(sr.db_id, []).append(
+            {"user_id": sr.user_id, "email": sr.email}
+        )
+
+    out: list[dict[str, Any]] = []
+    for r in main_rows:
+        out.append(
+            {
+                "db_id": r.db_id,
+                "owner_user_id": r.owner_user_id,
+                "owner_email": r.owner_email,
+                "visibility": r.visibility,
+                "size_bytes": r.size_bytes,
+                "created_at": r.created_at,
+                "shared_with": shares_by_db.get(r.db_id, []),
+            }
+        )
+    return out
+
+
 def set_visibility(
     db_id: str, visibility: str, shared_with: list[str] | None
 ) -> None:
