@@ -8,6 +8,7 @@ import uuid
 
 import sqlalchemy.exc
 
+from ..auth.current_user import bump_session_cache
 from . import repository
 from .hashing import hash_password, verify_password
 from .models import CreateUserInput, InviteResult, Role, User, UserWithHash
@@ -90,6 +91,7 @@ def change_password(user_id: str, current: str, new: str) -> None:
         "sessions_valid_after": now,
         "updated_at": now,
     })
+    bump_session_cache(user_id)
 
 
 def reset_password(user_id: str) -> str:
@@ -103,6 +105,7 @@ def reset_password(user_id: str) -> str:
         "sessions_valid_after": now,
         "updated_at": now,
     })
+    bump_session_cache(user_id)
     return temp
 
 
@@ -119,6 +122,7 @@ def set_role(user_id: str, role: Role) -> None:
         "sessions_valid_after": now,
         "updated_at": now,
     })
+    bump_session_cache(user_id)
 
 
 def set_active(user_id: str, active: bool) -> None:
@@ -133,6 +137,7 @@ def set_active(user_id: str, active: bool) -> None:
         "sessions_valid_after": now,
         "updated_at": now,
     })
+    bump_session_cache(user_id)
 
 
 def delete(user_id: str) -> None:
@@ -141,11 +146,13 @@ def delete(user_id: str) -> None:
         raise UserNotFoundError(user_id)
     if row.role == "admin" and repository.count_active_admins() <= 1:
         raise LastAdminError()
+    bump_session_cache(user_id)
     repository.delete_user(user_id)
 
 
 def touch_last_seen(user_id: str) -> None:
     repository.update_user(user_id, {"last_seen_at": _now()})
+    bump_session_cache(user_id)
 
 
 def get_public(user_id: str) -> User | None:
