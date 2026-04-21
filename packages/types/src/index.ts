@@ -62,7 +62,7 @@ export interface AnswerPayload {
 export interface MetricsPayload {
   latency_ms: number;
   prompt_tokens?: number | null;
-  completion_tokens?: number | null;
+  output_tokens?: number | null;
   total_tokens?: number | null;
   model?: string | null;
 }

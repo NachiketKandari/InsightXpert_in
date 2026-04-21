@@ -44,7 +44,7 @@ def default_pipeline(
         model=settings.gemini_chat_model,
         embed_model=settings.gemini_embed_model,
     )
-    return Pipeline([
+    pipeline = Pipeline([
         ProfilerStage(db_svc=db_svc, prof_svc=prof_svc, llm=llm),
         SchemaLinkerStage(
             llm=llm,
@@ -63,6 +63,11 @@ def default_pipeline(
             prompt_path=_vendored_prompt("prompts", "refine_sql.j2"),
         ),
     ])
+    # Expose the adapter so the route layer can read per-turn token totals
+    # (``llm.input_tokens_used`` / ``llm.output_tokens_used``) after the
+    # pipeline finishes and include them in the terminal ``metrics`` chunk.
+    pipeline.llm = llm  # type: ignore[attr-defined]
+    return pipeline
 
 
 __all__ = ["Pipeline", "PipelineContext", "Stage", "default_pipeline"]

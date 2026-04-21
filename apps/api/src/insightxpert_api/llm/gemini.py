@@ -38,6 +38,13 @@ class GeminiLLM:
         # genai.Client internally for ``chat``. Keeping separate clients
         # keeps the translation logic encapsulated in the vendored module.
         self._chat_impl = _VendoredGemini(api_key=api_key, model=model)
+        # Per-instance running totals of Gemini ``usage_metadata`` tokens
+        # across every ``chat``/``generate``/``async_generate`` call made on
+        # this adapter. A fresh ``GeminiLLM`` is constructed per chat turn
+        # (route layer), so these counters naturally scope to a single turn
+        # and can be surfaced on the terminal ``metrics`` SSE chunk.
+        self.input_tokens_used: int = 0
+        self.output_tokens_used: int = 0
 
     # ------------------------------------------------------------------
     # LLMProvider Protocol surface
@@ -53,13 +60,37 @@ class GeminiLLM:
         tools: list[dict] | None = None,
         force_tool_use: bool = False,
     ) -> LLMResponse:
-        return await self._chat_impl.chat(
+        resp = await self._chat_impl.chat(
             messages, tools=tools, force_tool_use=force_tool_use
         )
+        # Gemini's ``usage_metadata`` is surfaced on LLMResponse by the
+        # vendored provider (see vendored/agents_core/llm/gemini.py).
+        # Accumulate so the route layer can emit it on the terminal
+        # ``metrics`` chunk.
+        self.input_tokens_used += int(resp.input_tokens or 0)
+        self.output_tokens_used += int(resp.output_tokens or 0)
+        return resp
 
     # ------------------------------------------------------------------
     # Legacy Phase A pipeline surface (generate / embed)
     # ------------------------------------------------------------------
+
+    def _record_usage(self, resp: object) -> None:
+        """Fold a Gemini generate_content response's ``usage_metadata`` into
+        this adapter's running token totals.
+
+        Older SDK versions / error responses may not carry usage_metadata, so
+        we guard on ``getattr`` and fall back to 0. Non-numeric values (rare
+        test mocks) are silently ignored.
+        """
+        usage = getattr(resp, "usage_metadata", None)
+        if usage is None:
+            return
+        try:
+            self.input_tokens_used += int(getattr(usage, "prompt_token_count", 0) or 0)
+            self.output_tokens_used += int(getattr(usage, "candidates_token_count", 0) or 0)
+        except (TypeError, ValueError):
+            pass
 
     def generate(
         self,
@@ -73,6 +104,7 @@ class GeminiLLM:
             contents=prompt,
             config={"temperature": temperature, "max_output_tokens": max_tokens},
         )
+        self._record_usage(resp)
         return resp.text or ""
 
     async def async_generate(
@@ -87,6 +119,7 @@ class GeminiLLM:
             contents=prompt,
             config={"temperature": temperature, "max_output_tokens": max_tokens},
         )
+        self._record_usage(resp)
         return resp.text or ""
 
     def embed(self, text: str) -> list[float]:

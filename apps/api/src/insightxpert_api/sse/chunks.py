@@ -100,9 +100,18 @@ class ErrorPayload(BaseModel):
 
 
 class MetricsPayload(BaseModel):
+    """Terminal ``metrics`` chunk for a chat turn.
+
+    Field names mirror ``LLMResponse.input_tokens``/``output_tokens`` (vendored
+    ``agents_core.llm.base``) and are what ``routes/chat._extract_metrics_from_chunks``
+    reads to populate ``query_metrics.tokens_in``/``tokens_out``. ``prompt_tokens``
+    is retained (not renamed to ``input_tokens``) for backward compatibility with
+    the existing wire contract and TS types.
+    """
+
     latency_ms: int
     prompt_tokens: int | None = None
-    completion_tokens: int | None = None
+    output_tokens: int | None = None
     total_tokens: int | None = None
     model: str | None = None
 

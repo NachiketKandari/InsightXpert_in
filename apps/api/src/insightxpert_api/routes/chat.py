@@ -158,6 +158,21 @@ def _build_pipeline_and_ctx(
     return ctx, pipeline
 
 
+def _llm_token_totals(source: Any) -> tuple[int, int]:
+    """Read accumulated Gemini usage tokens off an LLM-bearing object.
+
+    Accepts either a ``GeminiLLM`` directly or a ``Pipeline`` that has
+    ``.llm`` stashed on it by ``default_pipeline``. Returns ``(input, output)``,
+    defaulting to ``(0, 0)`` when the source exposes no counters (keeps
+    existing test doubles — e.g. the 2-stage fake in ``conftest.py`` — green).
+    """
+    llm = getattr(source, "llm", source)
+    return (
+        int(getattr(llm, "input_tokens_used", 0) or 0),
+        int(getattr(llm, "output_tokens_used", 0) or 0),
+    )
+
+
 async def _run_pipeline(
     pipeline: Any,
     ctx: PipelineContext,
@@ -204,13 +219,22 @@ async def _run_pipeline(
                 ErrorPayload(code="pipeline_failed", detail=str(exc)),
             )
     finally:
-        # Emit a terminal metrics chunk (spec §5.4) before closing. Token counts
-        # require threading the Gemini response through — Slice 1+ territory.
+        # Emit a terminal metrics chunk (spec §5.4) before closing, carrying
+        # the Gemini ``usage_metadata`` tokens accumulated by the per-turn
+        # GeminiLLM (stashed on ``pipeline.llm`` by ``default_pipeline``).
         latency_ms = int((time.monotonic() - start) * 1000)
+        tokens_in, tokens_out = _llm_token_totals(pipeline)
+        total_tokens = (tokens_in + tokens_out) if (tokens_in or tokens_out) else None
         if emitter is not None:
             await emitter.emit(
                 ChunkType.METRICS,
-                MetricsPayload(latency_ms=latency_ms, model=model),
+                MetricsPayload(
+                    latency_ms=latency_ms,
+                    prompt_tokens=tokens_in or None,
+                    output_tokens=tokens_out or None,
+                    total_tokens=total_tokens,
+                    model=model,
+                ),
             )
             await emitter.close()
         if metrics_record is not None:
@@ -224,8 +248,8 @@ async def _run_pipeline(
                     question=metrics_record["question"],
                     final_sql=str(sql_state) if sql_state else None,
                     agent_mode=metrics_record.get("agent_mode"),
-                    tokens_in=None,
-                    tokens_out=None,
+                    tokens_in=tokens_in or None,
+                    tokens_out=tokens_out or None,
                     duration_ms=latency_ms,
                 )
             except Exception:  # noqa: BLE001
@@ -437,9 +461,23 @@ async def _run_orchestrator(
         )
     finally:
         latency_ms = int((time.monotonic() - start) * 1000)
+        # Token totals are the sum of: (a) LLM calls the orchestrator made
+        # directly via ``llm.chat`` (planner, evaluator, synthesiser,
+        # quality-evaluator), plus (b) LLM calls our analyst adapter drove
+        # through the pipeline via ``llm.async_generate``. Both paths feed
+        # the same per-turn GeminiLLM instance, so one read on the adapter
+        # yields the aggregate.
+        tokens_in, tokens_out = _llm_token_totals(llm)
+        total_tokens = (tokens_in + tokens_out) if (tokens_in or tokens_out) else None
         await emitter.emit(
             ChunkType.METRICS,
-            MetricsPayload(latency_ms=latency_ms, model=settings.gemini_chat_model),
+            MetricsPayload(
+                latency_ms=latency_ms,
+                prompt_tokens=tokens_in or None,
+                output_tokens=tokens_out or None,
+                total_tokens=total_tokens,
+                model=settings.gemini_chat_model,
+            ),
         )
         await emitter.close()
         if record_metrics:
@@ -452,8 +490,8 @@ async def _run_orchestrator(
                     question=body.message,
                     final_sql=final_sql_seen,
                     agent_mode=body.agent_mode,
-                    tokens_in=None,
-                    tokens_out=None,
+                    tokens_in=tokens_in or None,
+                    tokens_out=tokens_out or None,
                     duration_ms=latency_ms,
                 )
             except Exception:  # noqa: BLE001
