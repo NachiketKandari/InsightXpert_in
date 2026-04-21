@@ -81,3 +81,41 @@ def patched_pipeline(monkeypatch):
 
     with patch("insightxpert_api.routes.chat.default_pipeline", side_effect=fake_factory):
         yield
+
+
+# ---------------------------------------------------------------------------
+# fresh_db — isolated SQLite database with migrations applied
+# ---------------------------------------------------------------------------
+
+from pathlib import Path
+
+from alembic import command
+from alembic.config import Config
+
+
+@pytest.fixture()
+def fresh_db(tmp_path, monkeypatch):
+    """Provision a brand-new SQLite file with migrations applied.
+
+    Returns the DATABASE_URL string; also sets it in the process env and
+    clears the settings + engine cache so the app sees it.
+    """
+    db = tmp_path / "test.db"
+    url = f"sqlite:///{db}"
+    monkeypatch.setenv("DATABASE_URL", url)
+
+    from insightxpert_api.config import get_settings
+    from insightxpert_api.db.engine import reset_engine_cache
+    get_settings.cache_clear()
+    reset_engine_cache()
+
+    api_dir = Path(__file__).resolve().parents[1]  # apps/api
+    cfg = Config(str(api_dir / "alembic.ini"))
+    cfg.set_main_option("script_location", str(api_dir / "alembic"))
+    cfg.set_main_option("sqlalchemy.url", url)
+    command.upgrade(cfg, "head")
+
+    yield url
+
+    reset_engine_cache()
+    get_settings.cache_clear()
