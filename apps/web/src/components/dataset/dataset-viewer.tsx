@@ -86,7 +86,7 @@ export function DatasetViewer({ open, onOpenChange, tableName = "transactions", 
     setError(null);
 
     try {
-      const res = await apiFetch("/api/sql/execute", {
+      const res = await apiFetch("/api/v1/sql/execute", {
         method: "POST",
         body: JSON.stringify({
           sql: `SELECT * FROM ${tableName} LIMIT ${PAGE_SIZE} OFFSET ${pageOffset}`,
@@ -110,7 +110,7 @@ export function DatasetViewer({ open, onOpenChange, tableName = "transactions", 
   }, [tableName]);
 
   const fetchTotalCount = useCallback(async () => {
-    const result = await apiCall<QueryResult>("/api/sql/execute", {
+    const result = await apiCall<QueryResult>("/api/v1/sql/execute", {
       method: "POST",
       body: JSON.stringify({
         sql: `SELECT COUNT(*) as total FROM ${tableName}`,
@@ -126,7 +126,7 @@ export function DatasetViewer({ open, onOpenChange, tableName = "transactions", 
     setColumnsLoading(true);
     setColumnsError(null);
     try {
-      const result = await apiCall<ColumnMeta[]>(`/api/datasets/public/${datasetId}/columns`);
+      const result = await apiCall<ColumnMeta[]>(`/api/v1/datasets/public/${datasetId}/columns`);
       if (result) {
         setColumns(result);
       }

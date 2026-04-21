@@ -403,7 +403,7 @@ export function CsvUploadDialog({
 
     try {
       const res = await apiFetch(
-        `/api/datasets/${uploadResult.id}/confirm`,
+        `/api/v1/datasets/${uploadResult.id}/confirm`,
         {
           method: "POST",
           body: JSON.stringify({

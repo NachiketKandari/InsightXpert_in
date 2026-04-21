@@ -106,7 +106,7 @@ export function PdfUploadDialog({
       formData.append("name", name.trim());
       if (description.trim()) formData.append("description", description.trim());
 
-      const res = await apiFetch("/api/documents/upload", { method: "POST", body: formData });
+      const res = await apiFetch("/api/v1/documents/upload", { method: "POST", body: formData });
       if (!res.ok) {
         const body = await res.json().catch(() => ({ detail: `Upload failed (HTTP ${res.status})` }));
         setError(body.detail || `Upload failed (HTTP ${res.status})`);

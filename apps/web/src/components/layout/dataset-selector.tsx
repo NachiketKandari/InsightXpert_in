@@ -35,7 +35,7 @@ export function DatasetSelector() {
 
   const fetchDatasets = useCallback(async () => {
     setLoading(true);
-    const data = await apiCall<DatasetInfo[]>("/api/datasets/public");
+    const data = await apiCall<DatasetInfo[]>("/api/v1/datasets/public");
     if (data) setDatasets(data);
     setLoading(false);
   }, []);
@@ -85,7 +85,7 @@ export function DatasetSelector() {
     if (ds.is_active) return;
     setActivatingId(ds.id);
     try {
-      const res = await apiFetch(`/api/datasets/${ds.id}/activate`, {
+      const res = await apiFetch(`/api/v1/datasets/${ds.id}/activate`, {
         method: "POST",
       });
       if (!res.ok) {
@@ -126,7 +126,7 @@ export function DatasetSelector() {
 
     setDeletingId(ds.id);
     try {
-      const res = await apiFetch(`/api/datasets/${ds.id}`, {
+      const res = await apiFetch(`/api/v1/datasets/${ds.id}`, {
         method: "DELETE",
       });
 

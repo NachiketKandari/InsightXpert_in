@@ -51,7 +51,7 @@ export function SqlExecutor({ onClose }: { onClose: () => void }) {
     setLoading(true);
 
     try {
-      const res = await apiFetch("/api/sql/execute", {
+      const res = await apiFetch("/api/v1/sql/execute", {
         method: "POST",
         body: JSON.stringify({ sql: trimmed }),
       });
@@ -113,7 +113,7 @@ export function SqlExecutor({ onClose }: { onClose: () => void }) {
                     setResult(null);
                     setLoading(true);
                     try {
-                      const res = await apiFetch("/api/sql/execute", {
+                      const res = await apiFetch("/api/v1/sql/execute", {
                         method: "POST",
                         body: JSON.stringify({ sql: current }),
                       });

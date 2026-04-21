@@ -89,7 +89,7 @@ export const useChatStore = create<ChatState>()(persist((set, get) => ({
 
   initFromStorage: async () => {
     try {
-      const res = await apiFetch("/api/conversations");
+      const res = await apiFetch("/api/v1/conversations");
       if (!res.ok) {
         console.error("[chat-store] Failed to load conversations:", res.status, res.statusText);
         return;
@@ -168,7 +168,7 @@ export const useChatStore = create<ChatState>()(persist((set, get) => ({
 
   loadConversationMessages: async (id) => {
     try {
-      const res = await apiFetch(`/api/conversations/${id}`);
+      const res = await apiFetch(`/api/v1/conversations/${id}`);
       if (!res.ok) {
         console.error("[chat-store] Failed to load messages for", id, ":", res.status, res.statusText);
         if (res.status === 404) {
@@ -221,7 +221,7 @@ export const useChatStore = create<ChatState>()(persist((set, get) => ({
       return { conversations, activeConversationId: activeId };
     });
     // Fire-and-forget API call
-    apiFetch(`/api/conversations/${id}`, { method: "DELETE" }).catch(() => {});
+    apiFetch(`/api/v1/conversations/${id}`, { method: "DELETE" }).catch(() => {});
   },
 
   renameConversation: (id, title) => {
@@ -232,7 +232,7 @@ export const useChatStore = create<ChatState>()(persist((set, get) => ({
       return { conversations };
     });
     // Fire-and-forget API call
-    apiFetch(`/api/conversations/${id}`, {
+    apiFetch(`/api/v1/conversations/${id}`, {
       method: "PATCH",
       body: JSON.stringify({ title }),
     }).catch(() => {});

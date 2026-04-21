@@ -180,12 +180,12 @@ export const useAutomationStore = create<AutomationState>((set, get) => ({
 
   fetchAutomations: async () => {
     set({ isLoading: true, error: null });
-    const data = await apiCall<Automation[]>("/api/automations");
+    const data = await apiCall<Automation[]>("/api/v1/automations");
     set({ automations: data ?? [], isLoading: false });
   },
 
   createAutomation: async (payload) => {
-    const data = await apiCall<Automation>("/api/automations", {
+    const data = await apiCall<Automation>("/api/v1/automations", {
       method: "POST",
       body: JSON.stringify(payload),
     });
@@ -196,7 +196,7 @@ export const useAutomationStore = create<AutomationState>((set, get) => ({
   },
 
   updateAutomation: async (id, payload) => {
-    const data = await apiCall<Automation>(`/api/automations/${id}`, {
+    const data = await apiCall<Automation>(`/api/v1/automations/${id}`, {
       method: "PUT",
       body: JSON.stringify(payload),
     });
@@ -209,7 +209,7 @@ export const useAutomationStore = create<AutomationState>((set, get) => ({
   },
 
   deleteAutomation: async (id) => {
-    const res = await apiFetch(`/api/automations/${id}`, { method: "DELETE" });
+    const res = await apiFetch(`/api/v1/automations/${id}`, { method: "DELETE" });
     if (res.ok) {
       set((s) => ({
         automations: s.automations.filter((a) => a.id !== id),
@@ -220,7 +220,7 @@ export const useAutomationStore = create<AutomationState>((set, get) => ({
   },
 
   toggleAutomation: async (id) => {
-    const data = await apiCall<Automation>(`/api/automations/${id}/toggle`, {
+    const data = await apiCall<Automation>(`/api/v1/automations/${id}/toggle`, {
       method: "PATCH",
     });
     if (data) {
@@ -233,13 +233,13 @@ export const useAutomationStore = create<AutomationState>((set, get) => ({
 
   runNow: async (id) => {
     return await apiCall<{ status: string; message: string; run: AutomationRun | null }>(
-      `/api/automations/${id}/run`,
+      `/api/v1/automations/${id}/run`,
       { method: "POST" },
     );
   },
 
   fetchRunHistory: async (id, limit = 20) => {
-    return (await apiCall<AutomationRun[]>(`/api/automations/${id}/runs?limit=${limit}`)) ?? [];
+    return (await apiCall<AutomationRun[]>(`/api/v1/automations/${id}/runs?limit=${limit}`)) ?? [];
   },
 
   // ---------------------------------------------------------------------------
@@ -248,12 +248,12 @@ export const useAutomationStore = create<AutomationState>((set, get) => ({
 
   fetchTriggerTemplates: async () => {
     set({ isLoadingTemplates: true });
-    const data = await apiCall<TriggerTemplate[]>("/api/trigger-templates");
+    const data = await apiCall<TriggerTemplate[]>("/api/v1/trigger-templates");
     set({ triggerTemplates: data ?? [], isLoadingTemplates: false });
   },
 
   createTriggerTemplate: async (name, description, conditions) => {
-    const data = await apiCall<TriggerTemplate>("/api/trigger-templates", {
+    const data = await apiCall<TriggerTemplate>("/api/v1/trigger-templates", {
       method: "POST",
       body: JSON.stringify({ name, description, conditions }),
     });
@@ -264,7 +264,7 @@ export const useAutomationStore = create<AutomationState>((set, get) => ({
   },
 
   deleteTriggerTemplate: async (id) => {
-    const res = await apiFetch(`/api/trigger-templates/${id}`, { method: "DELETE" });
+    const res = await apiFetch(`/api/v1/trigger-templates/${id}`, { method: "DELETE" });
     if (res.ok) {
       set((s) => ({
         triggerTemplates: s.triggerTemplates.filter((t) => t.id !== id),
@@ -480,7 +480,7 @@ export const useAutomationStore = create<AutomationState>((set, get) => ({
     set({ isExecutingEndpoint: true });
     try {
       const data = await apiCall<{ columns: string[]; rows: Record<string, unknown>[]; row_count: number }>(
-        "/api/sql/execute",
+        "/api/v1/sql/execute",
         { method: "POST", body: JSON.stringify({ sql: block.sql.trim() }) },
       );
       if (data) {
@@ -593,7 +593,7 @@ export const useAutomationStore = create<AutomationState>((set, get) => ({
     set({ isGeneratingSQL: true });
     try {
       const data = await apiCall<{ sql: string; explanation: string | null }>(
-        "/api/automations/generate-sql",
+        "/api/v1/automations/generate-sql",
         { method: "POST", body: JSON.stringify({ prompt }) },
       );
       if (data) {

@@ -39,7 +39,7 @@ export function LeftSidebar() {
     }
     setIsSearching(true);
     try {
-      const res = await apiFetch(`/api/conversations/search?q=${encodeURIComponent(query)}`);
+      const res = await apiFetch(`/api/v1/conversations/search?q=${encodeURIComponent(query)}`);
       if (res.ok) {
         const data = await res.json();
         setSearchResults(data);

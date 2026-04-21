@@ -37,7 +37,7 @@ export function MessageList({ onRetry }: MessageListProps) {
 
   const handleFeedback = useCallback(
     (messageId: string, type: "up" | "down", comment?: string) => {
-      apiFetch("/api/feedback", {
+      apiFetch("/api/v1/feedback", {
         method: "POST",
         body: JSON.stringify({
           message_id: messageId,
@@ -51,7 +51,7 @@ export function MessageList({ onRetry }: MessageListProps) {
 
   const handleMarkInsight = useCallback(
     (messageId: string, note?: string) => {
-      apiFetch("/api/insights", {
+      apiFetch("/api/v1/insights", {
         method: "POST",
         body: JSON.stringify({
           message_id: messageId,

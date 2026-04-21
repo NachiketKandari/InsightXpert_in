@@ -18,7 +18,7 @@ export const useClientConfigStore = create<ClientConfigState>((set) => ({
 
   fetchConfig: async () => {
     set({ isLoading: true });
-    const data = await apiCall<{ config: OrgConfig | null; is_admin: boolean; org_id: string | null }>("/api/client-config");
+    const data = await apiCall<{ config: OrgConfig | null; is_admin: boolean; org_id: string | null }>("/api/v1/client-config");
     if (!data) {
       set({ isLoading: false });
       return;

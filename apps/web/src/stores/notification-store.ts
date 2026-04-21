@@ -41,15 +41,15 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
   isLoadingAll: false,
 
   fetchNotifications: async (unreadOnly = false) => {
-    await _fetchSlice("/api/notifications", "notifications", "isLoading", unreadOnly, set);
+    await _fetchSlice("/api/v1/notifications", "notifications", "isLoading", unreadOnly, set);
   },
 
   fetchAllNotifications: async (unreadOnly = false) => {
-    await _fetchSlice("/api/notifications/all", "allNotifications", "isLoadingAll", unreadOnly, set);
+    await _fetchSlice("/api/v1/notifications/all", "allNotifications", "isLoadingAll", unreadOnly, set);
   },
 
   fetchUnreadCount: async () => {
-    const data = await apiCall<{ count: number }>("/api/notifications/count");
+    const data = await apiCall<{ count: number }>("/api/v1/notifications/count");
     if (data) set({ unreadCount: data.count });
   },
 
@@ -67,7 +67,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     }));
     // Fire-and-forget API call; revert on failure
     apiCall<{ status: string }>(
-      `/api/notifications/${id}/read`,
+      `/api/v1/notifications/${id}/read`,
       { method: "PATCH" },
     ).catch(() => {
       set({
@@ -93,7 +93,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     });
     // Fire-and-forget API call; revert on failure
     apiCall<{ status: string; count: number }>(
-      "/api/notifications/mark-all-read",
+      "/api/v1/notifications/mark-all-read",
       { method: "POST" },
     ).catch(() => {
       set({

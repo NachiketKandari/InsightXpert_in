@@ -52,7 +52,7 @@ export function TriggerConditionBuilder({
     setCompileError(null);
     setCompiledPreview(null);
 
-    const result = await apiCall<TriggerCondition>("/api/automations/compile-trigger", {
+    const result = await apiCall<TriggerCondition>("/api/v1/automations/compile-trigger", {
       method: "POST",
       body: JSON.stringify({
         nl_text: nlText.trim(),

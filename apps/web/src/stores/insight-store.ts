@@ -46,15 +46,15 @@ export const useInsightStore = create<InsightState>((set, get) => ({
   isLoadingAll: false,
 
   fetchInsights: async (bookmarked = false) => {
-    await _fetchSlice("/api/insights", "insights", "isLoading", bookmarked, set);
+    await _fetchSlice("/api/v1/insights", "insights", "isLoading", bookmarked, set);
   },
 
   fetchAllInsights: async () => {
-    await _fetchSlice("/api/insights/all", "allInsights", "isLoadingAll", false, set);
+    await _fetchSlice("/api/v1/insights/all", "allInsights", "isLoadingAll", false, set);
   },
 
   fetchCount: async () => {
-    const data = await apiCall<{ count: number }>("/api/insights/count");
+    const data = await apiCall<{ count: number }>("/api/v1/insights/count");
     if (data) set({ totalCount: data.count });
   },
 
@@ -67,7 +67,7 @@ export const useInsightStore = create<InsightState>((set, get) => ({
       insights: update(prev.insights),
       allInsights: update(prev.allInsights),
     });
-    apiCall<{ status: string }>(`/api/insights/${id}/bookmark`, {
+    apiCall<{ status: string }>(`/api/v1/insights/${id}/bookmark`, {
       method: "PATCH",
       body: JSON.stringify({ bookmarked }),
     }).catch(() => {
@@ -83,7 +83,7 @@ export const useInsightStore = create<InsightState>((set, get) => ({
       allInsights: prev.allInsights.filter((i) => i.id !== id),
       totalCount: Math.max(0, prev.totalCount - 1),
     });
-    apiCall<{ status: string }>(`/api/insights/${id}`, {
+    apiCall<{ status: string }>(`/api/v1/insights/${id}`, {
       method: "DELETE",
     }).catch(() => {
       set({

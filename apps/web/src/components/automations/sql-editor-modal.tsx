@@ -58,7 +58,7 @@ export function SqlEditorModal({
     setIsRunning(true);
     setError(null);
     setResult(null);
-    const data = await apiCall<SqlResult>("/api/sql/execute", {
+    const data = await apiCall<SqlResult>("/api/v1/sql/execute", {
       method: "POST",
       body: JSON.stringify({ sql: editSql.trim() }),
     });

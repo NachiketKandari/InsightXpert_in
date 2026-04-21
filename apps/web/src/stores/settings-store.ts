@@ -29,7 +29,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   fetchConfig: async () => {
     set({ loading: true });
-    const data = await apiCall<{ current_provider: string; current_model: string; providers: ProviderModels[] }>("/api/config");
+    const data = await apiCall<{ current_provider: string; current_model: string; providers: ProviderModels[] }>("/api/v1/config");
     if (data) {
       set({
         currentProvider: data.current_provider,
@@ -46,7 +46,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     set({ currentProvider: provider, currentModel: model });
 
     try {
-      const res = await apiFetch("/api/config/switch", {
+      const res = await apiFetch("/api/v1/config/switch", {
         method: "POST",
         body: JSON.stringify({ provider, model }),
       });
