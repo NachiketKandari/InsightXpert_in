@@ -2,7 +2,6 @@
 
 import { useCallback, useRef } from "react";
 import { useChatStore } from "@/stores/chat-store";
-import { useAuthStore } from "@/stores/auth-store";
 import { createSSEStream, type AgentMode } from "@/lib/sse-client";
 import { parseChunk } from "@/lib/chunk-parser";
 import { useInsightStore } from "@/stores/insight-store";
@@ -70,8 +69,6 @@ export function useSSEChat() {
       }
       // Clear any pending clarification state
       useChatStore.getState().setPendingClarification(null);
-
-      const authToken = useAuthStore.getState().token;
 
       const controller = createSSEStream(message, convId, {
         onChunk: (raw) => {
@@ -282,7 +279,7 @@ export function useSSEChat() {
           });
           finishStreaming(convId!);
         },
-      }, agentMode, { skipClarification }, authToken);
+      }, agentMode, { skipClarification });
 
       abortRef.current = controller;
     },
