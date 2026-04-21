@@ -43,6 +43,9 @@ logs/
 tmp/
 uploads/
 
+# bundled SQLite samples are fetched locally/at-build-time, not tracked
+apps/api/Databases/*.sqlite
+
 # Python tooling
 .pytest_cache/
 .ruff_cache/
