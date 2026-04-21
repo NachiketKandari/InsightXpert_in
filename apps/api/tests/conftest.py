@@ -160,6 +160,66 @@ def user_client(fresh_db):
 
 
 @pytest.fixture()
+def automations_env(monkeypatch):
+    """Enable the automations feature flag for a test."""
+    monkeypatch.setenv("AUTOMATIONS_ENABLED", "true")
+    monkeypatch.setenv("AUTOMATIONS_SCHEDULER_MODE", "embedded")
+    monkeypatch.setenv("AUTOMATIONS_SCHEDULER_TICK_SECONDS", "60")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
+@pytest.fixture()
+def automations_external_env(monkeypatch):
+    """Enable automations with external scheduler mode + valid secret."""
+    monkeypatch.setenv("AUTOMATIONS_ENABLED", "true")
+    monkeypatch.setenv("AUTOMATIONS_SCHEDULER_MODE", "external")
+    monkeypatch.setenv(
+        "AUTOMATIONS_SCHEDULER_SECRET", "x" * 40
+    )
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
+@pytest.fixture()
+def user_client_automations(fresh_db, automations_env):
+    from fastapi.testclient import TestClient
+
+    from insightxpert_api.main import create_app
+    from insightxpert_api.users import service
+    from insightxpert_api.users.models import CreateUserInput
+
+    invited = service.invite(CreateUserInput(email="auto_user@example.com", role="user"))
+    client = TestClient(create_app())
+    resp = client.post(
+        "/api/v1/auth/login",
+        json={"email": "auto_user@example.com", "password": invited.temp_password},
+    )
+    assert resp.status_code == 200
+    yield client, invited.user
+
+
+@pytest.fixture()
+def admin_client_automations(fresh_db, automations_env):
+    from fastapi.testclient import TestClient
+
+    from insightxpert_api.main import create_app
+    from insightxpert_api.users import service
+    from insightxpert_api.users.models import CreateUserInput
+
+    invited = service.invite(CreateUserInput(email="auto_admin@example.com", role="admin"))
+    client = TestClient(create_app())
+    resp = client.post(
+        "/api/v1/auth/login",
+        json={"email": "auto_admin@example.com", "password": invited.temp_password},
+    )
+    assert resp.status_code == 200
+    yield client, invited.user
+
+
+@pytest.fixture()
 def admin_client(fresh_db):
     from fastapi.testclient import TestClient
 
