@@ -6,7 +6,7 @@ from pathlib import Path
 
 from jinja2 import Template
 
-from ..llm.base import BaseLLM
+from ..llm import LLMProvider
 from ..sse.chunks import ChunkType, SQLGeneratedPayload
 from .stage import PipelineContext
 
@@ -18,7 +18,7 @@ class SqlGeneratorStage:
 
     name = "sql_generator"
 
-    def __init__(self, llm: BaseLLM, prompt_path: str) -> None:
+    def __init__(self, llm: LLMProvider, prompt_path: str) -> None:
         self._llm = llm
         self._tpl = Template(Path(prompt_path).read_text())
 

@@ -27,13 +27,13 @@ from ..vendored.pipeline_core.profiler.stats_collector import StatsCollector
 from .stage import PipelineContext
 
 if TYPE_CHECKING:
-    from ..llm.base import BaseLLM
+    from ..llm import LLMProvider
 
 
 async def build_profile(
     db_id: str,
     db_path: str,
-    llm: "BaseLLM | None" = None,
+    llm: "LLMProvider | None" = None,
 ) -> DatabaseProfile:
     """Run the minimal 2-step profiler (schema → stats) against a local SQLite file.
 
@@ -61,7 +61,7 @@ class ProfilerStage:
         self,
         db_svc: DatabaseService,
         prof_svc: ProfileService,
-        llm: "BaseLLM | None" = None,
+        llm: "LLMProvider | None" = None,
     ) -> None:
         self._db = db_svc
         self._prof = prof_svc

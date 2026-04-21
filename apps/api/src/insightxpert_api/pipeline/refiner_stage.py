@@ -12,7 +12,7 @@ from pathlib import Path
 from jinja2 import Template
 
 from ..db.connector import DatabaseConnector
-from ..llm.base import BaseLLM
+from ..llm import LLMProvider
 from ..services.database_service import DatabaseService
 from ..sse.chunks import (
     ChunkType,
@@ -32,7 +32,7 @@ class SqlRefinerStage:
 
     def __init__(
         self,
-        llm: BaseLLM,
+        llm: LLMProvider,
         max_iters: int,
         db_svc: DatabaseService,
         prompt_path: str | None = None,
