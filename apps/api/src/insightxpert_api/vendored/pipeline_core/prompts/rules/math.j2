@@ -1,0 +1,6 @@
+MATH:
+- `CAST(x AS REAL) / y` for all division. SQLite does integer division.
+- ROUND() only when question specifies decimal places.
+- Percentages: 0–100 scale. Column stores 0.0–1.0? Multiply by 100. Better yet, compute from raw counts when a formula is implied: `count * 100 / total`.
+- "Percentage of A with B" → denominator = count of A only. "What percentage of X in Y?" → denominator = count of X, not count of everything.
+- "Decrease rate X→Y" = `(X - Y) * 100.0 / X`. "Increase rate" = `(Y - X) * 100.0 / X`. The denominator is ALWAYS the first value (the baseline).

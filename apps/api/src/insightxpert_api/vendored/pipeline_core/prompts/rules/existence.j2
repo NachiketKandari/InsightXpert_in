@@ -1,0 +1,5 @@
+EXISTENCE & BOOLEAN:
+- "If there is any" / "if available" → LEFT JOIN.
+- Don't over-filter with unnecessary IS NOT NULL or DISTINCT that reduces valid results.
+- Yes/No questions: if column stores labels ('+', 'Y'), select raw value. Else `IIF(cond, 'Yes', 'No')`.
+- "Without X" / "missing X" = `IS NULL`. Not `!= ''`.

@@ -1,0 +1,6 @@
+DATES & TIMES:
+- **DATETIME columns: ALWAYS use `date(col)` or `LIKE` for comparisons.** Direct `col > '2014-09-01'` is WRONG because time components cause off-by-one errors.
+  WRONG: `WHERE "LastAccessDate" > '2014-09-01'` → RIGHT: `WHERE date("LastAccessDate") > '2014-09-01'`
+- **Millisecond suffixes:** DB may store `'2014-04-23 20:29:39.0'`. Use `LIKE '2014-04-23 20:29:39%'` to match regardless of trailing precision. Never use bare `=` on timestamps.
+- **Time formats vary — ALWAYS use LIKE prefix match for lap/qualifying times.** Question says "0:01:27" but DB stores "1:27.345". WRONG: `= '0:01:27'`. RIGHT: `LIKE '1:27%'`. Strip the leading "0:" and use LIKE.
+- "After the 1990s" → `> '1990'` (after the start of the decade). "After 2000" → `> '2000'`.

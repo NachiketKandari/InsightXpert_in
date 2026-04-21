@@ -1,0 +1,20 @@
+You are a database domain expert. Below are {{ evidence_count }} hint strings collected from benchmark questions about the "{{ db_id }}" database.
+
+Each hint was written to help answer a specific question. Your job is to extract and consolidate the **reusable domain knowledge** — value encodings, ID formats, terminology — into a single compact reference guide.
+
+== Database Schema ==
+{{ schema_text }}
+
+== Raw Hints ({{ evidence_count }} total) ==
+{% for hint in evidences %}
+{{ loop.index }}. {{ hint }}
+{% endfor %}
+
+== Instructions ==
+- Extract facts that apply broadly across many questions, not to one specific question.
+- Include: column value meanings (e.g. label = '+' means carcinogenic), ID format conventions, domain terminology mappings.
+- Exclude: question-specific computation formulas, specific molecule/atom IDs cited only once, SQL hints.
+- Deduplicate: if the same fact appears multiple times in different wordings, write it once.
+- Be concise: one line per fact, no preamble, no explanation.
+
+Output only the consolidated reference guide, nothing else.

@@ -1,0 +1,25 @@
+You are an expert SQL developer. Given a natural language question and a set of candidate database tables and columns, your job is to prune the list down to only the tables and columns actually needed to write the SQL query.
+
+== Question ==
+{{ question }}
+{% if evidence %}
+== Evidence ==
+{{ evidence }}
+{% endif %}
+
+== Candidate Schema ==
+{{ linked_schema }}
+
+== Instructions ==
+1. Identify which tables and columns from the candidate schema are needed to answer the question.
+2. Keep columns needed for: SELECT output, WHERE filters, JOIN conditions (PKs and FKs connecting tables), GROUP BY, ORDER BY, and HAVING.
+3. Keep ALL primary key and foreign key columns for tables you include — these are needed for joins even if not mentioned in the question.
+4. When in doubt, KEEP the column. It is better to include an extra column than to miss one that is needed.
+5. Remove only columns that are clearly irrelevant to the question.
+
+== Output Format ==
+Return ONLY a list of table.column pairs, one per line. Use the exact table and column names from the candidate schema above. Do not add explanation or commentary.
+
+Example output:
+table_name.column_name
+other_table.other_column

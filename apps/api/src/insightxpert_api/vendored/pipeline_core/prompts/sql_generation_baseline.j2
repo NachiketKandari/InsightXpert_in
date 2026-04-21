@@ -1,0 +1,96 @@
+You are an expert SQLite developer. Write one SQL SELECT query answering the question below.
+
+== Question ==
+{{ question }}
+
+== Database Schema ==
+{{ schema_text }}
+
+{% if evidence %}
+== Evidence ==
+{{ evidence }}
+{% endif %}
+
+== Rules ==
+
+CRITICAL CHECKLIST (verify before returning SQL):
+1. ORDER BY + LIMIT? → Add `WHERE col IS NOT NULL` on the sorted column.
+2. Comparing dates/times? → Use `date(col)` or `LIKE`, never bare `=` or `>` on DATETIME.
+3. Filtering categorical column? → Use `=`, never `LIKE '%..%'`.
+4. Using AVG()? → If "average for ALL" is intended, use `SUM(col)*1.0/COUNT(*)` instead.
+5. Time values like "0:01:27"? → Strip leading zero, use `LIKE '1:27%'`.
+
+FORMAT: Double-quote all identifiers. Single-quote strings. Return ONLY ```sql``` block, no explanation.
+
+SELECT:
+- Select ONLY columns the question asks for.
+- If question asks for multiple data points, include ALL of them. "What are the category and type" → SELECT both columns.
+- Separate name columns: first/last, forename/surname — don't concatenate.
+- **Extract parts:** "which month" → `SUBSTR(date_col, 5, 2)` or `STRFTIME('%m', col)`. "What year" → `STRFTIME('%Y', col)`. Never return the full value when a component is asked for.
+- When the question asks "Who" / "Show the player" — include identifying columns (forename, surname, name, url, etc.), not just IDs.
+
+MATH:
+- `CAST(x AS REAL) / y` for all division. SQLite does integer division.
+- ROUND() only when question specifies decimal places.
+- Percentages: 0–100 scale. Column stores 0.0–1.0? Multiply by 100. Better yet, compute from raw counts when a formula is implied: `count * 100 / total`.
+- "Percentage of A with B" → denominator = count of A only. "What percentage of X in Y?" → denominator = count of X, not count of everything.
+- "Decrease rate X→Y" = `(X - Y) * 100.0 / X`. "Increase rate" = `(Y - X) * 100.0 / X`. The denominator is ALWAYS the first value (the baseline).
+- `A - B` in stated order. NEVER use ABS() unless question says "absolute".
+- "Per unit" → `Price / Amount` before filtering.
+- **"How many times more"** = ratio (A / B), NOT a count of comparison instances.
+
+COUNTING:
+- Joining historical/transaction tables inflates counts. Use `COUNT(DISTINCT entity_id)`.
+  WRONG: `COUNT(player_api_id)` on Player_Attributes. RIGHT: `COUNT(DISTINCT player_api_id)`.
+- "How many records meet X" → `COUNT(*)`. Only add DISTINCT for unique entities.
+- Listing from many-to-one join → `SELECT DISTINCT`.
+
+AGGREGATION:
+- Rows more granular than question → GROUP BY first, then ORDER BY/LIMIT.
+- Aggregates with descriptive columns → GROUP BY non-aggregated columns.
+- **"Highest/lowest monthly X"** where data has multiple rows per month → GROUP BY month, SUM/aggregate, then ORDER BY … LIMIT 1. Do NOT just `MAX()` or `MIN()` a single row.
+- If a column name already reflects an aggregate (e.g., `AvgScrWrite`), use it directly — do NOT wrap in AVG() or GROUP BY.
+- If a column encodes a threshold (e.g., `NumGE1500`), use it directly — do NOT recompute.
+
+NULLS:
+- **ORDER BY + LIMIT extremes: ALWAYS add `WHERE col IS NOT NULL`.** NULLs sort first in ASC and can silently corrupt results.
+- "Without X" / "missing X" = `IS NULL`. Not `!= ''`.
+- **AVG() silently excludes NULLs from the denominator.** When the question says "average across ALL" or "average for all", use `SUM(col) * 1.0 / COUNT(*)` instead, so NULLs count as zeros in the denominator.
+
+ORDERING & LIMITS:
+- Prefer `ORDER BY ... LIMIT 1` over subqueries with MAX/MIN — UNLESS ties matter.
+- **Ties:** If the question says "the league with the most matches" and multiple leagues could tie, use a subquery: `HAVING COUNT(*) = (SELECT MAX(cnt) FROM ...)` instead of LIMIT 1.
+- **LIMIT 1 only when one result is asked for.** "Which races did X win?" → ALL rows. "List X that Y" → ALL rows. Only use LIMIT 1 for "the top", "the best", "the single highest/lowest".
+- Word "rank" in question → **MUST** include `RANK() OVER (ORDER BY ...)` column in SELECT.
+
+DATES & STRINGS:
+- **DATETIME columns: ALWAYS use `date(col)` or `LIKE` for comparisons.** Direct `col > '2014-09-01'` is WRONG because time components cause off-by-one errors.
+  WRONG: `WHERE "LastAccessDate" > '2014-09-01'` → RIGHT: `WHERE date("LastAccessDate") > '2014-09-01'`
+- **Millisecond suffixes:** DB may store `'2014-04-23 20:29:39.0'`. Use `LIKE '2014-04-23 20:29:39%'` to match regardless of trailing precision. Never use bare `=` on timestamps.
+- **Time formats vary — ALWAYS use LIKE prefix match for lap/qualifying times.** Question says "0:01:27" but DB stores "1:27.345". WRONG: `= '0:01:27'`. RIGHT: `LIKE '1:27%'`. Strip the leading "0:" and use LIKE.
+- "After the 1990s" → `> '1990'` (after the start of the decade). "After 2000" → `> '2000'`.
+- **Categorical columns → ALWAYS use `=`, NEVER `LIKE`.** This is critical for columns that can hold multiple values.
+  WRONG: `WHERE "types" LIKE '%Artifact%'` (matches "Artifact Creature" too).
+  WRONG: `WHERE "colors" LIKE '%B%'` (matches "BG", "BR" too).
+  RIGHT: `WHERE "types" = 'Artifact'` and `WHERE "colors" = 'B'`.
+  Also applies to tags: `WHERE "Tags" = '<humor>'` not `LIKE '%<humor>%'`.
+- OR conditions → wrap in parentheses with AND.
+- Escape single quotes by doubling: `'It''s'`. Never backslash-escape.
+
+JOINS:
+- "If there is any" / "if available" → LEFT JOIN.
+- Don't over-filter with unnecessary IS NOT NULL or DISTINCT that reduces valid results.
+- Prefer the shortest join path. If two tables share a direct FK, join them directly.
+
+INTERPRETATION:
+- Yes/No questions: if column stores labels ('+', 'Y'), select raw value. Else `IIF(cond, 'Yes', 'No')`.
+- **Entity scope:** "the set containing card X" → query the SET, not the card. "All elements in molecules with double bonds" → all atoms in those molecules. "Korean version of it" where "it" is a set → query set_translations, not foreign_data.
+- Multi-part questions → answer the final part.
+- **"Completion rate"** = rows where the result column IS NOT NULL (e.g., `time IS NOT NULL`), divided by total rows.
+
+== Question (repeated) ==
+{{ question }}
+
+Before writing SQL, briefly identify: (1) which tables to join, (2) which columns map to which parts of the question, (3) any calculations needed. Then write the query.
+
+```sql

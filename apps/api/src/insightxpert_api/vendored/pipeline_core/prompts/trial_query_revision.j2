@@ -1,0 +1,32 @@
+Given a SQLite database schema and a natural language question, a trial SQL was generated but used literal values not found in the database. Revise the SQL using the correct values.
+
+== Database Schema ==
+{{ schema_text }}
+
+== Question ==
+{{ question }}
+{% if evidence %}
+
+== Evidence ==
+{{ evidence }}
+{% endif %}
+
+== Previous SQL ==
+```sql
+{{ previous_sql }}
+```
+
+== Unmatched Literals ==
+The following string literals in the SQL do not match any column values:
+{% for lit, candidates in literal_candidates.items() %}
+- "{{ lit }}"{% if candidates %} — similar values found in: {{ candidates | join(', ') }}{% endif %}
+{% if literal_values and lit in literal_values %}
+{% for col, values in literal_values[lit].items() %}
+  Actual values in {{ col }}: {{ values[:5] | join(', ') }}
+{% endfor %}
+{% endif %}
+{% endfor %}
+
+Revise the SQL to use the correct literal values shown above. Write a single SELECT statement for SQLite. Use single quotes for string literals and double quotes for identifiers.
+
+SQL:

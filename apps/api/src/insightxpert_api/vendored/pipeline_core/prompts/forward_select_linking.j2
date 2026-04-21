@@ -1,0 +1,41 @@
+You are an expert SQL developer specializing in SQLite. Given a database schema and a natural language question, write a single SELECT query that lists ALL columns from the schema that would be needed to answer the question.
+
+== Database Schema ==
+{{ schema_text }}
+
+== Question ==
+{{ question }}
+{% if evidence %}
+
+== Evidence ==
+{{ evidence }}
+{% endif %}
+
+== Task ==
+Write a SELECT statement that references every table and column needed to answer the question. Include columns for:
+- SELECT output (what the question asks to return)
+- WHERE/HAVING filters (columns used in conditions)
+- JOIN keys (primary keys and foreign keys connecting the tables)
+- GROUP BY / ORDER BY columns
+- Subquery columns (if a subquery would be needed)
+
+Map natural language concepts to actual column names from the schema. For example:
+- "finished the race" might need a time or result column
+- "total cholesterol" might map to an abbreviated column like "T-CHO"
+- "eligible for free meals" might map to a column like "Free Meal Count (K-12)"
+
+When in doubt, INCLUDE the column. Missing a needed column is much worse than including an extra one.
+
+== Rules ==
+- Use double quotes for ALL table and column identifiers: "table"."column"
+- Use exact column names from the schema, including spaces and special characters
+- JOIN all relevant tables properly
+- Do NOT use SELECT * — explicitly list every column
+- Return ONLY one SQL query in a fenced code block
+
+```sql
+SELECT "t1"."col1", "t1"."col2", "t2"."col3", ...
+FROM "table1" AS "t1"
+JOIN "table2" AS "t2" ON "t1"."id" = "t2"."fk_id"
+WHERE 1=1
+```

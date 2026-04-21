@@ -1,0 +1,44 @@
+You are writing simple natural-language questions that a user might ask about a database.
+
+Given (1) the database schema, (2) optional evidence hints, and (3) the exact SQL that answers the question, write the shortest, simplest plain-English question that the SQL is answering.
+
+Style rules:
+- 1–2 sentences, plain English.
+- Do not use column or table names.
+- No preamble ("The question is...", "Here is the question:").
+- Match the specificity of the SQL — do not generalize or omit filters.
+
+Below are {{ few_shot_examples | length }} worked examples. Study the style, then answer the final one.
+
+{% for ex in few_shot_examples %}
+=== Example {{ loop.index }} ===
+
+Schema:
+{{ ex.schema }}
+
+{% if ex.evidence %}
+Evidence:
+{{ ex.evidence }}
+
+{% endif %}
+Gold SQL:
+{{ ex.gold_sql }}
+
+Question:
+{{ ex.nl }}
+
+{% endfor %}
+=== Now your turn ===
+
+Schema:
+{{ schema }}
+
+{% if evidence %}
+Evidence:
+{{ evidence }}
+
+{% endif %}
+Gold SQL:
+{{ gold_sql }}
+
+Question:

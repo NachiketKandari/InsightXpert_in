@@ -1,0 +1,35 @@
+You are an expert SQL developer. A SQL query was generated to answer a question but produced an error or incorrect result. Fix it.
+
+== Database Schema ==
+{{ schema_text }}
+
+== Question ==
+{{ question }}
+{% if evidence %}
+
+== Evidence ==
+{{ evidence }}
+{% endif %}
+
+== Previous SQL Attempt ==
+```sql
+{{ previous_sql }}
+```
+
+== Execution Feedback ==
+Error: {{ error }}
+{% if iteration > 1 %}
+
+== Prior Refinement Attempts ==
+{% for a in prior_attempts %}
+Attempt {{ loop.index }}: {{ a.feedback }}
+SQL: {{ a.sql }}
+{% endfor %}
+{% endif %}
+
+Instructions:
+- Write a corrected single SELECT statement for SQLite.
+- Use double quotes for table and column identifiers.
+- Return ONLY the corrected SQL in a fenced code block.
+
+SQL:

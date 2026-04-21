@@ -1,0 +1,15 @@
+AGGREGATION:
+- Rows more granular than question → GROUP BY first, then ORDER BY/LIMIT.
+- Aggregates with descriptive columns → GROUP BY non-aggregated columns.
+- **"Highest/lowest monthly X"** where data has multiple rows per month → GROUP BY month, SUM/aggregate, then ORDER BY … LIMIT 1. Do NOT just `MAX()` or `MIN()` a single row.
+- If a column name already reflects an aggregate (e.g., `AvgScrWrite`), use it directly — do NOT wrap in AVG() or GROUP BY.
+- If a column encodes a threshold (e.g., `NumGE1500`), use it directly — do NOT recompute.
+
+COUNTING:
+- Joining historical/transaction tables inflates counts. Use `COUNT(DISTINCT entity_id)`.
+  WRONG: `COUNT(player_api_id)` on Player_Attributes. RIGHT: `COUNT(DISTINCT player_api_id)`.
+- "How many records meet X" → `COUNT(*)`. Only add DISTINCT for unique entities.
+
+NULLS (for aggregation):
+- **AVG() silently excludes NULLs from the denominator.** When the question says "average across ALL" or "average for all", use `SUM(col) * 1.0 / COUNT(*)` instead, so NULLs count as zeros in the denominator.
+- "Without X" / "missing X" = `IS NULL`. Not `!= ''`.

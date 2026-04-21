@@ -1,0 +1,38 @@
+You are an expert SQL developer specializing in SQLite. Given a database schema and a natural language question, identify ALL tables and columns that would be needed to answer the question.
+
+== Database Schema ==
+{{ schema_text }}
+
+== Question ==
+{{ question }}
+{% if evidence %}
+
+== Evidence ==
+{{ evidence }}
+{% endif %}
+
+== Task ==
+Analyze the question and identify every table and column that would be needed to write a correct SQL query. Consider:
+
+1. **SELECT columns**: What data does the question ask to return?
+2. **WHERE filters**: What conditions or filters does the question mention?
+3. **JOIN columns**: What foreign keys or primary keys connect the relevant tables?
+4. **GROUP BY / ORDER BY**: What columns would be used for grouping or sorting?
+5. **Subquery columns**: What columns might be needed in subqueries or CTEs?
+6. **Implicit references**: Map semantic meaning to actual column names (e.g., "finished the race" might mean a time or status column; "expensive" might mean a price column).
+7. **Evidence hints**: If evidence is provided, include any columns it references or implies.
+
+Be thorough — it is better to include an extra column than to miss one that is needed.
+
+== Output Format ==
+List each relevant table with its columns in exactly this format:
+
+Table: "table_name"
+  - "column1"
+  - "column2"
+
+Table: "other_table"
+  - "columnA"
+  - "columnB"
+
+Use the exact table and column names as they appear in the schema. Include ONLY tables and columns from the schema above — do not invent names.

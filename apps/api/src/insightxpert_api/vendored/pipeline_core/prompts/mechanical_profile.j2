@@ -1,0 +1,6 @@
+Column "{{ column_name }}" in table "{{ table_name }}":
+- Type: {{ column_type }}
+- This column has {{ stats.count }} total values, {{ stats.null_count }} NULLs, {{ stats.distinct_count }} distinct values
+{% if stats.min_value is not none %}- Min: "{{ stats.min_value }}", Max: "{{ stats.max_value }}"
+{% endif %}{% if stats.sample_values %}- Sample values: {{ stats.sample_values | join(', ') }}
+{% endif %}

@@ -1,0 +1,14 @@
+Given the following database column profile, write a concise 1-2 sentence summary describing what this column contains and its format.
+
+Table: {{ table_name }}
+All columns in this table: {{ column_names | join(', ') }}
+
+Profile for column "{{ column_name }}":
+{{ mechanical_description }}
+{% if unified_evidence %}
+Domain knowledge about this database:
+{{ unified_evidence }}
+
+Use this domain knowledge to produce a more precise and semantically accurate summary.
+{% endif %}
+Write only the summary (1-2 sentences). No preamble, no explanation.

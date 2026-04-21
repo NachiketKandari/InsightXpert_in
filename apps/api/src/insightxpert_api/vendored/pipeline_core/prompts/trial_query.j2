@@ -1,0 +1,16 @@
+Given a SQLite database schema and a natural language question, write a SQL SELECT query that answers the question.
+
+== Database Schema ==
+{{ schema_text }}
+
+== Question ==
+{{ question }}
+{% if evidence %}
+
+== Evidence ==
+{{ evidence }}
+{% endif %}
+
+Write a single SELECT statement for SQLite. Use single quotes for string literals and double quotes for identifiers.
+
+SQL:

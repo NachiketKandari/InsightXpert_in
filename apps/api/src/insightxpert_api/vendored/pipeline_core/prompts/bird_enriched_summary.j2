@@ -1,0 +1,38 @@
+You are writing a concise description of a database column that will be shown to a text-to-SQL model. You have three inputs and must synthesize them into one 2-4 sentence description that reconciles what the BIRD documentation says with what the actual data shows.
+
+Table: {{ table_name }}
+Column: "{{ column_name }}" ({{ column_type }})
+
+Profiling summary (derived from stats + samples):
+{{ short_summary or "(none)" }}
+
+Observed quirks:
+{%- if semantic_hint %}
+- Semantic hint: {{ semantic_hint }}
+{%- endif %}
+{%- if enum_labels %}
+- Enum labels: {{ enum_labels }}
+{%- endif %}
+{%- if type_mismatch %}
+- Type mismatch: {{ type_mismatch }}
+{%- endif %}
+{%- if aliases %}
+- Aliases: {{ aliases | join(', ') }}
+{%- endif %}
+{%- if not (semantic_hint or enum_labels or type_mismatch or aliases) %}
+- (none)
+{%- endif %}
+
+BIRD documentation:
+{{ bird_description }}
+
+Sample values: {{ sample_values }}
+Stats: distinct={{ distinct_count }}, min={{ min_value }}, max={{ max_value }}
+
+Write 2-4 sentences that:
+1. State what the column represents, preferring the BIRD description as ground truth for meaning.
+2. Call out the stored format or encoding when it matters for SQL (e.g. "stored as YYYYMMDD text", "values A/C/D mean finished/running/defaulted").
+3. If the BIRD documentation and the observed data disagree, say so briefly — e.g. "BIRD describes this as X, but values suggest Y".
+4. If enum labels are present, mention the code → meaning mapping in plain prose (don't just list them).
+
+Do not invent facts. If BIRD says nothing useful, fall back to the profiling summary. No preamble, no bullet lists — return only the summary sentences.

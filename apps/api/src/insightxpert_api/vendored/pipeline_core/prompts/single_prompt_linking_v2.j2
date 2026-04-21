@@ -1,0 +1,91 @@
+You are an expert SQL developer specializing in SQLite. Given a database schema and a natural language question, your task is to generate diverse candidate SQL SELECT queries that might answer the question.
+
+== Database Schema ==
+{{ schema_text }}
+
+== Universal SQLite Formulation Rules ==
+1. **Strict Dialect:** Use only valid SQLite syntax.
+2. **Quoting:** Wrap ALL table and column identifiers in double quotes (e.g., "table_name"."column_name") to prevent reserved keyword conflicts. Strings must use single quotes.
+3. **Mathematical Precision:** SQLite performs integer division by default. For any calculation involving ratios, percentages, or division, ALWAYS cast the numerator to REAL (e.g., `CAST(SUM(...) AS REAL) * 100 / COUNT(...)`).
+4. **Deduplication:** When asked to "list," "name," or "show" categories, types, or items, default to using the `DISTINCT` keyword in your SELECT clause to prevent duplicate row returns, unless explicit counts or totals are requested.
+5. **Completeness:** If the question asks for multiple specific data points (e.g., "Find the name and whether it is active"), ensure your SELECT clause explicitly includes columns for all requested points.
+6. **Rounding Precision:** Use `ROUND(expr, N)` ONLY when the question contains an explicit decimal place count such as "three decimal places", "rounded to 2 decimals", or "with N decimal places". Do NOT add ROUND if the question merely asks for a percentage or ratio without specifying decimal places.
+7. **Output Format:** Return ONLY the SQL query wrapped in a fenced code block (```sql ... ```). Do not include any explanation, comments, or conversational text outside the code block.
+
+== SQL Pattern Rules ==
+Apply these patterns when they match the question:
+
+8. **Name Columns:** When asked for a "full name", "name", or similar and the schema has separate component columns (e.g., first_name/last_name, forename/surname), SELECT each column individually — do NOT concatenate. If the question asks for a plural attribute (e.g., "email addresses") and the schema has multiple numbered columns for it (Email1, Email2, ...), select all of them.
+9. **Aggregation Scope:** When data rows are more granular than the question scope (e.g., monthly rows but yearly question), aggregate with SUM + GROUP BY before applying MIN/MAX/ORDER BY. For "monthly average over a year", divide the yearly total by 12 — do not average only active months. When asked to "list X with total Y", include the aggregated Y in SELECT.
+10. **COUNT DISTINCT:** When counting entities from transaction, history, or event tables where one entity can appear in many rows, use COUNT(DISTINCT entity_id), not COUNT(*).
+11. **Percentage Denominator:** For "percentage of [Group A] that [Condition B]", the denominator must be the count of Group A only, not the global total.
+12. **NULL Handling:** When using ORDER BY + LIMIT to find extremes (min/max/oldest/youngest), add WHERE column IS NOT NULL for the ORDER BY column to prevent NULLs from affecting the result. If the question says "average across all", use CAST(SUM(col) AS REAL) / COUNT(*) instead of AVG(col), since AVG() silently skips NULLs.
+13. **Dates & Times:** When comparing a DATETIME column to a date literal, use date("col") for day-level comparison. When the question says "after" a date, exclude that boundary day. When calculating "age", use STRFTIME to compute the difference from the birth year.
+14. **Difference & Rate:** "Difference between A and B" = A minus B in the stated order — do NOT use ABS() unless explicitly asked. "Rate" or "percentage" = ratio multiplied by 100. When the question asks for a "rate" or "ratio" and no pre-calculated column exists, calculate it by dividing the target metric by the total count.
+15. **SELECT Strictness:** Include ONLY columns the question explicitly asks for. Do NOT add filter, join, or context columns to SELECT unless requested.
+16. **ORDER BY Best Practices:** For "highest/lowest X where condition", prefer ORDER BY + LIMIT 1 over subqueries with MAX/MIN — this ensures the result respects WHERE filters. Always add a secondary sort column (e.g., name or ID) for deterministic results when ties may exist.
+17. **Yes/No & Verification Questions:** Questions starting with "Is/Did/Does/Was/Were/Has/Have" should return 'Yes' or 'No' using IIF() or CASE WHEN — do not return raw 0/1 values. For questions asking "was each..." or "are all...", list the status values for each record instead of aggregating to a single boolean.
+18. **Compound Questions & Ranking:** For multi-part questions (e.g., "List X. How many of them are Y?"), focus on the final metric requested. When the question explicitly uses the word "rank", include RANK() or DENSE_RANK() window function in the SELECT clause — do not rely on ORDER BY alone.
+19. **Missing & Null Values:** "Without X" or "missing X" means IS NULL — do not also check for empty strings or placeholder values (like '-' or 'Unknown') unless the evidence explicitly mentions them.
+
+== Question ==
+{{ question }}
+{% if evidence %}
+
+== Evidence ==
+{{ evidence }}
+{% endif %}
+
+== Step 1: Schema-Grounded Question Rephrasings ==
+
+Before writing any SQL, carefully study the database schema above and rephrase the question 3 different ways. Each rephrase MUST replace natural language concepts with explicit "table"."column" references from the schema. Focus on:
+
+- **Synonyms and abbreviations:** Map natural terms to actual column names in the schema (e.g., "total cholesterol" → Laboratory."T-CHO", "finished the race" → results."time" IS NOT NULL meaning they have a recorded time).
+- **Implicit filters:** Make hidden conditions explicit — what WHERE clauses or NULL checks does the question imply?
+- **Implicit joins:** Name the specific tables and join columns needed, especially when the question implies relationships between entities.
+- **Alternative column mappings:** Consider multiple columns that could match a concept (e.g., "type" could map to "supertypes" AND "subtypes").
+
+Output each rephrase in XML tags:
+<rephrase id="1">First rephrase with explicit column references</rephrase>
+<rephrase id="2">Second rephrase exploring alternative column mappings</rephrase>
+<rephrase id="3">Third rephrase focusing on implicit joins and filters</rephrase>
+
+== Step 2: Diverse Candidate SQL Queries ==
+
+Now generate exactly 6 candidate SQL queries. Each query should explore a different approach — different join paths, column selections, aggregation strategies, or interpretations from your rephrasings above. Ensure at least one query per rephrase interpretation. Use the column descriptions from the database schema to understand what each column contains.
+
+Rules:
+- Each query must be a valid SQLite SELECT statement.
+- Use single quotes for string literals and double quotes for identifiers.
+- Return each query in a numbered fenced code block as shown below.
+- Use the RULES provided in order to generate high quality, schema-aligned and rule-aligned SQL queries.
+
+Query 1:
+```sql
+...
+```
+
+Query 2:
+```sql
+...
+```
+
+Query 3:
+```sql
+...
+```
+
+Query 4:
+```sql
+...
+```
+
+Query 5:
+```sql
+...
+```
+
+Query 6:
+```sql
+...
+```

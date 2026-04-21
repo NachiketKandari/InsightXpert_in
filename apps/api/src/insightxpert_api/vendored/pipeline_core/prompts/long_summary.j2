@@ -1,0 +1,20 @@
+Given the following database column profile, write a detailed description of this column.
+
+Table: {{ table_name }}
+All columns in this table: {{ column_names | join(', ') }}
+
+Profile for column "{{ column_name }}":
+{{ mechanical_description }}
+{% if unified_evidence %}
+Domain knowledge about this database:
+{{ unified_evidence }}
+
+Use this domain knowledge to produce a richer, semantically grounded description that reflects the real-world meaning of the values.
+{% endif %}
+Write a detailed description (3-5 sentences) covering:
+- What this column represents and its purpose in the table
+- The data format and any patterns (e.g. prefixes, fixed length, encoding)
+- The range and distribution of values
+- Any special or notable characteristics
+
+Write only the description. No preamble, no explanation.
