@@ -24,8 +24,9 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, s
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
-from ..auth.current_user import CurrentUser, get_current_user
+from ..auth.current_user import CurrentUser, get_current_user, require_admin
 from ..config import Settings, get_settings
+from ..databases import service as visibility_service
 from ..db.schema import ddl as schema_ddl
 from ..logging import get_logger
 from ..pipeline.pipeline import Pipeline
@@ -96,8 +97,28 @@ async def list_databases(
     cu: CurrentUser = Depends(get_current_user),
     settings: Settings = Depends(get_settings),
 ) -> list[DatabaseListItem]:
+    """List DBs visible to the caller.
+
+    We take the filesystem union (bundled + uploaded) from :class:`DatabaseService`
+    and intersect it against the visibility table. Bundled BIRD DBs are seeded
+    as ``public`` in migration 0003, so all callers see them. Uploaded DBs are
+    filtered by ownership / shares. Admins bypass the filter and see everything.
+    """
     svc = _db_svc(settings)
-    return [DatabaseListItem(db_id=r.db_id, source=r.source) for r in svc.list(cu.id)]
+    refs = await asyncio.to_thread(svc.list, cu.id)
+    is_admin = cu.role == "admin"
+    visible_ids = await asyncio.to_thread(
+        visibility_service.visible_ids, cu.id, is_admin
+    )
+    return [
+        DatabaseListItem(db_id=r.db_id, source=r.source)
+        for r in refs
+        # If there's no row in the `databases` table for a given db_id the
+        # item pre-dates the visibility layer — keep it listed for the owning
+        # session so legacy uploads keep working for their uploader. For
+        # bundled DBs (always seeded public) this branch never fires.
+        if r.db_id in visible_ids or r.source == "uploaded"
+    ]
 
 
 @router.post("/upload", response_model=UploadResponse)
@@ -116,6 +137,11 @@ async def upload_database(
         raise HTTPException(status_code=400, detail="invalid_file")
     svc = _db_svc(settings)
     ref = svc.save_upload(cu.id, db_id, data)
+    # Register in the visibility table so the DB shows up in GET /databases and
+    # admins can change its visibility later. Idempotent for re-uploads.
+    await asyncio.to_thread(
+        visibility_service.upsert_private, db_id, cu.id, len(data)
+    )
     return UploadResponse(db_id=ref.db_id, source=ref.source)
 
 
@@ -195,6 +221,30 @@ async def run_profile(
 
     asyncio.create_task(_run_profile_pipeline(pipeline, ctx))
     return EventSourceResponse(emitter.stream())
+
+
+class VisibilityRequest(BaseModel):
+    visibility: str  # private | shared | public
+    shared_with: list[str] | None = None
+
+
+@router.post("/{db_id}/visibility")
+async def set_db_visibility(
+    db_id: str,
+    body: VisibilityRequest,
+    cu: CurrentUser = Depends(require_admin),
+) -> dict[str, str]:
+    """Admin-only: set visibility + (for 'shared') replace the share list."""
+    try:
+        await asyncio.to_thread(
+            visibility_service.set_visibility,
+            db_id,
+            body.visibility,
+            body.shared_with,
+        )
+    except visibility_service.InvalidVisibilityError:
+        raise HTTPException(status_code=400, detail="invalid_visibility") from None
+    return {"status": "ok"}
 
 
 # Fallback when trailing slash variant is hit (FastAPI defaults redirect; this keeps
