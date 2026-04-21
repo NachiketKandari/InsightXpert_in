@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -61,6 +61,37 @@ class Settings(BaseSettings):
 
     # --- paths -------------------------------------------------------------
     bundled_dbs_dir: str = "./Databases"
+
+    # --- automations (C1) --------------------------------------------------
+    # Master switch. When false all automations/notifications routes are
+    # unmounted and the scheduler lifespan hook is a no-op.
+    automations_enabled: bool = False
+    # "embedded" runs APScheduler inside the FastAPI process (local dev /
+    # single-replica). "external" means scheduling comes from a cron hitting
+    # POST /api/internal/run-due-automations with an HMAC-signed body.
+    automations_scheduler_mode: str = "embedded"
+    # Required (≥32 bytes) when mode=external; validated below.
+    automations_scheduler_secret: str = ""
+    # Embedded tick granularity in seconds — how often each job's cron trigger
+    # is re-evaluated. Keep ≥5s to avoid pegging SQLite.
+    automations_scheduler_tick_seconds: int = 30
+
+    @model_validator(mode="after")
+    def _check_automations(self) -> "Settings":
+        if (
+            self.automations_enabled
+            and self.automations_scheduler_mode == "external"
+            and len(self.automations_scheduler_secret) < 32
+        ):
+            raise ValueError(
+                "AUTOMATIONS_SCHEDULER_SECRET must be >=32 bytes when "
+                "AUTOMATIONS_SCHEDULER_MODE=external"
+            )
+        if self.automations_scheduler_mode not in ("embedded", "external"):
+            raise ValueError(
+                "AUTOMATIONS_SCHEDULER_MODE must be 'embedded' or 'external'"
+            )
+        return self
 
 
 @lru_cache(maxsize=1)
