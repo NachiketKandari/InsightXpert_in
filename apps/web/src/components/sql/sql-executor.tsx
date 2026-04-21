@@ -1,26 +1,46 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
+import dynamic from "next/dynamic";
 import { Play, AlertTriangle, Clock, Rows3, X, Loader2, Table2, BarChart3 } from "lucide-react";
-import { Light as SyntaxHighlighter } from "react-syntax-highlighter";
-import sqlLang from "react-syntax-highlighter/dist/esm/languages/hljs/sql";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DataTable } from "@/components/chunks/data-table";
 import { ChartConfigurator } from "@/components/sql/chart-configurator";
 import { apiFetch } from "@/lib/api";
-import { useSyntaxTheme } from "@/hooks/use-syntax-theme";
 import type { QueryResult, QueryError } from "@/types/api";
 
-SyntaxHighlighter.registerLanguage("sql", sqlLang);
+// Monaco is SSR-incompatible — load client-side only.
+const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
+  ssr: false,
+  loading: () => (
+    <div className="w-full h-[160px] flex items-center justify-center text-xs text-muted-foreground">
+      Loading editor…
+    </div>
+  ),
+});
 
 export function SqlExecutor({ onClose }: { onClose: () => void }) {
   const [sql, setSql] = useState("");
   const [result, setResult] = useState<QueryResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const syntaxTheme = useSyntaxTheme();
+
+  // Detect dark mode to pick Monaco theme; keeps in sync with the app theme.
+  const [isDark, setIsDark] = useState<boolean>(() =>
+    typeof document !== "undefined" &&
+    document.documentElement.classList.contains("dark"),
+  );
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const root = document.documentElement;
+    const observer = new MutationObserver(() => {
+      setIsDark(root.classList.contains("dark"));
+    });
+    observer.observe(root, { attributes: true, attributeFilter: ["class"] });
+    return () => observer.disconnect();
+  }, []);
 
   const execute = useCallback(async () => {
     const trimmed = sql.trim();
@@ -51,13 +71,6 @@ export function SqlExecutor({ onClose }: { onClose: () => void }) {
     }
   }, [sql, loading]);
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-      e.preventDefault();
-      execute();
-    }
-  };
-
   return (
     <div className="flex flex-col h-full bg-background">
       {/* Header */}
@@ -81,13 +94,57 @@ export function SqlExecutor({ onClose }: { onClose: () => void }) {
       {/* Editor */}
       <div className="px-4 pt-3 pb-2 border-b border-border">
         <div className="relative rounded-lg border border-border bg-card/50 overflow-hidden focus-within:ring-1 focus-within:ring-cyan-accent/50 focus-within:border-cyan-accent/50 transition-colors">
-          <textarea
+          <MonacoEditor
+            height="160px"
+            defaultLanguage="sql"
+            theme={isDark ? "vs-dark" : "vs"}
             value={sql}
-            onChange={(e) => setSql(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="SELECT * FROM transactions LIMIT 10;"
-            className="w-full bg-transparent text-sm font-mono px-3 py-3 min-h-[120px] max-h-[200px] resize-y outline-none placeholder:text-muted-foreground/40"
-            spellCheck={false}
+            onChange={(v) => setSql(v ?? "")}
+            onMount={(editor, monaco) => {
+              editor.addCommand(
+                monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter,
+                () => {
+                  // Read the latest SQL directly from the editor to avoid
+                  // capturing a stale closure over the `execute` callback.
+                  const current = editor.getValue().trim();
+                  if (!current) return;
+                  void (async () => {
+                    setError(null);
+                    setResult(null);
+                    setLoading(true);
+                    try {
+                      const res = await apiFetch("/api/sql/execute", {
+                        method: "POST",
+                        body: JSON.stringify({ sql: current }),
+                      });
+                      if (!res.ok) {
+                        const body: QueryError = await res.json();
+                        setError(body.detail || `HTTP ${res.status}`);
+                        return;
+                      }
+                      const data: QueryResult = await res.json();
+                      setResult(data);
+                    } catch (err) {
+                      setError((err as Error).message || "Network error");
+                    } finally {
+                      setLoading(false);
+                    }
+                  })();
+                },
+              );
+            }}
+            options={{
+              minimap: { enabled: false },
+              scrollBeyondLastLine: false,
+              fontSize: 13,
+              fontFamily: "var(--font-mono)",
+              lineNumbers: "on",
+              folding: false,
+              renderLineHighlight: "none",
+              padding: { top: 8, bottom: 8 },
+              automaticLayout: true,
+              wordWrap: "on",
+            }}
           />
         </div>
         <div className="flex items-center justify-between mt-2">
@@ -188,19 +245,11 @@ export function SqlExecutor({ onClose }: { onClose: () => void }) {
 
         {!result && !error && (
           <div className="flex flex-col items-center justify-center h-full text-muted-foreground/50 gap-2 px-4">
-            <SyntaxHighlighter
-              language="sql"
-              style={syntaxTheme}
-              customStyle={{
-                background: "transparent",
-                fontSize: "0.75rem",
-                fontFamily: "var(--font-mono)",
-                padding: 0,
-                margin: 0,
-              }}
-            >
-              {"SELECT column FROM table\nWHERE condition\nLIMIT 100;"}
-            </SyntaxHighlighter>
+            <pre className="text-xs font-mono text-muted-foreground/60 m-0 leading-relaxed">
+{`SELECT column FROM table
+WHERE condition
+LIMIT 100;`}
+            </pre>
             <p className="text-xs mt-2">
               Write a query above and hit Execute
             </p>
