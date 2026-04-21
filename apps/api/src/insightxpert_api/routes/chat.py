@@ -127,3 +127,77 @@ async def chat_sse(
     # the emitter's queue before the pipeline finishes.
     asyncio.create_task(_run_pipeline(pipeline, ctx, convo_store))
     return EventSourceResponse(emitter.stream())
+
+
+async def _collect_chunks(
+    pipeline: Any,
+    ctx: PipelineContext,
+    convo_store: ConversationStore,
+) -> list[Any]:
+    """Run the pipeline to completion, draining the emitter into a list of ChatChunks."""
+    emitter = ctx.emitter
+    assert emitter is not None
+
+    task = asyncio.create_task(_run_pipeline(pipeline, ctx, convo_store))
+    collected: list[Any] = []
+    # Drain the queue until the sentinel (None) is pushed by emitter.close().
+    while True:
+        event = await emitter._queue.get()  # noqa: SLF001 — internal drain is deliberate
+        if event is None:
+            break
+        collected.append(event)
+    await task
+    return collected
+
+
+@router.post("/chat/poll", response_model=ChatPollResponse)
+async def chat_poll(
+    body: ChatRequest,
+    claims: SessionClaims = Depends(require_session),
+    settings: Settings = Depends(get_settings),
+    convo_store: ConversationStore = Depends(get_conversation_store),
+) -> ChatPollResponse:
+    """Run pipeline to completion and return the full list of chunks (non-streaming)."""
+    convo = convo_store.get_or_create(claims.session_id, body.conversation_id)
+    emitter = EventEmitter(convo.conversation_id)
+    ctx, pipeline = _build_pipeline_and_ctx(
+        body=body, claims=claims, settings=settings, convo_store=convo_store, emitter=emitter
+    )
+    chunks = await _collect_chunks(pipeline, ctx, convo_store)
+    return ChatPollResponse(
+        conversation_id=convo.conversation_id,
+        chunks=[c.model_dump(mode="json") for c in chunks],
+    )
+
+
+@router.post("/chat/answer", response_model=ChatAnswerResponse)
+async def chat_answer(
+    body: ChatRequest,
+    claims: SessionClaims = Depends(require_session),
+    settings: Settings = Depends(get_settings),
+    convo_store: ConversationStore = Depends(get_conversation_store),
+) -> ChatAnswerResponse:
+    """Run pipeline to completion; return final answer text + generated SQL list."""
+    convo = convo_store.get_or_create(claims.session_id, body.conversation_id)
+    emitter = EventEmitter(convo.conversation_id)
+    ctx, pipeline = _build_pipeline_and_ctx(
+        body=body, claims=claims, settings=settings, convo_store=convo_store, emitter=emitter
+    )
+    chunks = await _collect_chunks(pipeline, ctx, convo_store)
+
+    answer = ""
+    sqls: list[str] = []
+    for chunk in chunks:
+        # chunk.data may be a BaseModel or a dict; normalize to dict form.
+        data = chunk.data if isinstance(chunk.data, dict) else chunk.data.model_dump(mode="json")
+        if chunk.type == ChunkType.ANSWER_GENERATED:
+            answer = str(data.get("text", ""))
+        elif chunk.type == ChunkType.SQL_GENERATED:
+            sql_text = data.get("sql")
+            if sql_text:
+                sqls.append(str(sql_text))
+    return ChatAnswerResponse(
+        conversation_id=convo.conversation_id,
+        answer=answer,
+        sql=sqls,
+    )
