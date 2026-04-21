@@ -30,6 +30,13 @@ on lands here and is re-applied on every re-sync by
   the associated helpers `_ALLOWED_IMPORT_ROOTS`, `_import_hook`, `_timeout`
   in `stat_tools.py` and the registration of `RunPythonTool()` in
   `quant_analyst._quant_registry`.
+- `0003-inject-analyst-impl.patch` — makes the analyst implementation
+  injectable. `orchestrator_loop` accepts an optional `analyst_impl` kwarg
+  (defaults to the vendored analyst). The route layer passes
+  `insightxpert_api.agents.analyst.analyst_loop` — our pipeline-wrapping
+  adapter — so the vendored orchestrator drives our Phase A pipeline via a
+  nominal async-generator contract. The kwarg is threaded down to
+  `_run_sql_analyst` so enrichment sub-tasks use the same adapter.
 
 ## Applying by hand
 

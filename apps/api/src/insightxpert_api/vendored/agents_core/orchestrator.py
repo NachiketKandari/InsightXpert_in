@@ -19,7 +19,7 @@ import logging
 import time
 from typing import AsyncGenerator
 
-from insightxpert_api.vendored.agents_core.analyst import analyst_loop
+from insightxpert_api.vendored.agents_core.analyst import analyst_loop as _default_analyst_loop
 from insightxpert_api.vendored.agents_core.common import (
     CATEGORY_LABELS,
     AnalystCollector,
@@ -65,6 +65,7 @@ async def orchestrator_loop(
     stats_context_injection: bool = False,
     clarification_enabled: bool = False,
     rag_retrieval: bool = True,
+    analyst_impl=None,
 ) -> AsyncGenerator[ChatChunk, None]:
     """Run the orchestrator pipeline.
 
@@ -73,6 +74,10 @@ async def orchestrator_loop(
         "agentic"  -- analyst-first with conditional enrichment
         Other      -- mapped to "agentic" for backward compatibility
     """
+    # Allow callers to inject an analyst implementation (e.g. a pipeline-wrapping
+    # adapter). Defaults to the vendored ``analyst_loop``. Passed down to
+    # ``_run_sql_analyst`` so enrichment sub-tasks also use the injected impl.
+    analyst_loop = analyst_impl if analyst_impl is not None else _default_analyst_loop
     # Backward compat: map legacy modes
     if agent_mode == "analyst":
         agent_mode = "basic"
@@ -294,6 +299,7 @@ async def orchestrator_loop(
                 allowed_tables=allowed_tables,
                 dataset_id=dataset_id,
                 org_id=org_id,
+                analyst_impl=analyst_loop,
             )
         elif task.agent == "quant_analyst":
             return await _run_quant_analyst(
@@ -404,6 +410,7 @@ async def _run_sql_analyst(
     allowed_tables: set[str] | None = None,
     dataset_id: str | None = None,
     org_id: str | None = None,
+    analyst_impl=None,
 ) -> SubTaskResult:
     """Run analyst_loop for a sub-task and collect results."""
     collected_sql = ""
@@ -411,6 +418,7 @@ async def _run_sql_analyst(
     collected_answer = ""
     trace_steps: list[dict] = []
     t0 = time.time()
+    analyst_loop = analyst_impl if analyst_impl is not None else _default_analyst_loop
 
     try:
         async for chunk in analyst_loop(
