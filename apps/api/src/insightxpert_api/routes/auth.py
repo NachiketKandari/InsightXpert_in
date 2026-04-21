@@ -1,39 +1,38 @@
-"""Auth routes: unlock (password gate), me, logout."""
+"""Auth routes: login, logout, me, change-password.
+
+The legacy /unlock route returns 410 Gone during the one-commit window until
+Task 15 deletes it entirely. This makes any remaining callers fail loudly.
+"""
 
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 
-from ..auth.dependencies import require_session
-from ..auth.session import SessionClaims, SessionSigner
+from ..auth.current_user import CurrentUser, get_current_user
+from ..auth.session import SessionSigner
 from ..config import Settings, get_settings
+from ..users import service
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
 
-class UnlockRequest(BaseModel):
+# --- login ----------------------------------------------------------------
+
+
+class LoginRequest(BaseModel):
+    email: EmailStr
     password: str = Field(min_length=1, max_length=256)
 
 
-class UnlockResponse(BaseModel):
-    status: str
+class LoginResponse(BaseModel):
+    id: str
+    email: EmailStr
+    role: str
+    must_change_password: bool
 
 
-class MeResponse(BaseModel):
-    session_id: str
-
-
-@router.post("/unlock", response_model=UnlockResponse)
-async def unlock(
-    body: UnlockRequest,
-    response: Response,
-    settings: Settings = Depends(get_settings),
-) -> UnlockResponse:
-    """Exchange the shared password for a signed session cookie."""
-    if body.password != settings.gate_password:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="unauthorized")
-    token = SessionSigner(settings).issue()
+def _set_session_cookie(response: Response, settings: Settings, token: str) -> None:
     response.set_cookie(
         key=settings.session_cookie_name,
         value=token,
@@ -43,19 +42,94 @@ async def unlock(
         samesite="lax",
         path="/",
     )
-    return UnlockResponse(status="ok")
+
+
+@router.post("/login", response_model=LoginResponse)
+async def login(
+    body: LoginRequest,
+    response: Response,
+    settings: Settings = Depends(get_settings),
+) -> LoginResponse:
+    user = service.authenticate(body.email, body.password)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="unauthorized")
+    token = SessionSigner(settings).issue(user_id=user.id, role=user.role)
+    _set_session_cookie(response, settings, token)
+    service.touch_last_seen(user.id)
+    return LoginResponse(
+        id=user.id,
+        email=user.email,
+        role=user.role,
+        must_change_password=user.must_change_password,
+    )
+
+
+# --- logout ---------------------------------------------------------------
+
+
+@router.post("/logout")
+async def logout(response: Response, settings: Settings = Depends(get_settings)) -> dict[str, str]:
+    response.delete_cookie(settings.session_cookie_name, path="/")
+    return {"status": "ok"}
+
+
+# --- me -------------------------------------------------------------------
+
+
+class MeResponse(BaseModel):
+    id: str
+    email: EmailStr
+    role: str
+    is_active: bool
+    must_change_password: bool
 
 
 @router.get("/me", response_model=MeResponse)
-async def me(claims: SessionClaims = Depends(require_session)) -> MeResponse:
-    """Return the caller's session_id. Handy for FE bootstrap."""
-    return MeResponse(session_id=claims.session_id)
+async def me(cu: CurrentUser = Depends(get_current_user)) -> MeResponse:
+    full = service.get_public(cu.id)
+    assert full is not None  # current_user just resolved it
+    return MeResponse(
+        id=full.id,
+        email=full.email,
+        role=full.role,
+        is_active=full.is_active,
+        must_change_password=full.must_change_password,
+    )
 
 
-@router.post("/logout", response_model=UnlockResponse)
-async def logout(
+# --- change-password ------------------------------------------------------
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=256)
+    new_password: str = Field(min_length=12, max_length=256)
+
+
+@router.post("/change-password")
+async def change_password(
+    body: ChangePasswordRequest,
+    cu: CurrentUser = Depends(get_current_user),
+) -> dict[str, str]:
+    try:
+        service.change_password(cu.id, current=body.current_password, new=body.new_password)
+    except service.InvalidCredentialsError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="unauthorized")
+    return {"status": "ok"}
+
+
+# --- legacy unlock (deleted in Task 15) ---------------------------------
+
+
+class UnlockRequest(BaseModel):
+    password: str = Field(min_length=1, max_length=256)
+
+
+@router.post("/unlock", deprecated=True)
+async def unlock_deprecated(
+    body: UnlockRequest,
     response: Response,
     settings: Settings = Depends(get_settings),
-) -> UnlockResponse:
-    response.delete_cookie(settings.session_cookie_name, path="/")
-    return UnlockResponse(status="ok")
+) -> dict[str, str]:
+    """Deprecated. Returns 410 Gone so tests that still call it fail loudly
+    during the one-commit window between B1 Task 12 and Task 15."""
+    raise HTTPException(status_code=status.HTTP_410_GONE, detail="use /auth/login")
