@@ -5,17 +5,18 @@ import type { NextConfig } from "next";
 const isStaticExport = process.env.NEXT_OUTPUT === "export";
 
 // ESM next.config.ts has no CommonJS __dirname; derive it from import.meta.url.
-// We set this as `turbopack.root` so the bundler doesn't misinfer
-// `apps/web/src/app` as the project root. Note: even with this set, Turbopack
-// 16 currently can't resolve `next/package.json` across pnpm's `.pnpm` store
-// symlinks, so `pnpm dev` defaults to the webpack path via --webpack in
-// package.json. Use `pnpm dev:turbopack` to opt in (and watch it fail).
 const projectRoot = path.dirname(fileURLToPath(import.meta.url));
+// pnpm workspace root is two levels up from apps/web. Turbopack must be
+// pointed at the monorepo root (not apps/web), otherwise it refuses to
+// traverse pnpm's `.pnpm/` store symlinks which live at the root
+// `node_modules/` — causing `Error: Next.js inferred your workspace root...
+// We couldn't find the Next.js package`. Keep this set to the monorepo root.
+const monorepoRoot = path.resolve(projectRoot, "..", "..");
 
 const nextConfig: NextConfig = {
   allowedDevOrigins: ["*.ngrok-free.dev", "*.ngrok.io"],
   turbopack: {
-    root: projectRoot,
+    root: monorepoRoot,
   },
   // Static export for Firebase Hosting (set NEXT_OUTPUT=export in CI)
   ...(isStaticExport
