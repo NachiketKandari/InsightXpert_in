@@ -1,8 +1,4 @@
-"""Auth routes: login, logout, me, change-password.
-
-The legacy /unlock route returns 410 Gone during the one-commit window until
-Task 15 deletes it entirely. This makes any remaining callers fail loudly.
-"""
+"""Auth routes: login, logout, me, change-password."""
 
 from __future__ import annotations
 
@@ -116,20 +112,3 @@ async def change_password(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="unauthorized")
     return {"status": "ok"}
 
-
-# --- legacy unlock (deleted in Task 15) ---------------------------------
-
-
-class UnlockRequest(BaseModel):
-    password: str = Field(min_length=1, max_length=256)
-
-
-@router.post("/unlock", deprecated=True)
-async def unlock_deprecated(
-    body: UnlockRequest,
-    response: Response,
-    settings: Settings = Depends(get_settings),
-) -> dict[str, str]:
-    """Deprecated. Returns 410 Gone so tests that still call it fail loudly
-    during the one-commit window between B1 Task 12 and Task 15."""
-    raise HTTPException(status_code=status.HTTP_410_GONE, detail="use /auth/login")

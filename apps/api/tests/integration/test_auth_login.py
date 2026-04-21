@@ -48,7 +48,7 @@ def test_login_inactive_user_returns_401(fresh_db):
     assert resp.status_code == 401
 
 
-def test_unlock_returns_410(fresh_db):
+def test_unlock_returns_404_after_removal(fresh_db):
     client = TestClient(create_app())
     resp = client.post("/api/v1/auth/unlock", json={"password": "dev"})
-    assert resp.status_code == 410
+    assert resp.status_code == 404

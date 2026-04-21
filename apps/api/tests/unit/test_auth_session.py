@@ -8,7 +8,6 @@ from insightxpert_api.config import Settings
 
 def _settings() -> Settings:
     return Settings(  # type: ignore[call-arg]
-        gate_password="ignored",
         session_secret="secret-for-tests-secret-for-tests",
         session_cookie_name="ix_session",
         gemini_api_key="k",

@@ -1,7 +1,7 @@
 """Legacy auth tests, migrated to /login + CurrentUser semantics.
 
 The old anonymous gate tests (``/unlock``) have been reshaped to exercise the
-new email/password flow. /unlock itself returns 410 Gone and is covered in
+new email/password flow. /unlock is gone (404) and is covered in
 ``test_auth_login.py`` — no need to duplicate here.
 """
 

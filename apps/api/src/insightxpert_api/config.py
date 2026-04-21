@@ -25,7 +25,6 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./app.db"
 
     # --- auth --------------------------------------------------------------
-    gate_password: str
     session_secret: str
     session_ttl_seconds: int = 60 * 60 * 24 * 30  # 30 days sliding
     session_cookie_name: str = "ix_session"
