@@ -105,7 +105,6 @@ async def quant_analyst_loop(
         analyst_sql=merged_sql,
         allowed_tables=allowed_tables,
         dataset_id=dataset_id,
-        org_id=org_id,
     )
 
     logger.info("=" * 60)

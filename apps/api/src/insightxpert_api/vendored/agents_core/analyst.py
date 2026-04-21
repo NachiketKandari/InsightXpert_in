@@ -306,7 +306,7 @@ async def analyst_loop(
         tool_registry = default_registry(clarification_enabled=clarification_enabled)
     tool_context = ToolContext(
         db=db, rag=rag, row_limit=config.sql_row_limit,
-        allowed_tables=allowed_tables, dataset_id=dataset_id, org_id=org_id,
+        allowed_tables=allowed_tables, dataset_id=dataset_id,
     )
 
     logger.info("=" * 60)

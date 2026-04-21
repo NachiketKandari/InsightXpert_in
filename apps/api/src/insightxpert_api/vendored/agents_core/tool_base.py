@@ -23,7 +23,6 @@ class ToolContext:
     analyst_sql: str | None = None
     allowed_tables: set[str] | None = None
     dataset_id: str | None = None
-    org_id: str | None = None
 
 
 class Tool(ABC):

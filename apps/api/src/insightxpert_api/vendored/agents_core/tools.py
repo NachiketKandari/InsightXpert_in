@@ -177,17 +177,17 @@ class SearchSimilarTool(Tool):
             items = await asyncio.to_thread(
                 context.rag.search_qa, query,
                 max_distance=1.0, sql_valid_only=True,
-                dataset_id=context.dataset_id, org_id=context.org_id,
+                dataset_id=context.dataset_id,
             )
         elif collection == "ddl":
             items = await asyncio.to_thread(
                 context.rag.search_ddl, query,
-                dataset_id=context.dataset_id, org_id=context.org_id,
+                dataset_id=context.dataset_id,
             )
         elif collection == "docs":
             items = await asyncio.to_thread(
                 context.rag.search_docs, query,
-                dataset_id=context.dataset_id, org_id=context.org_id,
+                dataset_id=context.dataset_id,
             )
         else:
             logger.warning("Unknown collection: %s", collection)

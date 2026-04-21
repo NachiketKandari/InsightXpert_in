@@ -1,0 +1,54 @@
+--- tool_base.py	2026-04-21 16:57:02
++++ tool_base.py	2026-04-21 16:57:07
+@@ -23,7 +23,6 @@
+     analyst_sql: str | None = None
+     allowed_tables: set[str] | None = None
+     dataset_id: str | None = None
+-    org_id: str | None = None
+ 
+ 
+ class Tool(ABC):
+--- quant_analyst.py	2026-04-21 16:57:02
++++ quant_analyst.py	2026-04-21 16:57:09
+@@ -105,7 +105,6 @@
+         analyst_sql=merged_sql,
+         allowed_tables=allowed_tables,
+         dataset_id=dataset_id,
+-        org_id=org_id,
+     )
+ 
+     logger.info("=" * 60)
+--- analyst.py	2026-04-21 16:57:02
++++ analyst.py	2026-04-21 16:57:11
+@@ -306,7 +306,7 @@
+         tool_registry = default_registry(clarification_enabled=clarification_enabled)
+     tool_context = ToolContext(
+         db=db, rag=rag, row_limit=config.sql_row_limit,
+-        allowed_tables=allowed_tables, dataset_id=dataset_id, org_id=org_id,
++        allowed_tables=allowed_tables, dataset_id=dataset_id,
+     )
+ 
+     logger.info("=" * 60)
+--- tools.py	2026-04-21 16:57:02
++++ tools.py	2026-04-21 16:57:14
+@@ -177,17 +177,17 @@
+             items = await asyncio.to_thread(
+                 context.rag.search_qa, query,
+                 max_distance=1.0, sql_valid_only=True,
+-                dataset_id=context.dataset_id, org_id=context.org_id,
++                dataset_id=context.dataset_id,
+             )
+         elif collection == "ddl":
+             items = await asyncio.to_thread(
+                 context.rag.search_ddl, query,
+-                dataset_id=context.dataset_id, org_id=context.org_id,
++                dataset_id=context.dataset_id,
+             )
+         elif collection == "docs":
+             items = await asyncio.to_thread(
+                 context.rag.search_docs, query,
+-                dataset_id=context.dataset_id, org_id=context.org_id,
++                dataset_id=context.dataset_id,
+             )
+         else:
+             logger.warning("Unknown collection: %s", collection)
