@@ -12,6 +12,9 @@ from fastapi.middleware.gzip import GZipMiddleware
 from .config import get_settings
 from .logging import configure_logging, get_logger
 from .routes import (
+    admin_audit,
+    admin_metrics,
+    admin_overview,
     admin_users,
     auth,
     chat,
@@ -84,6 +87,9 @@ def create_app() -> FastAPI:
     app.include_router(feedback.router)
     app.include_router(client_config.router)
     app.include_router(admin_users.router)
+    app.include_router(admin_overview.router)
+    app.include_router(admin_audit.router)
+    app.include_router(admin_metrics.router)
     return app
 
 
