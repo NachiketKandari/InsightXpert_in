@@ -13,9 +13,11 @@ import asyncio
 import time
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
+
+from ..metrics.service import record_turn as _record_turn
 
 from ..agents.analyst import analyst_loop as _our_analyst_loop
 from ..auth.current_user import CurrentUser, get_current_user
@@ -40,6 +42,65 @@ from ..vendored.agents_core.orchestrator import orchestrator_loop
 
 router = APIRouter(prefix="/api/v1", tags=["chat"])
 log = get_logger("chat")
+
+
+def _extract_metrics_from_chunks(chunks: list[Any]) -> dict[str, Any]:
+    """Pull the bits we need for query_metrics out of a collected chunk list.
+
+    Returns a dict with keys: final_sql, duration_ms, tokens_in, tokens_out.
+    Any missing signal falls back to None. Last sql_generated wins.
+    """
+    final_sql: str | None = None
+    duration_ms: int | None = None
+    tokens_in: int | None = None
+    tokens_out: int | None = None
+    for chunk in chunks:
+        data = chunk.data if isinstance(chunk.data, dict) else (
+            chunk.data.model_dump(mode="json")
+            if hasattr(chunk.data, "model_dump")
+            else {}
+        )
+        t = chunk.type
+        if t == ChunkType.SQL_GENERATED:
+            sql_text = data.get("sql")
+            if sql_text:
+                final_sql = str(sql_text)
+        elif t == ChunkType.METRICS:
+            if duration_ms is None and data.get("latency_ms") is not None:
+                duration_ms = int(data["latency_ms"])
+            if data.get("prompt_tokens") is not None:
+                tokens_in = int(data["prompt_tokens"])
+            if data.get("output_tokens") is not None:
+                tokens_out = int(data["output_tokens"])
+    return {
+        "final_sql": final_sql,
+        "duration_ms": duration_ms,
+        "tokens_in": tokens_in,
+        "tokens_out": tokens_out,
+    }
+
+
+def _schedule_record_turn(
+    background_tasks: BackgroundTasks,
+    *,
+    cu: CurrentUser,
+    conversation_id: str,
+    body: "ChatRequest",
+    chunks: list[Any],
+) -> None:
+    extracted = _extract_metrics_from_chunks(chunks)
+    background_tasks.add_task(
+        _record_turn,
+        user_id=cu.id,
+        conversation_id=conversation_id,
+        db_id=body.db_id,
+        question=body.message,
+        final_sql=extracted["final_sql"],
+        agent_mode=body.agent_mode,
+        tokens_in=extracted["tokens_in"],
+        tokens_out=extracted["tokens_out"],
+        duration_ms=extracted["duration_ms"],
+    )
 
 
 class ChatRequest(BaseModel):
@@ -102,8 +163,14 @@ async def _run_pipeline(
     ctx: PipelineContext,
     convo_store: ConversationStore,
     model: str | None = None,
+    metrics_record: dict[str, Any] | None = None,
 ) -> None:
-    """Drive the pipeline, emit final events, persist the assistant message."""
+    """Drive the pipeline, emit final events, persist the assistant message.
+
+    When ``metrics_record`` is provided, a query_metrics row is written in the
+    finally block (off-loop via asyncio.to_thread). The dict must contain
+    ``user_id``, ``conversation_id``, ``db_id``, ``question``, ``agent_mode``.
+    """
     emitter = ctx.emitter
     start = time.monotonic()
     try:
@@ -139,13 +206,30 @@ async def _run_pipeline(
     finally:
         # Emit a terminal metrics chunk (spec §5.4) before closing. Token counts
         # require threading the Gemini response through — Slice 1+ territory.
+        latency_ms = int((time.monotonic() - start) * 1000)
         if emitter is not None:
-            latency_ms = int((time.monotonic() - start) * 1000)
             await emitter.emit(
                 ChunkType.METRICS,
                 MetricsPayload(latency_ms=latency_ms, model=model),
             )
             await emitter.close()
+        if metrics_record is not None:
+            try:
+                sql_state = ctx.state.get("sql")
+                await asyncio.to_thread(
+                    _record_turn,
+                    user_id=metrics_record["user_id"],
+                    conversation_id=metrics_record["conversation_id"],
+                    db_id=metrics_record["db_id"],
+                    question=metrics_record["question"],
+                    final_sql=str(sql_state) if sql_state else None,
+                    agent_mode=metrics_record.get("agent_mode"),
+                    tokens_in=None,
+                    tokens_out=None,
+                    duration_ms=latency_ms,
+                )
+            except Exception:  # noqa: BLE001
+                pass
 
 
 @router.post("/chat")
@@ -166,7 +250,8 @@ async def chat_sse(
     if body.agent_mode is not None:
         asyncio.create_task(
             _run_orchestrator(
-                body, cu, settings, convo_store, emitter, convo.conversation_id
+                body, cu, settings, convo_store, emitter, convo.conversation_id,
+                record_metrics=True,
             )
         )
     else:
@@ -177,7 +262,17 @@ async def chat_sse(
         # Fire pipeline on a background task so EventSourceResponse can start streaming
         # the emitter's queue before the pipeline finishes.
         asyncio.create_task(
-            _run_pipeline(pipeline, ctx, convo_store, model=settings.gemini_chat_model)
+            _run_pipeline(
+                pipeline, ctx, convo_store,
+                model=settings.gemini_chat_model,
+                metrics_record={
+                    "user_id": cu.id,
+                    "conversation_id": convo.conversation_id,
+                    "db_id": body.db_id,
+                    "question": body.message,
+                    "agent_mode": body.agent_mode,
+                },
+            )
         )
     return EventSourceResponse(emitter.stream())
 
@@ -238,6 +333,7 @@ async def _run_orchestrator(
     convo_store: ConversationStore,
     emitter: EventEmitter,
     conversation_id: str,
+    record_metrics: bool = False,
 ) -> None:
     """Drive the vendored orchestrator_loop with our analyst injected, translate
     each yielded vendored chunk to our envelope, and push through the emitter.
@@ -282,6 +378,7 @@ async def _run_orchestrator(
     )
 
     answer_text = ""
+    final_sql_seen: str | None = None
     try:
         async for vchunk in orchestrator_loop(
             question=body.message,
@@ -307,6 +404,12 @@ async def _run_orchestrator(
                     answer_text = str(payload.get("text", "")) or answer_text
                 elif hasattr(payload, "text"):
                     answer_text = str(payload.text) or answer_text  # type: ignore[attr-defined]
+            elif envelope.type == ChunkType.sql_generated:
+                sql_payload = envelope.data
+                if isinstance(sql_payload, dict):
+                    sql_val = sql_payload.get("sql")
+                    if sql_val:
+                        final_sql_seen = str(sql_val)
             # Push through the emitter (which persists chunks via on_emit).
             # Route directly — don't go through emit() which re-wraps.
             if emitter._on_emit is not None:  # noqa: SLF001 — mirrors emit()
@@ -339,6 +442,22 @@ async def _run_orchestrator(
             MetricsPayload(latency_ms=latency_ms, model=settings.gemini_chat_model),
         )
         await emitter.close()
+        if record_metrics:
+            try:
+                await asyncio.to_thread(
+                    _record_turn,
+                    user_id=cu.id,
+                    conversation_id=conversation_id,
+                    db_id=body.db_id,
+                    question=body.message,
+                    final_sql=final_sql_seen,
+                    agent_mode=body.agent_mode,
+                    tokens_in=None,
+                    tokens_out=None,
+                    duration_ms=latency_ms,
+                )
+            except Exception:  # noqa: BLE001
+                pass
 
 
 async def _collect_chunks(
@@ -388,6 +507,7 @@ async def _collect_chunks_orchestrator(
 @router.post("/chat/poll", response_model=ChatPollResponse)
 async def chat_poll(
     body: ChatRequest,
+    background_tasks: BackgroundTasks,
     cu: CurrentUser = Depends(get_current_user),
     settings: Settings = Depends(get_settings),
     convo_store: ConversationStore = Depends(get_conversation_store),
@@ -410,6 +530,13 @@ async def chat_poll(
             emitter=emitter, conversation_id=convo.conversation_id,
         )
         chunks = await _collect_chunks(pipeline, ctx, convo_store, model=settings.gemini_chat_model)
+    _schedule_record_turn(
+        background_tasks,
+        cu=cu,
+        conversation_id=convo.conversation_id,
+        body=body,
+        chunks=chunks,
+    )
     return ChatPollResponse(
         conversation_id=convo.conversation_id,
         chunks=[c.model_dump(mode="json") for c in chunks],
@@ -419,6 +546,7 @@ async def chat_poll(
 @router.post("/chat/answer", response_model=ChatAnswerResponse)
 async def chat_answer(
     body: ChatRequest,
+    background_tasks: BackgroundTasks,
     cu: CurrentUser = Depends(get_current_user),
     settings: Settings = Depends(get_settings),
     convo_store: ConversationStore = Depends(get_conversation_store),
@@ -461,6 +589,13 @@ async def chat_answer(
             error_detail = str(data.get("detail") or data.get("code") or "pipeline_error")
     if error_detail is not None:
         raise HTTPException(status_code=500, detail=error_detail)
+    _schedule_record_turn(
+        background_tasks,
+        cu=cu,
+        conversation_id=convo.conversation_id,
+        body=body,
+        chunks=chunks,
+    )
     return ChatAnswerResponse(
         conversation_id=convo.conversation_id,
         answer=answer,
