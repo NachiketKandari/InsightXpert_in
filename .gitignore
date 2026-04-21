@@ -50,3 +50,6 @@ apps/api/Databases/*.sqlite
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+
+# Worktrees
+.worktrees/
