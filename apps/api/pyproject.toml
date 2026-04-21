@@ -56,3 +56,6 @@ exclude = ["src/insightxpert_api/vendored/"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+  "slow: requires a real Gemini API key; opt in via GEMINI_API_KEY_REAL",
+]
