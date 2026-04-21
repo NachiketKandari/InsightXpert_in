@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     bootstrap_admin_email: str | None = None
     bootstrap_admin_password: str | None = None
 
+    # Bootstrap regular user for local testing (optional; same idempotence as admin)
+    bootstrap_user_email: str | None = None
+    bootstrap_user_password: str | None = None
+
     # --- llm ---------------------------------------------------------------
     gemini_api_key: str
     gemini_chat_model: str = "gemini-2.5-flash"
