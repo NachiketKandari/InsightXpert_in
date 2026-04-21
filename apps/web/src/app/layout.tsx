@@ -3,6 +3,7 @@ import { Inter, JetBrains_Mono } from "next/font/google";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
 import { HealthCheckGate } from "@/components/health/health-check-gate";
+import { QueryProvider } from "@/components/providers/query-provider";
 import "./globals.css";
 
 const inter = Inter({
@@ -48,10 +49,12 @@ export default function RootLayout({
       <body
         className={`${inter.variable} ${jetbrainsMono.variable} font-sans antialiased`}
       >
-        <TooltipProvider delayDuration={300}>
-          <HealthCheckGate>{children}</HealthCheckGate>
-          <Toaster />
-        </TooltipProvider>
+        <QueryProvider>
+          <TooltipProvider delayDuration={300}>
+            <HealthCheckGate>{children}</HealthCheckGate>
+            <Toaster />
+          </TooltipProvider>
+        </QueryProvider>
       </body>
     </html>
   );

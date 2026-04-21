@@ -1,10 +1,29 @@
 "use client";
 
+// Admin shell: auth/admin gate + sticky header + horizontal tab bar.
+// All 8 admin pages render as children beneath this layout.
+
 import { useEffect } from "react";
-import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
+import { ArrowLeft } from "lucide-react";
+
+import { AuthGuard } from "@/components/auth/auth-guard";
+import { Button } from "@/components/ui/button";
 import { useClientConfig } from "@/hooks/use-client-config";
 import { useCurrentUser } from "@/hooks/use-current-user";
-import { AuthGuard } from "@/components/auth/auth-guard";
+import { cn } from "@/lib/utils";
+
+const TABS: { href: string; label: string }[] = [
+  { href: "/admin/overview", label: "Overview" },
+  { href: "/admin/users", label: "Users" },
+  { href: "/admin/metrics", label: "Query Metrics" },
+  { href: "/admin/audit", label: "Audit Log" },
+  { href: "/admin/databases", label: "Databases" },
+  { href: "/admin/conversations", label: "Conversations" },
+  { href: "/admin/prompts", label: "Prompts" },
+  { href: "/admin/rag", label: "RAG" },
+];
 
 function AdminGuard({ children }: { children: React.ReactNode }) {
   const { isLoading: isConfigLoading, fetchConfig } = useClientConfig();
@@ -31,18 +50,61 @@ function AdminGuard({ children }: { children: React.ReactNode }) {
   }
 
   if (!isAdmin) return null;
-
   return <>{children}</>;
 }
 
-export default function AdminLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+function AdminTabs() {
+  const pathname = usePathname() ?? "";
+  return (
+    <nav className="overflow-x-auto border-b border-border">
+      <ul className="mx-auto flex max-w-7xl min-w-max items-center gap-1 px-4 sm:px-6">
+        {TABS.map((t) => {
+          const active = pathname.startsWith(t.href);
+          return (
+            <li key={t.href}>
+              <Link
+                href={t.href}
+                className={cn(
+                  "inline-block whitespace-nowrap px-3 py-3 text-sm font-medium transition-colors",
+                  "border-b-2 -mb-px",
+                  active
+                    ? "border-primary text-foreground"
+                    : "border-transparent text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {t.label}
+              </Link>
+            </li>
+          );
+        })}
+      </ul>
+    </nav>
+  );
+}
+
+export default function AdminLayout({ children }: { children: React.ReactNode }) {
   return (
     <AuthGuard>
-      <AdminGuard>{children}</AdminGuard>
+      <AdminGuard>
+        <div className="min-h-screen bg-background">
+          <header className="sticky top-0 z-20 glass border-b border-border">
+            <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 sm:px-6">
+              <div className="flex items-center gap-3">
+                <Link href="/">
+                  <Button variant="ghost" size="icon" className="size-9">
+                    <ArrowLeft className="size-4" />
+                  </Button>
+                </Link>
+                <h1 className="text-lg font-semibold">Admin</h1>
+              </div>
+            </div>
+            <AdminTabs />
+          </header>
+          <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
+            {children}
+          </main>
+        </div>
+      </AdminGuard>
     </AuthGuard>
   );
 }
