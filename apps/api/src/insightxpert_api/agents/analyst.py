@@ -231,7 +231,16 @@ async def analyst_loop(
     final_sql: str = ""
     final_columns: list[str] = []
     final_rows_positional: list[list[object]] = []
-    synthetic_pair_emitted = False
+    # Emit the synthetic sql/tool_call pair once per execution attempt; refiner
+    # recovery reopens the gate so the refined SQL is what downstream
+    # AnalystCollector captures (not the stale first-attempt SQL).
+    needs_synthetic_pair = True
+    # Invariant: an error from sql_executor is PROVISIONAL — if the refiner
+    # subsequently emits rows_returned, recovery happened and we must NOT
+    # propagate the error (otherwise AnalystCollector latches had_error=True
+    # and orchestrator Phase-2 enrichment is silently skipped). Buffer error
+    # chunks locally and only flush them if no rows_returned ever arrives.
+    buffered_errors: list[ChatChunk] = []
     had_error = False
 
     try:
@@ -245,11 +254,9 @@ async def analyst_loop(
                 final_sql = _sql_text(event) or final_sql
 
             # Executor emits SQL_EXECUTING immediately before running the query.
-            # That's our cue to inject the synthetic tier-2 pair (once; refiner
-            # re-executes on failure, so only the FIRST execution boundary gets
-            # the synthetic "sql"/"tool_call" pair — downstream re-execution is
-            # a retry, not a new tool call).
-            if event.type == ChunkType.sql_executing and not synthetic_pair_emitted:
+            # Emit the synthetic tier-2 pair at every execution boundary after
+            # recovery so the downstream collector sees the refined SQL.
+            if event.type == ChunkType.sql_executing and needs_synthetic_pair:
                 sql = _sql_text(event) or final_sql
                 if sql:
                     final_sql = sql
@@ -278,15 +285,26 @@ async def analyst_loop(
                         conversation_id=cid,
                         timestamp=time.time(),
                     )
-                    synthetic_pair_emitted = True
+                    needs_synthetic_pair = False
 
-            # Re-emit the Tier-3 chunk in vendored shape.
-            yield _to_vendored(event)
+            if event.type == ChunkType.error:
+                # Buffer — do NOT re-emit yet. If a rows_returned arrives
+                # later, the refiner recovered and this error is discarded.
+                buffered_errors.append(_to_vendored(event))
+                had_error = True
+            else:
+                # Re-emit the Tier-3 chunk in vendored shape.
+                yield _to_vendored(event)
 
             if event.type == ChunkType.rows_returned:
                 cols, rows, _ = _rows_payload(event)
                 final_columns = cols
                 final_rows_positional = rows
+                # Recovery: discard buffered executor errors and clear the
+                # provisional error flag. Re-open the synthetic-pair gate so a
+                # FURTHER retry (iter N+1) would also get a fresh sql/tool_call.
+                buffered_errors.clear()
+                had_error = False
                 # Emit synthetic tool_result AFTER the real rows_returned, using
                 # the JSON-string shape AnalystCollector expects.
                 result_json = json.dumps(
@@ -308,10 +326,19 @@ async def analyst_loop(
                     timestamp=time.time(),
                 )
 
-            if event.type == ChunkType.error:
-                had_error = True
+            # If the refiner produces a new sql_generated AFTER an error (i.e.
+            # we're still had_error=True because no rows_returned yet), reopen
+            # the synthetic-pair gate so the next sql_executing re-emits.
+            if event.type == ChunkType.sql_generated and had_error:
+                needs_synthetic_pair = True
 
         await pipeline_task
+        # Flush any unresolved (unrecovered) error chunks so downstream sees
+        # the terminal failure. If the refiner recovered, buffered_errors was
+        # cleared above and this is a no-op.
+        for err_chunk in buffered_errors:
+            yield err_chunk
+        buffered_errors.clear()
     except Exception as exc:  # noqa: BLE001 — surface as error chunk
         logger.exception("analyst_loop failed: %s", exc)
         had_error = True

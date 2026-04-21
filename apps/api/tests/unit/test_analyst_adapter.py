@@ -22,6 +22,7 @@ import pytest
 from insightxpert_api.agents import analyst as analyst_module
 from insightxpert_api.sse.chunks import (
     ChunkType,
+    ErrorPayload,
     LinkedSchemaFinalPayload,
     ProfileLoadedPayload,
     RowsReturnedPayload,
@@ -255,6 +256,79 @@ async def test_analyst_error_in_pipeline_propagates(monkeypatch, tmp_path):
         collector.process_chunk(chunk)
 
     assert collector.had_error is True
+
+
+class _RefinerRecoveryPipeline:
+    """Simulates executor error followed by successful refiner recovery.
+
+    Chunk sequence mirrors what happens in production when the first executed
+    SQL fails and ``sql_refiner`` successfully produces a new SQL that returns
+    rows: ``SQL_GENERATED`` (iter 0) -> ``SQL_EXECUTING`` -> ``ERROR`` ->
+    ``SQL_GENERATED`` (iter 1) -> ``SQL_EXECUTING`` -> ``ROWS_RETURNED``.
+    """
+
+    async def run_scalar(self, ctx, _seed) -> None:
+        em = ctx.emitter
+        bad_sql = "SELECT * FROM nonexistent"
+        good_sql = "SELECT n FROM t"
+        good_rows = [[42]]
+        await em.emit(ChunkType.SQL_GENERATED, SQLGeneratedPayload(sql=bad_sql, iteration=0))
+        await em.emit(ChunkType.SQL_EXECUTING, SQLExecutingPayload(sql=bad_sql))
+        await em.emit(
+            ChunkType.ERROR,
+            ErrorPayload(code="sql_execution_failed", detail="no such table: nonexistent"),
+        )
+        # Refiner recovers.
+        await em.emit(ChunkType.SQL_GENERATED, SQLGeneratedPayload(sql=good_sql, iteration=1))
+        await em.emit(ChunkType.SQL_EXECUTING, SQLExecutingPayload(sql=good_sql))
+        await em.emit(
+            ChunkType.ROWS_RETURNED,
+            RowsReturnedPayload(
+                columns=["n"], row_count=1, rows=good_rows, execution_time_ms=2
+            ),
+        )
+        ctx.state["rows"] = {"columns": ["n"], "rows": good_rows, "execution_time_ms": 2}
+        ctx.state["answer"] = "refined ok."
+
+
+@pytest.mark.asyncio
+async def test_analyst_recovers_from_executor_error_via_refiner(monkeypatch, tmp_path):
+    """Regression: a transient executor error followed by a refiner success must
+    NOT leave had_error=True, must emit answer_generated, and must populate the
+    tool_result with the refined rows. This gates orchestrator Phase-2 enrichment.
+    """
+    monkeypatch.setattr(
+        analyst_module, "default_pipeline", lambda *a, **k: _RefinerRecoveryPipeline()
+    )
+    config = _FakeConfig(local_storage_root=str(tmp_path))
+    collector = AnalystCollector()
+
+    chunks: list[VendoredChatChunk] = []
+    async for chunk in analyst_module.analyst_loop(
+        question="Q", llm=None, db=None, rag=None, config=config,
+        conversation_id="c1", db_id="toy", session_id="s1",
+        db_svc=_FAKE_DB_SVC, prof_svc=_FAKE_PROF_SVC,
+    ):
+        chunks.append(chunk)
+        collector.process_chunk(chunk)
+
+    types = [c.type for c in chunks]
+    # Phase-2 gate: answer_generated AND answer must both be emitted despite
+    # the intermediate error.
+    assert "answer_generated" in types, f"missing answer_generated; got {types}"
+    assert "answer" in types, f"missing answer; got {types}"
+
+    # tool_result must carry the refined rows, not be empty.
+    tool_results = [c for c in chunks if c.type == "tool_result"]
+    assert len(tool_results) == 1
+    parsed = json.loads(tool_results[0].data["result"])
+    assert parsed["rows"] == [{"n": 42}]
+
+    # AnalystCollector state must reflect recovery.
+    assert collector.had_error is False
+    assert collector.sql == "SELECT n FROM t"
+    assert collector.rows == [{"n": 42}]
+    assert collector.answer == "refined ok."
 
 
 @pytest.mark.asyncio
