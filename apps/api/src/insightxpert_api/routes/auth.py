@@ -87,7 +87,8 @@ class MeResponse(BaseModel):
 @router.get("/me", response_model=MeResponse)
 async def me(cu: CurrentUser = Depends(get_current_user)) -> MeResponse:
     full = service.get_public(cu.id)
-    assert full is not None  # current_user just resolved it
+    if full is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="unauthorized")
     return MeResponse(
         id=full.id,
         email=full.email,

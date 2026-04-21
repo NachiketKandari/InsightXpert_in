@@ -19,7 +19,6 @@ from insightxpert_api.sse.chunks import ChunkType, SQLGeneratedPayload, StatusPa
 @pytest.fixture(autouse=True)
 def _env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Populate required env for every test."""
-    monkeypatch.setenv("GATE_PASSWORD", "test-pw")
     monkeypatch.setenv("SESSION_SECRET", "s" * 32)
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
     monkeypatch.setenv("APP_ENV", "local")
