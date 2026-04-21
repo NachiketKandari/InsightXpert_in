@@ -8,7 +8,6 @@ import {
   TerminalSquare,
   Sparkles,
   Zap,
-  Brain,
   Check,
   ChevronDown,
   ArrowUp,
@@ -125,6 +124,7 @@ export function InputToolbar({
   const showPhase = isStreaming && !!currentAgentPhase;
   const activeKey = showPhase ? currentAgentPhase! : agentMode;
 
+  // Two-state toggle per spec F1. `deep_think` mode deferred.
   const modeConfig = {
     basic: {
       label: "Basic",
@@ -139,20 +139,6 @@ export function InputToolbar({
       color: "text-emerald-500",
       bg: "bg-emerald-500/10",
       border: "border-emerald-500/30",
-    },
-    deep: {
-      label: "Deep Think",
-      icon: Brain,
-      color: "text-violet-500",
-      bg: "bg-violet-500/10",
-      border: "border-violet-500/30",
-    },
-    deep_think: {
-      label: "Deep Thinking",
-      icon: Brain,
-      color: "text-violet-500",
-      bg: "bg-violet-500/10",
-      border: "border-violet-500/30",
     },
     analyst: {
       label: "Analyzing",
@@ -223,18 +209,13 @@ export function InputToolbar({
             </DropdownMenuLabel>
             <DropdownMenuItem onSelect={() => setAgentMode("basic")}>
               <Sparkles className="size-4" />
-              Basic
+              Basic (fast)
               {agentMode === "basic" && <Check className="size-3.5 ml-auto text-emerald-500" />}
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => setAgentMode("agentic")}>
               <Zap className="size-4" />
-              Agentic
+              Agentic (recommended)
               {agentMode === "agentic" && <Check className="size-3.5 ml-auto text-emerald-500" />}
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => setAgentMode("deep")}>
-              <Brain className="size-4" />
-              Deep Think
-              {agentMode === "deep" && <Check className="size-3.5 ml-auto text-emerald-500" />}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -267,18 +248,13 @@ export function InputToolbar({
               <DropdownMenuSeparator />
               <DropdownMenuItem onSelect={() => setAgentMode("basic")}>
                 <Sparkles className="size-4 text-amber-500" />
-                Basic
+                Basic (fast)
                 {agentMode === "basic" && <Check className="size-3.5 ml-auto text-emerald-500" />}
               </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => setAgentMode("agentic")}>
                 <Zap className="size-4 text-emerald-500" />
-                Agentic
+                Agentic (recommended)
                 {agentMode === "agentic" && <Check className="size-3.5 ml-auto text-emerald-500" />}
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => setAgentMode("deep")}>
-                <Brain className="size-4 text-violet-500" />
-                Deep Think
-                {agentMode === "deep" && <Check className="size-3.5 ml-auto text-emerald-500" />}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
