@@ -25,7 +25,6 @@ from .common import agent_tool_loop, summarize_results
 from .stat_tools import (
     ComputeCorrelationTool,
     ComputeDescriptiveStatsTool,
-    RunPythonTool,
     TestHypothesisTool,
 )
 from .tool_base import ToolContext, ToolRegistry
@@ -34,14 +33,13 @@ from .tools import RunSqlTool
 logger = logging.getLogger("insightxpert.quant_analyst")
 
 
-def _quant_registry(python_exec_timeout: int = 10) -> ToolRegistry:
-    """Create a focused ToolRegistry with 7 essential tools.
+def _quant_registry() -> ToolRegistry:
+    """Create a focused ToolRegistry with 6 essential tools.
 
     Keeps only what the quant analyst actually needs on pre-aggregated data.
     """
     registry = ToolRegistry()
     registry.register(RunSqlTool())
-    registry.register(RunPythonTool(timeout=python_exec_timeout))
     registry.register(TestHypothesisTool())
     registry.register(ComputeCorrelationTool())
     registry.register(ComputeDescriptiveStatsTool())
@@ -68,7 +66,7 @@ async def quant_analyst_loop(
     cid = conversation_id
     loop_start = time.time()
 
-    tool_registry = _quant_registry(python_exec_timeout=config.python_exec_timeout_seconds)
+    tool_registry = _quant_registry()
 
     # Merge upstream analyst results into a single dataset for the tool context
     merged_results: list[dict] = []

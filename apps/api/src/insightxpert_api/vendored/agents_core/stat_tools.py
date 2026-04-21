@@ -2,48 +2,14 @@
 
 from __future__ import annotations
 
-import collections
-import datetime
-import functools
-import itertools
 import json
 import logging
-import math
-import re as _re
-import signal
-import traceback
-from contextlib import contextmanager
-from typing import Any
 
 import numpy as np
 import pandas as pd
 from scipy import stats
 
 from insightxpert_api.vendored.agents_core.tool_base import Tool, ToolContext
-
-# Whitelist of module roots that run_python code is allowed to import.
-_ALLOWED_IMPORT_ROOTS = frozenset({
-    "numpy", "pandas", "scipy", "math", "json", "itertools",
-    "collections", "functools", "datetime", "re", "statistics",
-    "warnings", "operator", "string", "textwrap", "decimal",
-    "fractions", "numbers", "copy", "enum", "typing", "io", "csv",
-    "dataclasses", "abc",
-})
-
-_real_import = __import__
-
-
-def _safe_import(name, globals=None, locals=None, fromlist=(), level=0):  # noqa: A002
-    """Restricted __import__ that only allows safe, pre-approved modules."""
-    root = name.split(".")[0]
-    if root not in _ALLOWED_IMPORT_ROOTS:
-        raise ImportError(
-            f"Module '{name}' is not available in the sandbox. "
-            f"Available: numpy/np, pandas/pd, scipy/stats, math, json, "
-            f"itertools, collections, functools, datetime, re, statistics, "
-            f"warnings, operator, copy, csv, io."
-        )
-    return _real_import(name, globals, locals, fromlist, level)
 
 logger = logging.getLogger("insightxpert.stat_tools")
 
@@ -53,138 +19,6 @@ def _get_analyst_df(context: ToolContext) -> pd.DataFrame:
     if not context.analyst_results:
         return pd.DataFrame()
     return pd.DataFrame(context.analyst_results)
-
-
-@contextmanager
-def _timeout(seconds: int):
-    """Context manager that raises TimeoutError after *seconds* on Unix."""
-    def _handler(signum, frame):
-        raise TimeoutError(f"Execution timed out after {seconds}s")
-
-    try:
-        old = signal.signal(signal.SIGALRM, _handler)
-        signal.alarm(seconds)
-    except (AttributeError, ValueError):
-        # AttributeError: Windows (no SIGALRM)
-        # ValueError: non-main thread (Cloud Run / gunicorn workers)
-        yield
-        return
-
-    try:
-        yield
-    finally:
-        signal.alarm(0)
-        signal.signal(signal.SIGALRM, old)
-
-
-# ---------------------------------------------------------------------------
-# 1. RunPythonTool
-# ---------------------------------------------------------------------------
-
-_SAFE_BUILTINS = {
-    "__import__": _safe_import,
-    "abs": abs, "all": all, "any": any, "bool": bool,
-    "dict": dict, "enumerate": enumerate, "filter": filter,
-    "float": float, "frozenset": frozenset, "int": int,
-    "isinstance": isinstance, "len": len, "list": list,
-    "map": map, "max": max, "min": min, "print": print,
-    "range": range, "reversed": reversed, "round": round,
-    "set": set, "sorted": sorted, "str": str, "sum": sum,
-    "tuple": tuple, "type": type, "zip": zip,
-    "True": True, "False": False, "None": None,
-    # Common exceptions
-    "Exception": Exception, "ValueError": ValueError,
-    "TypeError": TypeError, "KeyError": KeyError,
-    "IndexError": IndexError, "ZeroDivisionError": ZeroDivisionError,
-    "RuntimeError": RuntimeError, "StopIteration": StopIteration,
-    "ImportError": ImportError,
-}
-
-
-class RunPythonTool(Tool):
-    """Execute Python code with numpy, pandas, scipy.stats pre-loaded."""
-
-    def __init__(self, timeout: int = 10) -> None:
-        self._timeout = timeout
-
-    @property
-    def name(self) -> str:
-        return "run_python"
-
-    @property
-    def description(self) -> str:
-        return (
-            "Execute a Python code snippet for statistical analysis. "
-            "Pre-loaded: np (numpy), pd (pandas), stats (scipy.stats), math, "
-            "json, itertools, collections, functools, datetime, re, "
-            "and df (analyst query results as a DataFrame). "
-            "You may import standard library modules (e.g. warnings, statistics, "
-            "copy, csv, operator) but NOT os, subprocess, sys, or similar. "
-            "Use df.to_string() instead of df.to_markdown(). "
-            "Print your results — the captured stdout is returned."
-        )
-
-    def get_args_schema(self) -> dict:
-        return {
-            "type": "object",
-            "properties": {
-                "code": {
-                    "type": "string",
-                    "description": "Python code to execute",
-                }
-            },
-            "required": ["code"],
-        }
-
-    async def execute(self, context: ToolContext, args: dict) -> str:
-        code = args["code"]
-        df = _get_analyst_df(context)
-
-        namespace: dict[str, Any] = {
-            "__builtins__": _SAFE_BUILTINS,
-            "np": np,
-            "pd": pd,
-            "stats": stats,
-            "math": math,
-            "json": json,
-            "itertools": itertools,
-            "collections": collections,
-            "functools": functools,
-            "datetime": datetime,
-            "re": _re,
-            "df": df,
-        }
-
-        captured: list[str] = []
-
-        def _print(*a, **kw):
-            import io
-            buf = io.StringIO()
-            print(*a, file=buf, **kw)
-            captured.append(buf.getvalue())
-
-        namespace["print"] = _print
-
-        try:
-            with _timeout(self._timeout):
-                exec(compile(code, "<statistician>", "exec"), namespace)  # noqa: S102
-        except TimeoutError:
-            return json.dumps({"error": f"Code execution timed out after {self._timeout}s"})
-        except ImportError as e:
-            # _safe_import blocked a disallowed module
-            return json.dumps({"error": str(e)})
-        except Exception as e:
-            logger.warning("RunPython execution failed: %s", e, exc_info=True)
-            return json.dumps({"error": traceback.format_exc()[-1500:]})
-
-        # Sync modified DataFrame back to context so subsequent tools
-        # can see derived columns created by this code.
-        post_df = namespace.get("df")
-        if post_df is not None and isinstance(post_df, pd.DataFrame) and not post_df.empty:
-            context.analyst_results = post_df.to_dict(orient="records")
-
-        output = "".join(captured).strip()
-        return json.dumps({"output": output or "(no output)"})
 
 
 # ---------------------------------------------------------------------------
