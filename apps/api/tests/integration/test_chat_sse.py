@@ -35,6 +35,24 @@ def test_chat_requires_session(client: TestClient, patched_pipeline):
     assert r.status_code == 401
 
 
+def test_chat_sse_no_double_prefix(authed_client: TestClient, patched_pipeline):
+    """Regression test for QA FLAG 2: EventEmitter yielded already-framed strings,
+    EventSourceResponse re-wrapped them → `data: data: {...}`. Raw body must never
+    contain a double-`data:` prefix.
+    """
+    with authed_client.stream(
+        "POST",
+        "/api/v1/chat",
+        json={"message": "count rows", "db_id": "california_schools"},
+    ) as response:
+        assert response.status_code == 200
+        body = b"".join(response.iter_bytes()).decode()
+    assert "data: data:" not in body
+    assert "data: [DONE]" in body
+    # Events should frame as `data: {json}` — confirm at least one JSON line.
+    assert "data: {" in body
+
+
 def test_chat_rejects_empty_message(authed_client: TestClient, patched_pipeline):
     r = authed_client.post(
         "/api/v1/chat",

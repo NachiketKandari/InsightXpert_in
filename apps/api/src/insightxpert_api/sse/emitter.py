@@ -34,10 +34,13 @@ class EventEmitter:
         await self._queue.put(self._SENTINEL)
 
     async def stream(self) -> AsyncIterator[str]:
-        """Yield SSE frames. Terminates with ``data: [DONE]`` after ``close()``."""
+        """Yield raw JSON payload strings. ``EventSourceResponse`` frames each as
+        ``data: <payload>\\n\\n``. Terminates with the literal ``[DONE]`` sentinel
+        (which the response wrapper will send as ``data: [DONE]\\n\\n``).
+        """
         while True:
             event = await self._queue.get()
             if event is None:
-                yield "data: [DONE]\n\n"
+                yield "[DONE]"
                 return
-            yield event.to_sse()
+            yield event.to_json()

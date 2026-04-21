@@ -195,7 +195,12 @@ class ChatChunk(BaseModel):
     conversation_id: str | None = None
     timestamp: float = Field(default_factory=time)
 
-    def to_sse(self) -> str:
-        """Serialize to the ``data: <json>\\n\\n`` SSE frame."""
+    def to_json(self) -> str:
+        """Serialize the chunk to a JSON string (no SSE framing).
+
+        ``sse_starlette.EventSourceResponse`` handles the ``data:`` prefix and
+        trailing double newline itself — yielding already-framed strings from
+        ``EventEmitter.stream()`` caused a double-prefix bug (see QA FLAG 2).
+        """
         payload = self.model_dump(mode="json", by_alias=True)
-        return f"data: {json.dumps(payload)}\n\n"
+        return json.dumps(payload)

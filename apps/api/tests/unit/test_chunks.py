@@ -22,13 +22,15 @@ def test_status_chunk_serializes_with_type_and_data():
     assert isinstance(d["timestamp"], float)
 
 
-def test_to_sse_produces_data_line_and_double_newline():
+def test_to_json_returns_raw_payload():
     c = ChatChunk(type=ChunkType.ANSWER_GENERATED, data=AnswerGeneratedPayload(text="ok"))
-    frame = c.to_sse()
-    assert frame.startswith("data: ")
-    assert frame.endswith("\n\n")
-    payload = json.loads(frame[len("data: ") : -len("\n\n")])
+    raw = c.to_json()
+    # No SSE framing — EventSourceResponse adds `data:` and `\n\n`.
+    assert not raw.startswith("data:")
+    assert "\n" not in raw
+    payload = json.loads(raw)
     assert payload["type"] == "answer_generated"
+    assert payload["data"]["text"] == "ok"
 
 
 def test_linked_schema_final_roundtrip_with_column_sources():
@@ -67,9 +69,14 @@ async def test_emitter_streams_chunks_then_done():
     await produce_task
 
     assert len(collected) == 3
+    # First two should be raw JSON payloads (no `data:` prefix).
+    for frame in collected[:2]:
+        assert not frame.startswith("data:")
+        parsed = json.loads(frame)
+        assert parsed["type"] == "status"
     assert "one" in collected[0]
     assert "two" in collected[1]
-    assert collected[2] == "data: [DONE]\n\n"
+    assert collected[2] == "[DONE]"
 
 
 @pytest.mark.asyncio
@@ -77,6 +84,6 @@ async def test_emitter_ignores_emit_after_close():
     em = EventEmitter(conversation_id="c1")
     await em.close()
     await em.emit(ChunkType.STATUS, StatusPayload(message="late"))  # should no-op
-    # stream should yield only DONE
+    # stream should yield only the DONE sentinel
     frames = [f async for f in em.stream()]
-    assert frames == ["data: [DONE]\n\n"]
+    assert frames == ["[DONE]"]
