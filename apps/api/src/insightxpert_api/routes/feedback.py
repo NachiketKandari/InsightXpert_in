@@ -9,8 +9,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from ..auth.dependencies import require_session
-from ..auth.session import SessionClaims
+from ..auth.current_user import CurrentUser, get_current_user
 from ..logging import get_logger
 
 router = APIRouter(prefix="/api/v1/feedback", tags=["feedback"])
@@ -27,11 +26,11 @@ class FeedbackRequest(BaseModel):
 @router.post("")
 async def post_feedback(
     body: FeedbackRequest,
-    claims: SessionClaims = Depends(require_session),
+    cu: CurrentUser = Depends(get_current_user),
 ) -> dict[str, str]:
     log.info(
         "feedback.received",
-        session_id=claims.session_id,
+        user_id=cu.id,
         conversation_id=body.conversation_id,
         message_id=body.message_id,
         feedback=body.feedback,
