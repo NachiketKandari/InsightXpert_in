@@ -191,10 +191,13 @@ export function InputToolbar({
               <Upload className="size-4" />
               Upload CSV
             </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => setPdfUploadOpen(true)}>
-              <FileText className="size-4" />
-              Upload Document
-            </DropdownMenuItem>
+            {/* TODO(deferred-features): PDF upload hidden until backend lands — see docs/deferred-features.md */}
+            {false && (
+              <DropdownMenuItem onSelect={() => setPdfUploadOpen(true)}>
+                <FileText className="size-4" />
+                Upload Document
+              </DropdownMenuItem>
+            )}
 
             {showSqlExecutor && (
               <DropdownMenuItem onSelect={() => setSqlExecutorOpen(true)}>

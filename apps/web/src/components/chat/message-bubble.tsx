@@ -227,7 +227,8 @@ function MessageBubbleInner({
         />
       )}
 
-      {showAutomationBtn && (
+      {/* TODO(deferred-features): Automations hidden until backend lands — see docs/deferred-features.md#automations */}
+      {false && showAutomationBtn && (
         <button
           onClick={handleCreateAutomation}
           className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary transition-colors mt-1"
