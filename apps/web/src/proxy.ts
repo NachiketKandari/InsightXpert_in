@@ -1,4 +1,8 @@
-// apps/web/src/middleware.ts
+// apps/web/src/proxy.ts
+// Renamed from middleware.ts per Next 16 deprecation
+// (https://nextjs.org/docs/messages/middleware-to-proxy). Exported function
+// name stays `middleware` — only the file moved.
+//
 // Redirects unauth requests to /login?next=...; skips static files, the auth
 // pages themselves, and API routes. Identity check is "is the session cookie
 // present" — we don't re-verify the signature here (let the API do that).
