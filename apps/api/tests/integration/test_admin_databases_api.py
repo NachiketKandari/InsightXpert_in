@@ -22,10 +22,11 @@ def test_admin_list_shows_bundled_as_public(admin_client):
     r = client.get("/api/v1/admin/databases/")
     assert r.status_code == 200
     rows = r.json()
-    assert len(rows) == 6
+    assert len(rows) == 7
     by_id = {row["db_id"] for row in rows}
     assert "california_schools" in by_id
     assert "formula_1" in by_id
+    assert "transactions" in by_id
     for row in rows:
         assert row["visibility"] == "public"
         assert row["owner_user_id"] is None
