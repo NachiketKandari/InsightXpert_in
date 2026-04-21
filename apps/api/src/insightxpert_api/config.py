@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     app_env: str = "local"  # local | staging | prod
     port: int = 8080
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000"])
+    database_url: str = "sqlite:///./app.db"
 
     # --- auth --------------------------------------------------------------
     gate_password: str
