@@ -85,10 +85,12 @@ def change_password(user_id: str, current: str, new: str) -> None:
     if not verify_password(current, row.password_hash):
         raise InvalidCredentialsError()
     now = _now()
+    # sessions_valid_after = now + 1 ensures any token issued at `now`
+    # (iat == now) satisfies iat < sessions_valid_after and is rejected.
     repository.update_user(user_id, {
         "password_hash": hash_password(new),
         "must_change_password": 0,
-        "sessions_valid_after": now,
+        "sessions_valid_after": now + 1,
         "updated_at": now,
     })
     bump_session_cache(user_id)
@@ -99,10 +101,12 @@ def reset_password(user_id: str) -> str:
         raise UserNotFoundError(user_id)
     temp = _gen_temp_password()
     now = _now()
+    # sessions_valid_after = now + 1 ensures any token issued at `now`
+    # (iat == now) satisfies iat < sessions_valid_after and is rejected.
     repository.update_user(user_id, {
         "password_hash": hash_password(temp),
         "must_change_password": 1,
-        "sessions_valid_after": now,
+        "sessions_valid_after": now + 1,
         "updated_at": now,
     })
     bump_session_cache(user_id)

@@ -37,11 +37,11 @@ class SessionSigner:
         self._serializer = URLSafeTimedSerializer(settings.session_secret, salt=self._SALT)
         self._ttl = settings.session_ttl_seconds
 
-    def issue(self, *, user_id: str, role: Role, sid: str | None = None) -> str:
+    def issue(self, *, user_id: str, role: Role, sid: str | None = None, iat: int | None = None) -> str:
         payload = {
             "user_id": user_id,
             "role": role,
-            "iat": int(time.time()),
+            "iat": iat if iat is not None else int(time.time()),
             "sid": sid or secrets.token_urlsafe(8),
         }
         return self._serializer.dumps(payload)

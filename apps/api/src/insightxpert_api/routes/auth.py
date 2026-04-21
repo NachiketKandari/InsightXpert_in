@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, EmailStr, Field
 
@@ -49,7 +51,9 @@ async def login(
     user = service.authenticate(body.email, body.password)
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="unauthorized")
-    token = SessionSigner(settings).issue(user_id=user.id, role=user.role)
+    # Ensure iat >= sessions_valid_after so the freshly-issued token is always valid.
+    iat = max(int(time.time()), user.sessions_valid_after)
+    token = SessionSigner(settings).issue(user_id=user.id, role=user.role, iat=iat)
     _set_session_cookie(response, settings, token)
     service.touch_last_seen(user.id)
     return LoginResponse(
