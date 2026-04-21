@@ -43,9 +43,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await asyncio.to_thread(command.upgrade, cfg, "head")
     await asyncio.to_thread(users_bootstrap.run)
 
+    from .audit.queue import get_queue as _get_audit_queue
+    await _get_audit_queue().start()
+
     try:
         yield
     finally:
+        try:
+            await _get_audit_queue().stop()
+        except Exception:  # noqa: BLE001
+            pass
         log.info("api.stopping")
 
 
@@ -65,6 +72,8 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     app.add_middleware(GZipMiddleware, minimum_size=1024)
+    from .audit.middleware import register as _register_audit
+    _register_audit(app)
     app.include_router(health.router)
     app.include_router(auth.router)
     app.include_router(chat.router)
