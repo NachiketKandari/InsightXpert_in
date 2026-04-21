@@ -45,9 +45,9 @@ def test_bootstrap_creates_admin_and_user_when_both_env_set(fresh_db, monkeypatc
 def test_bootstrap_admin_only_when_user_env_missing(fresh_db, monkeypatch):
     monkeypatch.setenv("BOOTSTRAP_ADMIN_EMAIL", "admin@insightxpert.ai")
     monkeypatch.setenv("BOOTSTRAP_ADMIN_PASSWORD", "admin123")
-    # Explicitly unset user env vars (shadow any .env.local values via empty string
-    # is not reliable; instead override pydantic to read only env, not the file).
-    # We shadow them with empty strings so pydantic_settings treats them as unset.
+    # monkeypatch the env vars directly rather than editing .env.local —
+    # Pydantic Settings reads both, with env winning, so explicit empty strings
+    # shadow any values the developer has in their local .env.local.
     monkeypatch.setenv("BOOTSTRAP_USER_EMAIL", "")
     monkeypatch.setenv("BOOTSTRAP_USER_PASSWORD", "")
     from insightxpert_api.config import get_settings
