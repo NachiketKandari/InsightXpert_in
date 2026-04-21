@@ -15,7 +15,8 @@ import { Button } from "@/components/ui/button";
 import { ListLoading, ListEmptyState } from "@/components/ui/list-states";
 import { useInsightStore } from "@/stores/insight-store";
 import { useChatStore } from "@/stores/chat-store";
-import { useClientConfig } from "@/hooks/use-client-config";
+import { useCurrentUser } from "@/hooks/use-current-user";
+import { useClientConfigStore } from "@/stores/client-config-store";
 import { InsightCard } from "./insight-card";
 import { CATEGORY_COLOR, DEFAULT_CATEGORY_COLOR } from "./constants";
 import type { Insight } from "@/types/insight";
@@ -29,7 +30,8 @@ interface InsightAllModalProps {
 }
 
 export function InsightAllModal({ open, onOpenChange, initialInsight }: InsightAllModalProps) {
-  const { isAdmin, orgId } = useClientConfig();
+  const { isAdmin } = useCurrentUser();
+  const orgId = useClientConfigStore((s) => s.orgId);
   // Admins use the /all endpoint; regular users use the standard endpoint
   const adminInsights = useInsightStore((s) => s.allInsights);
   const userInsights = useInsightStore((s) => s.insights);

@@ -9,7 +9,6 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from insightxpert_api.auth.session import SessionSigner
 from insightxpert_api.config import Settings, get_settings
 from insightxpert_api.main import create_app
 from insightxpert_api.pipeline.pipeline import Pipeline
@@ -20,7 +19,6 @@ from insightxpert_api.sse.chunks import ChunkType, SQLGeneratedPayload, StatusPa
 @pytest.fixture(autouse=True)
 def _env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Populate required env for every test."""
-    monkeypatch.setenv("GATE_PASSWORD", "test-pw")
     monkeypatch.setenv("SESSION_SECRET", "s" * 32)
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
     monkeypatch.setenv("APP_ENV", "local")
@@ -41,11 +39,26 @@ def client() -> Iterator[TestClient]:
 
 
 @pytest.fixture
-def authed_client(client: TestClient, settings: Settings) -> TestClient:
-    """A TestClient with a valid signed session cookie pre-set."""
-    token = SessionSigner(settings).issue()
-    client.cookies.set(settings.session_cookie_name, token)
-    return client
+def authed_client(fresh_db) -> Iterator[TestClient]:
+    """A TestClient pre-authenticated as a regular user.
+
+    Post-B1: the old anonymous gate is gone, so "authed" means a real user
+    record + /login. Kept as a distinct fixture from ``user_client`` to avoid
+    touching every legacy call site; it yields just the TestClient for
+    backward compatibility.
+    """
+    from insightxpert_api.main import create_app
+    from insightxpert_api.users import service as users_service
+    from insightxpert_api.users.models import CreateUserInput
+
+    invited = users_service.invite(CreateUserInput(email="authed@example.com", role="user"))
+    c = TestClient(create_app())
+    resp = c.post(
+        "/api/v1/auth/login",
+        json={"email": "authed@example.com", "password": invited.temp_password},
+    )
+    assert resp.status_code == 200
+    yield c
 
 
 class _FakeGen:
@@ -81,3 +94,84 @@ def patched_pipeline(monkeypatch):
 
     with patch("insightxpert_api.routes.chat.default_pipeline", side_effect=fake_factory):
         yield
+
+
+# ---------------------------------------------------------------------------
+# fresh_db — isolated SQLite database with migrations applied
+# ---------------------------------------------------------------------------
+
+from pathlib import Path
+
+from alembic import command
+from alembic.config import Config
+
+
+@pytest.fixture()
+def fresh_db(tmp_path, monkeypatch):
+    """Provision a brand-new SQLite file with migrations applied.
+
+    Returns the DATABASE_URL string; also sets it in the process env and
+    clears the settings + engine cache so the app sees it.
+    """
+    db = tmp_path / "test.db"
+    url = f"sqlite:///{db}"
+    monkeypatch.setenv("DATABASE_URL", url)
+
+    from insightxpert_api.config import get_settings
+    from insightxpert_api.db.engine import reset_engine_cache
+    get_settings.cache_clear()
+    reset_engine_cache()
+
+    api_dir = Path(__file__).resolve().parents[1]  # apps/api
+    cfg = Config(str(api_dir / "alembic.ini"))
+    cfg.set_main_option("script_location", str(api_dir / "alembic"))
+    cfg.set_main_option("sqlalchemy.url", url)
+    command.upgrade(cfg, "head")
+
+    yield url
+
+    reset_engine_cache()
+    get_settings.cache_clear()
+
+
+# --- auth fixtures --------------------------------------------------------
+
+
+@pytest.fixture()
+def user_client(fresh_db):
+    """TestClient pre-authenticated as a regular user.
+
+    Yields a tuple (client, user) so tests can assert on user.id when needed.
+    """
+    from fastapi.testclient import TestClient
+
+    from insightxpert_api.main import create_app
+    from insightxpert_api.users import service
+    from insightxpert_api.users.models import CreateUserInput
+
+    invited = service.invite(CreateUserInput(email="user@example.com", role="user"))
+    client = TestClient(create_app())
+    resp = client.post(
+        "/api/v1/auth/login",
+        json={"email": "user@example.com", "password": invited.temp_password},
+    )
+    assert resp.status_code == 200
+    yield client, invited.user
+
+
+@pytest.fixture()
+def admin_client(fresh_db):
+    from fastapi.testclient import TestClient
+
+    from insightxpert_api.main import create_app
+    from insightxpert_api.users import service
+    from insightxpert_api.users.models import CreateUserInput
+
+    invited = service.invite(CreateUserInput(email="admin@example.com", role="admin"))
+    client = TestClient(create_app())
+    resp = client.post(
+        "/api/v1/auth/login",
+        json={"email": "admin@example.com", "password": invited.temp_password},
+    )
+    assert resp.status_code == 200
+    yield client, invited.user

@@ -13,8 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
-from ..auth.dependencies import require_session
-from ..auth.session import SessionClaims
+from ..auth.current_user import CurrentUser, get_current_user
 from ..config import Settings, get_settings
 from ..logging import get_logger
 from ..pipeline import default_pipeline
@@ -49,7 +48,7 @@ class ChatPollResponse(BaseModel):
 
 def _build_pipeline_and_ctx(
     body: ChatRequest,
-    claims: SessionClaims,
+    cu: CurrentUser,
     settings: Settings,
     convo_store: ConversationStore,
     emitter: EventEmitter | None,
@@ -69,11 +68,11 @@ def _build_pipeline_and_ctx(
     pipeline = default_pipeline(settings, db_svc, prof_svc)
 
     convo_store.append_message(
-        claims.session_id, conversation_id, role="user", content=body.message
+        cu.id, conversation_id, role="user", content=body.message
     )
 
     ctx = PipelineContext(
-        session_id=claims.session_id,
+        session_id=cu.id,
         conversation_id=conversation_id,
         emitter=emitter,
     )
@@ -135,20 +134,20 @@ async def _run_pipeline(
 @router.post("/chat")
 async def chat_sse(
     body: ChatRequest,
-    claims: SessionClaims = Depends(require_session),
+    cu: CurrentUser = Depends(get_current_user),
     settings: Settings = Depends(get_settings),
     convo_store: ConversationStore = Depends(get_conversation_store),
 ) -> EventSourceResponse:
     """Run the pipeline and stream SSE chunks as they happen."""
-    convo = convo_store.get_or_create(claims.session_id, body.conversation_id)
+    convo = convo_store.get_or_create(cu.id, body.conversation_id)
     emitter = EventEmitter(
         convo.conversation_id,
         on_emit=lambda chunk: convo_store.append_chunk(
-            claims.session_id, convo.conversation_id, chunk.model_dump(mode="json")
+            cu.id, convo.conversation_id, chunk.model_dump(mode="json")
         ),
     )
     ctx, pipeline = _build_pipeline_and_ctx(
-        body=body, claims=claims, settings=settings, convo_store=convo_store,
+        body=body, cu=cu, settings=settings, convo_store=convo_store,
         emitter=emitter, conversation_id=convo.conversation_id,
     )
     # Fire pipeline on a background task so EventSourceResponse can start streaming
@@ -184,20 +183,20 @@ async def _collect_chunks(
 @router.post("/chat/poll", response_model=ChatPollResponse)
 async def chat_poll(
     body: ChatRequest,
-    claims: SessionClaims = Depends(require_session),
+    cu: CurrentUser = Depends(get_current_user),
     settings: Settings = Depends(get_settings),
     convo_store: ConversationStore = Depends(get_conversation_store),
 ) -> ChatPollResponse:
     """Run pipeline to completion and return the full list of chunks (non-streaming)."""
-    convo = convo_store.get_or_create(claims.session_id, body.conversation_id)
+    convo = convo_store.get_or_create(cu.id, body.conversation_id)
     emitter = EventEmitter(
         convo.conversation_id,
         on_emit=lambda chunk: convo_store.append_chunk(
-            claims.session_id, convo.conversation_id, chunk.model_dump(mode="json")
+            cu.id, convo.conversation_id, chunk.model_dump(mode="json")
         ),
     )
     ctx, pipeline = _build_pipeline_and_ctx(
-        body=body, claims=claims, settings=settings, convo_store=convo_store,
+        body=body, cu=cu, settings=settings, convo_store=convo_store,
         emitter=emitter, conversation_id=convo.conversation_id,
     )
     chunks = await _collect_chunks(pipeline, ctx, convo_store, model=settings.gemini_chat_model)
@@ -210,20 +209,20 @@ async def chat_poll(
 @router.post("/chat/answer", response_model=ChatAnswerResponse)
 async def chat_answer(
     body: ChatRequest,
-    claims: SessionClaims = Depends(require_session),
+    cu: CurrentUser = Depends(get_current_user),
     settings: Settings = Depends(get_settings),
     convo_store: ConversationStore = Depends(get_conversation_store),
 ) -> ChatAnswerResponse:
     """Run pipeline to completion; return final answer text + generated SQL list."""
-    convo = convo_store.get_or_create(claims.session_id, body.conversation_id)
+    convo = convo_store.get_or_create(cu.id, body.conversation_id)
     emitter = EventEmitter(
         convo.conversation_id,
         on_emit=lambda chunk: convo_store.append_chunk(
-            claims.session_id, convo.conversation_id, chunk.model_dump(mode="json")
+            cu.id, convo.conversation_id, chunk.model_dump(mode="json")
         ),
     )
     ctx, pipeline = _build_pipeline_and_ctx(
-        body=body, claims=claims, settings=settings, convo_store=convo_store,
+        body=body, cu=cu, settings=settings, convo_store=convo_store,
         emitter=emitter, conversation_id=convo.conversation_id,
     )
     chunks = await _collect_chunks(pipeline, ctx, convo_store, model=settings.gemini_chat_model)

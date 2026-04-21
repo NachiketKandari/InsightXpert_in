@@ -1,41 +1,25 @@
 "use client";
 
-import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { useAuthStore } from "@/stores/auth-store";
+import { useEffect } from "react";
+
+import { useCurrentUser } from "@/hooks/use-current-user";
 
 export function AuthGuard({ children }: { children: React.ReactNode }) {
-  const { user, isLoading } = useAuthStore();
+  const { user, isLoading } = useCurrentUser();
   const router = useRouter();
-  const didCheck = useRef(false);
-
-  useEffect(() => {
-    if (!didCheck.current) {
-      didCheck.current = true;
-      useAuthStore.getState().checkAuth();
-    }
-  }, []);
 
   useEffect(() => {
     if (!isLoading && !user) {
-      router.push("/login");
+      const next = encodeURIComponent(
+        typeof window !== "undefined"
+          ? window.location.pathname + window.location.search
+          : "/",
+      );
+      router.replace(`/login?next=${next}`);
     }
   }, [isLoading, user, router]);
 
-  if (isLoading) {
-    return (
-      <div className="flex h-screen w-screen items-center justify-center bg-background">
-        <div className="flex flex-col items-center gap-3">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-cyan-accent border-t-transparent" />
-          <span className="text-sm text-muted-foreground">Loading...</span>
-        </div>
-      </div>
-    );
-  }
-
-  if (!user) {
-    return null;
-  }
-
+  if (isLoading || !user) return null;
   return <>{children}</>;
 }

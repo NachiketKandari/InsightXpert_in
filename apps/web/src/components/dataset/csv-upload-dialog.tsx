@@ -27,7 +27,6 @@ import {
 } from "@/components/ui/dialog";
 import { apiFetch } from "@/lib/api";
 import { SSE_BASE_URL } from "@/lib/constants";
-import { useAuthStore } from "@/stores/auth-store";
 import { formatFileName, formatFileSize } from "@/lib/file-utils";
 
 // ---------------------------------------------------------------------------
@@ -165,14 +164,11 @@ function columnDetailText(col: ColumnProfile): string {
 }
 
 /** Best-effort DELETE to roll back an unconfirmed upload. */
-function rollbackUpload(datasetId: string, token: string | null) {
-  const headers: Record<string, string> = {};
-  if (token) headers["Authorization"] = `Bearer ${token}`;
+function rollbackUpload(datasetId: string) {
   // Fire-and-forget — we don't want to block the UI on cleanup
   fetch(`${SSE_BASE_URL}/api/datasets/${datasetId}`, {
     method: "DELETE",
     credentials: "include",
-    headers,
   }).catch(() => {});
 }
 
@@ -191,8 +187,6 @@ export function CsvUploadDialog({
   onOpenChange,
   onUploadSuccess,
 }: CsvUploadDialogProps) {
-  const token = useAuthStore((s) => s.token);
-
   // Step state
   const [step, setStep] = useState<Step>("upload");
   const [uploadResult, setUploadResult] = useState<UploadResult | null>(null);
@@ -239,12 +233,12 @@ export function CsvUploadDialog({
   const handleOpenChange = useCallback(
     (nextOpen: boolean) => {
       if (!nextOpen && uploadResult && !confirmedRef.current) {
-        rollbackUpload(uploadResult.id, token);
+        rollbackUpload(uploadResult.id);
       }
       if (!nextOpen) reset();
       onOpenChange(nextOpen);
     },
-    [uploadResult, token, reset, onOpenChange],
+    [uploadResult, reset, onOpenChange],
   );
 
   // Cancel in-flight XHR on unmount
@@ -263,11 +257,11 @@ export function CsvUploadDialog({
 
     const id = uploadResult.id;
     const handleBeforeUnload = () => {
-      rollbackUpload(id, token);
+      rollbackUpload(id);
     };
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [step, uploadResult, token]);
+  }, [step, uploadResult]);
 
   // ---- Upload step handlers ----
 
@@ -329,8 +323,8 @@ export function CsvUploadDialog({
     }
 
     // Use XHR for upload progress tracking.
-    // Send directly to SSE_BASE_URL (bypasses Next.js proxy body size limit)
-    // with Bearer token auth (same pattern as SSE streaming).
+    // Send directly to SSE_BASE_URL (bypasses Next.js proxy body size limit).
+    // Auth is cookie-based; withCredentials ensures cookies are forwarded.
     const xhr = new XMLHttpRequest();
     xhrRef.current = xhr;
 
@@ -382,9 +376,6 @@ export function CsvUploadDialog({
 
     xhr.open("POST", `${SSE_BASE_URL}/api/datasets/upload`);
     xhr.withCredentials = true;
-    if (token) {
-      xhr.setRequestHeader("Authorization", `Bearer ${token}`);
-    }
     xhr.send(formData);
   };
 
@@ -397,7 +388,7 @@ export function CsvUploadDialog({
   const handleBack = () => {
     // Roll back the unconfirmed upload before going back
     if (uploadResult && !confirmedRef.current) {
-      rollbackUpload(uploadResult.id, token);
+      rollbackUpload(uploadResult.id);
     }
     setStep("upload");
     setUploadResult(null);

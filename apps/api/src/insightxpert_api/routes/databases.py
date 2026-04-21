@@ -24,8 +24,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, s
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
-from ..auth.dependencies import require_session
-from ..auth.session import SessionClaims
+from ..auth.current_user import CurrentUser, get_current_user
 from ..config import Settings, get_settings
 from ..db.schema import ddl as schema_ddl
 from ..logging import get_logger
@@ -94,18 +93,18 @@ def _list_tables(path: str) -> list[str]:
 
 @router.get("", response_model=list[DatabaseListItem])
 async def list_databases(
-    claims: SessionClaims = Depends(require_session),
+    cu: CurrentUser = Depends(get_current_user),
     settings: Settings = Depends(get_settings),
 ) -> list[DatabaseListItem]:
     svc = _db_svc(settings)
-    return [DatabaseListItem(db_id=r.db_id, source=r.source) for r in svc.list(claims.session_id)]
+    return [DatabaseListItem(db_id=r.db_id, source=r.source) for r in svc.list(cu.id)]
 
 
 @router.post("/upload", response_model=UploadResponse)
 async def upload_database(
     db_id: str = Form(...),
     file: UploadFile = File(...),
-    claims: SessionClaims = Depends(require_session),
+    cu: CurrentUser = Depends(get_current_user),
     settings: Settings = Depends(get_settings),
 ) -> UploadResponse:
     _validate_db_id(db_id)
@@ -116,18 +115,18 @@ async def upload_database(
     if not data[:16].startswith(_SQLITE_MAGIC):
         raise HTTPException(status_code=400, detail="invalid_file")
     svc = _db_svc(settings)
-    ref = svc.save_upload(claims.session_id, db_id, data)
+    ref = svc.save_upload(cu.id, db_id, data)
     return UploadResponse(db_id=ref.db_id, source=ref.source)
 
 
 @router.get("/{db_id}/schema", response_model=SchemaResponse)
 async def get_schema(
     db_id: str,
-    claims: SessionClaims = Depends(require_session),
+    cu: CurrentUser = Depends(get_current_user),
     settings: Settings = Depends(get_settings),
 ) -> SchemaResponse:
     svc = _db_svc(settings)
-    ref = svc.resolve(claims.session_id, db_id)
+    ref = svc.resolve(cu.id, db_id)
     if ref is None:
         raise HTTPException(status_code=404, detail="invalid_db")
     return SchemaResponse(ddl=schema_ddl(ref.local_path), tables=_list_tables(ref.local_path))
@@ -136,11 +135,11 @@ async def get_schema(
 @router.get("/{db_id}/profile")
 async def get_profile(
     db_id: str,
-    claims: SessionClaims = Depends(require_session),
+    cu: CurrentUser = Depends(get_current_user),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
     prof = _prof_svc(settings)
-    profile = prof.load(claims.session_id, db_id)
+    profile = prof.load(cu.id, db_id)
     if profile is None:
         raise HTTPException(status_code=404, detail="not_found")
     return profile.model_dump(mode="json")
@@ -173,22 +172,22 @@ async def _run_profile_pipeline(
 @router.post("/{db_id}/profile")
 async def run_profile(
     db_id: str,
-    claims: SessionClaims = Depends(require_session),
+    cu: CurrentUser = Depends(get_current_user),
     settings: Settings = Depends(get_settings),
     convo_store: ConversationStore = Depends(get_conversation_store),
 ) -> EventSourceResponse:
     """Kick off profiling as a single-stage Pipeline, stream SSE progress."""
     db_svc = _db_svc(settings)
     prof_svc = _prof_svc(settings)
-    if db_svc.resolve(claims.session_id, db_id) is None:
+    if db_svc.resolve(cu.id, db_id) is None:
         raise HTTPException(status_code=404, detail="invalid_db")
 
-    convo = convo_store.get_or_create(claims.session_id, None)
+    convo = convo_store.get_or_create(cu.id, None)
     emitter = EventEmitter(convo.conversation_id)
     pipeline = Pipeline([ProfilerStage(db_svc=db_svc, prof_svc=prof_svc)])
 
     ctx = PipelineContext(
-        session_id=claims.session_id,
+        session_id=cu.id,
         conversation_id=convo.conversation_id,
         emitter=emitter,
     )
@@ -202,10 +201,10 @@ async def run_profile(
 # strict-slash clients happy without a redirect hop).
 @router.get("/", include_in_schema=False, response_model=list[DatabaseListItem])
 async def _list_databases_slash(
-    claims: SessionClaims = Depends(require_session),
+    cu: CurrentUser = Depends(get_current_user),
     settings: Settings = Depends(get_settings),
 ) -> list[DatabaseListItem]:
-    return await list_databases(claims=claims, settings=settings)
+    return await list_databases(cu=cu, settings=settings)
 
 
 # Expose the status symbol in case other modules want the same shape. Unused internally.

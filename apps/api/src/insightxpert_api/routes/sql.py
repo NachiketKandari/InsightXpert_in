@@ -12,8 +12,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from ..auth.dependencies import require_session
-from ..auth.session import SessionClaims
+from ..auth.current_user import CurrentUser, get_current_user
 from ..config import Settings, get_settings
 from ..db.connector import DatabaseConnector, ForbiddenSQLError, SQLTimeoutError
 from ..services.database_service import DatabaseService
@@ -37,12 +36,12 @@ class SqlExecuteResponse(BaseModel):
 @router.post("/execute", response_model=SqlExecuteResponse)
 async def execute_sql(
     body: SqlExecuteRequest,
-    claims: SessionClaims = Depends(require_session),
+    cu: CurrentUser = Depends(get_current_user),
     settings: Settings = Depends(get_settings),
 ) -> SqlExecuteResponse:
     store = build_store(settings)
     svc = DatabaseService(bundled_dir=settings.bundled_dbs_dir, store=store)
-    ref = svc.resolve(claims.session_id, body.db_id)
+    ref = svc.resolve(cu.id, body.db_id)
     if ref is None:
         raise HTTPException(status_code=404, detail="invalid_db")
 

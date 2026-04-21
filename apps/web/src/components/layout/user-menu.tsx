@@ -3,8 +3,9 @@
 import React from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { LogOut, Activity, Sun, Moon, Settings, ListChecks, ChevronsUpDown, Zap } from "lucide-react";
-import { useAuthStore } from "@/stores/auth-store";
+import { LogOut, Activity, Sun, Moon, Settings, ListChecks, ChevronsUpDown } from "lucide-react";
+import { logout } from "@/lib/auth-api";
+import { useCurrentUser } from "@/hooks/use-current-user";
 import { useClientConfig } from "@/hooks/use-client-config";
 import { useChatStore } from "@/stores/chat-store";
 import { useIsMobile } from "@/hooks/use-media-query";
@@ -43,8 +44,8 @@ function getDisplayName(email: string): string {
 }
 
 export const UserMenu = React.memo(function UserMenu() {
-  const { user, logout } = useAuthStore();
-  const { isAdmin, config } = useClientConfig();
+  const { user, isAdmin } = useCurrentUser();
+  const { config } = useClientConfig();
   const router = useRouter();
   const isMobile = useIsMobile();
   const toggleRightSidebar = useChatStore((s) => s.toggleRightSidebar);
@@ -58,7 +59,7 @@ export const UserMenu = React.memo(function UserMenu() {
 
   const handleLogout = async () => {
     await logout();
-    router.push("/login");
+    router.replace("/login");
   };
 
   return (
@@ -112,15 +113,7 @@ export const UserMenu = React.memo(function UserMenu() {
               </Link>
             </DropdownMenuItem>
           )}
-          {isAdmin && (
-            <DropdownMenuItem asChild>
-              <Link href="/admin/automations">
-                <Zap className="size-4" />
-                Automations
-              </Link>
-            </DropdownMenuItem>
-          )}
-<DropdownMenuItem onClick={() => setSampleQuestionsOpen(true)}>
+          <DropdownMenuItem onClick={() => setSampleQuestionsOpen(true)}>
             <ListChecks className="size-4" />
             Sample Questions
           </DropdownMenuItem>

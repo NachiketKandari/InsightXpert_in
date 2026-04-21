@@ -12,7 +12,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useNotificationStore } from "@/stores/notification-store";
-import { useClientConfig } from "@/hooks/use-client-config";
+import { useCurrentUser } from "@/hooks/use-current-user";
+import { useClientConfigStore } from "@/stores/client-config-store";
 import { NotificationCard } from "./notification-card";
 import { NotificationFilterBar, NotificationLoading, NotificationEmptyState } from "./notification-shared";
 import { SEVERITY_VARIANT } from "./constants";
@@ -26,7 +27,8 @@ interface NotificationAllModalProps {
 }
 
 export function NotificationAllModal({ open, onOpenChange }: NotificationAllModalProps) {
-  const { isAdmin, orgId } = useClientConfig();
+  const { isAdmin } = useCurrentUser();
+  const orgId = useClientConfigStore((s) => s.orgId);
   const allNotifications = useNotificationStore((s) => s.allNotifications);
   const isLoadingAll = useNotificationStore((s) => s.isLoadingAll);
   const fetchAllNotifications = useNotificationStore((s) => s.fetchAllNotifications);

@@ -3,10 +3,13 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useClientConfig } from "@/hooks/use-client-config";
+import { useCurrentUser } from "@/hooks/use-current-user";
 import { AuthGuard } from "@/components/auth/auth-guard";
 
 function AdminGuard({ children }: { children: React.ReactNode }) {
-  const { isAdmin, isLoading, fetchConfig } = useClientConfig();
+  const { isLoading: isConfigLoading, fetchConfig } = useClientConfig();
+  const { isAdmin, isLoading: isUserLoading } = useCurrentUser();
+  const isLoading = isConfigLoading || isUserLoading;
   const router = useRouter();
 
   useEffect(() => {

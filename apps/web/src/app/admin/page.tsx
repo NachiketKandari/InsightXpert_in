@@ -21,7 +21,7 @@ import { UserOrgMappingsEditor } from "@/components/admin/user-org-mappings";
 import { AdminDomainEditor } from "@/components/admin/admin-domain-editor";
 import { ConversationViewer } from "@/components/admin/conversation-viewer";
 import { useConfirm } from "@/components/ui/confirm-dialog";
-import { useClientConfig } from "@/hooks/use-client-config";
+import { useClientConfigStore } from "@/stores/client-config-store";
 import type {
   ClientConfig,
   OrgConfig,
@@ -78,7 +78,7 @@ export default function AdminPage() {
     text: string;
   } | null>(null);
   const { confirm, ConfirmDialog } = useConfirm();
-  const { orgId } = useClientConfig();
+  const orgId = useClientConfigStore((s) => s.orgId);
   const isSuperAdmin = !orgId;
 
   const loadConfig = useCallback(async () => {

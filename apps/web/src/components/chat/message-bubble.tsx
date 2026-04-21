@@ -8,7 +8,7 @@ import { MessageActions } from "@/components/chat/message-actions";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useChatStore } from "@/stores/chat-store";
 import { useAutomationStore } from "@/stores/automation-store";
-import { useClientConfig } from "@/hooks/use-client-config";
+import { useCurrentUser } from "@/hooks/use-current-user";
 import type { Message, EnrichmentTrace, OrchestratorPlan, AgentTrace } from "@/types/chat";
 import { downloadMessageReport, downloadConversationReport } from "@/lib/export-report";
 
@@ -90,7 +90,7 @@ function MessageBubbleInner({
 }: MessageBubbleProps) {
   const isStreaming = useChatStore(selectIsActiveStreaming);
   const activeConversationId = useChatStore((s) => s.activeConversationId);
-  const { isAdmin } = useClientConfig();
+  const { isAdmin } = useCurrentUser();
   const isUser = message.role === "user";
 
   // Stable wrapper so MessageActions always gets the same function reference

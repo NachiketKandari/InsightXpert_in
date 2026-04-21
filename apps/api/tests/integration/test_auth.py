@@ -1,15 +1,35 @@
+"""Legacy auth tests, migrated to /login + CurrentUser semantics.
+
+The old anonymous gate tests (``/unlock``) have been reshaped to exercise the
+new email/password flow. /unlock is gone (404) and is covered in
+``test_auth_login.py`` — no need to duplicate here.
+"""
+
+from __future__ import annotations
+
 from fastapi.testclient import TestClient
 
+from insightxpert_api.main import create_app
+from insightxpert_api.users import service
+from insightxpert_api.users.models import CreateUserInput
 
-def test_unlock_rejects_wrong_password(client: TestClient):
-    r = client.post("/api/v1/auth/unlock", json={"password": "nope"})
+
+def test_login_rejects_wrong_password(fresh_db):
+    service.invite(CreateUserInput(email="x@example.com", role="user"))
+    client = TestClient(create_app())
+    r = client.post("/api/v1/auth/login", json={"email": "x@example.com", "password": "nope"})
     assert r.status_code == 401
 
 
-def test_unlock_sets_cookie_on_success(client: TestClient):
-    r = client.post("/api/v1/auth/unlock", json={"password": "test-pw"})
+def test_login_sets_cookie_on_success(fresh_db):
+    invited = service.invite(CreateUserInput(email="x@example.com", role="user"))
+    client = TestClient(create_app())
+    r = client.post(
+        "/api/v1/auth/login",
+        json={"email": "x@example.com", "password": invited.temp_password},
+    )
     assert r.status_code == 200
-    assert r.json() == {"status": "ok"}
+    assert r.json()["email"] == "x@example.com"
     assert "ix_session" in r.cookies
 
 
@@ -18,18 +38,20 @@ def test_me_requires_session(client: TestClient):
     assert r.status_code == 401
 
 
-def test_me_returns_session_id_when_authed(authed_client: TestClient):
+def test_me_returns_user_when_authed(authed_client: TestClient):
     r = authed_client.get("/api/v1/auth/me")
     assert r.status_code == 200
     body = r.json()
-    assert "session_id" in body
-    assert len(body["session_id"]) >= 16
+    assert body["email"] == "authed@example.com"
+    assert body["role"] == "user"
+    assert "id" in body and len(body["id"]) > 0
 
 
 def test_me_rejects_bad_token(client: TestClient):
     client.cookies.set("ix_session", "garbage")
     r = client.get("/api/v1/auth/me")
-    assert r.status_code == 403
+    # get_current_user returns 401 for any bad/malformed token.
+    assert r.status_code == 401
 
 
 def test_logout_clears_cookie(authed_client: TestClient):
@@ -41,10 +63,15 @@ def test_logout_clears_cookie(authed_client: TestClient):
     assert r2.status_code == 401
 
 
-def test_bearer_token_fallback_works(client: TestClient):
-    # Unlock to get a token, then use it via Authorization header
-    r = client.post("/api/v1/auth/unlock", json={"password": "test-pw"})
+def test_bearer_token_fallback_works(fresh_db):
+    invited = service.invite(CreateUserInput(email="b@example.com", role="user"))
+    client = TestClient(create_app())
+    r = client.post(
+        "/api/v1/auth/login",
+        json={"email": "b@example.com", "password": invited.temp_password},
+    )
     token = r.cookies.get("ix_session")
     client.cookies.clear()
     r2 = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
     assert r2.status_code == 200
+    assert r2.json()["email"] == "b@example.com"

@@ -22,12 +22,20 @@ class Settings(BaseSettings):
     app_env: str = "local"  # local | staging | prod
     port: int = 8080
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000"])
+    database_url: str = "sqlite:///./app.db"
 
     # --- auth --------------------------------------------------------------
-    gate_password: str
     session_secret: str
     session_ttl_seconds: int = 60 * 60 * 24 * 30  # 30 days sliding
     session_cookie_name: str = "ix_session"
+
+    # Bootstrap admin (applied once on first boot, then ignored if any user exists)
+    bootstrap_admin_email: str | None = None
+    bootstrap_admin_password: str | None = None
+
+    # Bootstrap regular user for local testing (optional; same idempotence as admin)
+    bootstrap_user_email: str | None = None
+    bootstrap_user_password: str | None = None
 
     # --- llm ---------------------------------------------------------------
     gemini_api_key: str

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+# Intentionally unauthenticated — FE reads this on /login before session exists.
 router = APIRouter(prefix="/api/v1/client-config", tags=["client-config"])
 
 

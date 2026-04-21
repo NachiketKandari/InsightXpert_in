@@ -2,7 +2,6 @@
 
 import { useRef, useState, useCallback, useEffect } from "react";
 import { SSE_BASE_URL } from "@/lib/constants";
-import { useAuthStore } from "@/stores/auth-store";
 
 export type VoiceState = "idle" | "requesting" | "listening";
 
@@ -29,7 +28,6 @@ function getWsBaseUrl(): string {
 export function useVoiceInput(onTranscript?: (text: string) => void) {
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [voiceError, setVoiceError] = useState<string | null>(null);
-  const token = useAuthStore((s) => s.token);
 
   // Stable ref so WS handlers always see the latest callback without re-creating
   const onTranscriptRef = useRef(onTranscript);
@@ -118,9 +116,8 @@ export function useVoiceInput(onTranscript?: (text: string) => void) {
 
     streamRef.current = stream;
 
-    // Build WS URL with auth token (cookies may not reach Cloud Run directly)
+    // Build WS URL — auth is handled via session cookie sent by the browser.
     const wsUrl = new URL(`${getWsBaseUrl()}/api/transcribe`);
-    if (token) wsUrl.searchParams.set("token", token);
     console.debug("[voice] WS URL:", wsUrl.toString());
 
     const ws = new WebSocket(wsUrl.toString());
@@ -216,7 +213,7 @@ export function useVoiceInput(onTranscript?: (text: string) => void) {
         setVoiceError("Speech-to-text is not configured");
       }
     };
-  }, [stop, emit, clearSilenceTimer, token]);
+  }, [stop, emit, clearSilenceTimer]);
 
   /** Reset accumulated voice text — call after sending the message. */
   const clearVoiceText = useCallback(() => {

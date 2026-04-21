@@ -19,8 +19,7 @@ import {
 import { DatasetViewer } from "@/components/dataset/dataset-viewer";
 import { CsvUploadDialog } from "@/components/dataset/csv-upload-dialog";
 import { apiCall, apiFetch } from "@/lib/api";
-import { useAuthStore } from "@/stores/auth-store";
-import { useClientConfig } from "@/hooks/use-client-config";
+import { useCurrentUser } from "@/hooks/use-current-user";
 import type { DatasetInfo } from "@/types/dataset";
 
 export function DatasetSelector() {
@@ -32,8 +31,7 @@ export function DatasetSelector() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [activatingId, setActivatingId] = useState<string | null>(null);
 
-  const user = useAuthStore((s) => s.user);
-  const { isAdmin } = useClientConfig();
+  const { user, isAdmin } = useCurrentUser();
 
   const fetchDatasets = useCallback(async () => {
     setLoading(true);
