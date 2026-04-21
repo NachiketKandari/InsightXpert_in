@@ -11,25 +11,59 @@
 //   terminal to occasional probes instead of every-request retries.
 // - A 3s initial grace window avoids flashing the banner during hot reload /
 //   cold start when the first probe hasn't resolved yet.
+// - Manual "Retry now" button uses an explicit `checking` state (rather than
+//   relying on react-query's `isFetching`) so we can (a) guarantee the button
+//   shows "Checking…" for the full duration of the user-initiated probe and
+//   (b) bail out of that visual state after a 2s cap even if the request is
+//   still in flight. This prevents the banner from looking "stuck on retry".
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Loader2, AlertTriangle } from "lucide-react";
+import { toast } from "sonner";
 import { useHealthCheck } from "@/hooks/use-health-check";
 import { Button } from "@/components/ui/button";
 
 const GRACE_MS = 3_000;
+const CHECKING_MAX_MS = 2_000;
 
 export function HealthCheckGate({ children }: { children: React.ReactNode }) {
   const { data, isLoading, isFetching, refetch } = useHealthCheck();
   const [showAfterGrace, setShowAfterGrace] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const prevDataRef = useRef<boolean | undefined>(undefined);
 
   useEffect(() => {
     const t = setTimeout(() => setShowAfterGrace(true), GRACE_MS);
     return () => clearTimeout(t);
   }, []);
 
+  // Surface a recovery toast when the probe flips from false -> true. Only
+  // fires on a real transition; skips the initial undefined -> true case on
+  // first mount (no banner was ever shown, no need to announce recovery).
+  useEffect(() => {
+    const prev = prevDataRef.current;
+    if (prev === false && data === true) {
+      toast.success("Backend reconnected");
+    }
+    prevDataRef.current = data;
+  }, [data]);
+
+  async function handleRetry() {
+    if (checking) return;
+    setChecking(true);
+    const cap = setTimeout(() => setChecking(false), CHECKING_MAX_MS);
+    try {
+      await refetch();
+    } finally {
+      clearTimeout(cap);
+      setChecking(false);
+    }
+  }
+
   // Only surface the banner once (a) the grace window elapsed, (b) the first
-  // probe finished, and (c) the last probe returned false.
+  // probe finished, and (c) the last probe returned false. `data === false`
+  // flips to `true` synchronously when refetch resolves green, so the banner
+  // disappears within one render tick of a successful retry.
   const unavailable = showAfterGrace && !isLoading && data === false;
 
   return (
@@ -46,17 +80,17 @@ export function HealthCheckGate({ children }: { children: React.ReactNode }) {
               <strong className="font-semibold">Backend unavailable.</strong>{" "}
               Retrying every 15s. Some actions will fail until it&apos;s back.
             </span>
-            {isFetching ? (
+            {(isFetching || checking) ? (
               <Loader2 className="h-4 w-4 animate-spin" aria-label="Retrying" />
             ) : null}
             <Button
               size="sm"
               variant="outline"
               className="h-7"
-              onClick={() => refetch()}
-              disabled={isFetching}
+              onClick={handleRetry}
+              disabled={checking || isFetching}
             >
-              Retry now
+              {checking ? "Checking…" : "Retry now"}
             </Button>
           </div>
         </div>
