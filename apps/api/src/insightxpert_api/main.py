@@ -16,6 +16,7 @@ from .routes import (
     admin_conversations,
     admin_metrics,
     admin_overview,
+    admin_prompts,
     admin_users,
     auth,
     chat,
@@ -92,6 +93,7 @@ def create_app() -> FastAPI:
     app.include_router(admin_audit.router)
     app.include_router(admin_metrics.router)
     app.include_router(admin_conversations.router)
+    app.include_router(admin_prompts.router)
     return app
 
 
