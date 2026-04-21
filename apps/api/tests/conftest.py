@@ -9,7 +9,6 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from insightxpert_api.auth.session import SessionSigner
 from insightxpert_api.config import Settings, get_settings
 from insightxpert_api.main import create_app
 from insightxpert_api.pipeline.pipeline import Pipeline
@@ -41,11 +40,26 @@ def client() -> Iterator[TestClient]:
 
 
 @pytest.fixture
-def authed_client(client: TestClient, settings: Settings) -> TestClient:
-    """A TestClient with a valid signed session cookie pre-set."""
-    token = SessionSigner(settings).issue()
-    client.cookies.set(settings.session_cookie_name, token)
-    return client
+def authed_client(fresh_db) -> Iterator[TestClient]:
+    """A TestClient pre-authenticated as a regular user.
+
+    Post-B1: the old anonymous gate is gone, so "authed" means a real user
+    record + /login. Kept as a distinct fixture from ``user_client`` to avoid
+    touching every legacy call site; it yields just the TestClient for
+    backward compatibility.
+    """
+    from insightxpert_api.main import create_app
+    from insightxpert_api.users import service as users_service
+    from insightxpert_api.users.models import CreateUserInput
+
+    invited = users_service.invite(CreateUserInput(email="authed@example.com", role="user"))
+    c = TestClient(create_app())
+    resp = c.post(
+        "/api/v1/auth/login",
+        json={"email": "authed@example.com", "password": invited.temp_password},
+    )
+    assert resp.status_code == 200
+    yield c
 
 
 class _FakeGen:

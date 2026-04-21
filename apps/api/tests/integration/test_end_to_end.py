@@ -29,17 +29,23 @@ requires_real_gemini = pytest.mark.skipif(
 
 
 @pytest.fixture
-def real_client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
+def real_client(monkeypatch: pytest.MonkeyPatch, fresh_db) -> TestClient:
     """TestClient configured with the real Gemini key + bundled DBs dir."""
+    from insightxpert_api.users import service as users_service
+    from insightxpert_api.users.models import CreateUserInput
+
     real_key = os.environ["GEMINI_API_KEY_REAL"]
     monkeypatch.setenv("GEMINI_API_KEY", real_key)
     monkeypatch.setenv("BUNDLED_DBS_DIR", str(BUNDLED_DIR))
-    monkeypatch.setenv("GATE_PASSWORD", "test-pw")
     monkeypatch.setenv("SESSION_SECRET", "s" * 32)
     get_settings.cache_clear()
 
+    invited = users_service.invite(CreateUserInput(email="e2e@example.com", role="user"))
     client = TestClient(create_app())
-    r = client.post("/api/v1/auth/unlock", json={"password": "test-pw"})
+    r = client.post(
+        "/api/v1/auth/login",
+        json={"email": "e2e@example.com", "password": invited.temp_password},
+    )
     assert r.status_code == 200
     return client
 
