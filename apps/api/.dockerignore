@@ -1,5 +1,5 @@
 .venv/
-__pycache__/
+**/__pycache__/
 *.pyc
 .pytest_cache/
 .ruff_cache/
@@ -8,5 +8,10 @@ tests/
 .env
 .env.local
 .env.*
+!.env.example
 *.log
 .DS_Store
+scripts/
+PRUNING.md
+README.md
+# Keep Databases/ in the build context — we bake the bundled samples into the image.
