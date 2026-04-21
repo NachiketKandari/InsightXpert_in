@@ -18,6 +18,9 @@ from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from ..metrics.service import record_turn as _record_turn
+from ..orchestration.service import (
+    record_conversation_snapshot as _record_conversation_snapshot,
+)
 
 from ..agents.analyst import analyst_loop as _our_analyst_loop
 from ..auth.current_user import CurrentUser, get_current_user
@@ -54,6 +57,7 @@ def _extract_metrics_from_chunks(chunks: list[Any]) -> dict[str, Any]:
     duration_ms: int | None = None
     tokens_in: int | None = None
     tokens_out: int | None = None
+    answer_text: str = ""
     for chunk in chunks:
         data = chunk.data if isinstance(chunk.data, dict) else (
             chunk.data.model_dump(mode="json")
@@ -65,6 +69,10 @@ def _extract_metrics_from_chunks(chunks: list[Any]) -> dict[str, Any]:
             sql_text = data.get("sql")
             if sql_text:
                 final_sql = str(sql_text)
+        elif t == ChunkType.ANSWER_GENERATED:
+            text = data.get("text")
+            if text:
+                answer_text = str(text)
         elif t == ChunkType.METRICS:
             if duration_ms is None and data.get("latency_ms") is not None:
                 duration_ms = int(data["latency_ms"])
@@ -77,6 +85,7 @@ def _extract_metrics_from_chunks(chunks: list[Any]) -> dict[str, Any]:
         "duration_ms": duration_ms,
         "tokens_in": tokens_in,
         "tokens_out": tokens_out,
+        "answer_text": answer_text,
     }
 
 
@@ -100,6 +109,18 @@ def _schedule_record_turn(
         tokens_in=extracted["tokens_in"],
         tokens_out=extracted["tokens_out"],
         duration_ms=extracted["duration_ms"],
+    )
+    chunk_dicts = [c.model_dump(mode="json") for c in chunks]
+    background_tasks.add_task(
+        _record_conversation_snapshot,
+        user_id=cu.id,
+        conversation_id=conversation_id,
+        db_id=body.db_id,
+        user_message=body.message,
+        assistant_message=extracted["answer_text"],
+        chunks=chunk_dicts,
+        tokens_in=extracted["tokens_in"],
+        tokens_out=extracted["tokens_out"],
     )
 
 
@@ -179,6 +200,8 @@ async def _run_pipeline(
     convo_store: ConversationStore,
     model: str | None = None,
     metrics_record: dict[str, Any] | None = None,
+    snapshot_record: dict[str, Any] | None = None,
+    collected_chunks: list[Any] | None = None,
 ) -> None:
     """Drive the pipeline, emit final events, persist the assistant message.
 
@@ -254,6 +277,24 @@ async def _run_pipeline(
                 )
             except Exception:  # noqa: BLE001
                 pass
+        if snapshot_record is not None:
+            try:
+                chunk_dicts = (
+                    [c.model_dump(mode="json") for c in (collected_chunks or [])]
+                )
+                await asyncio.to_thread(
+                    _record_conversation_snapshot,
+                    user_id=snapshot_record["user_id"],
+                    conversation_id=snapshot_record["conversation_id"],
+                    db_id=snapshot_record["db_id"],
+                    user_message=snapshot_record["question"],
+                    assistant_message=str(ctx.state.get("answer", "") or ""),
+                    chunks=chunk_dicts,
+                    tokens_in=tokens_in or None,
+                    tokens_out=tokens_out or None,
+                )
+            except Exception:  # noqa: BLE001
+                pass
 
 
 @router.post("/chat")
@@ -265,17 +306,31 @@ async def chat_sse(
 ) -> EventSourceResponse:
     """Run the pipeline and stream SSE chunks as they happen."""
     convo = convo_store.get_or_create(cu.id, body.conversation_id)
+    collected: list[Any] = []
+
+    def _on_emit(chunk: Any) -> None:
+        collected.append(chunk)
+        convo_store.append_chunk(
+            cu.id, convo.conversation_id, chunk.model_dump(mode="json")
+        )
+
     emitter = EventEmitter(
         convo.conversation_id,
-        on_emit=lambda chunk: convo_store.append_chunk(
-            cu.id, convo.conversation_id, chunk.model_dump(mode="json")
-        ),
+        on_emit=_on_emit,
     )
+    snapshot_rec = {
+        "user_id": cu.id,
+        "conversation_id": convo.conversation_id,
+        "db_id": body.db_id,
+        "question": body.message,
+    }
     if body.agent_mode is not None:
         asyncio.create_task(
             _run_orchestrator(
                 body, cu, settings, convo_store, emitter, convo.conversation_id,
                 record_metrics=True,
+                snapshot_record=snapshot_rec,
+                collected_chunks=collected,
             )
         )
     else:
@@ -296,6 +351,8 @@ async def chat_sse(
                     "question": body.message,
                     "agent_mode": body.agent_mode,
                 },
+                snapshot_record=snapshot_rec,
+                collected_chunks=collected,
             )
         )
     return EventSourceResponse(emitter.stream())
@@ -358,6 +415,8 @@ async def _run_orchestrator(
     emitter: EventEmitter,
     conversation_id: str,
     record_metrics: bool = False,
+    snapshot_record: dict[str, Any] | None = None,
+    collected_chunks: list[Any] | None = None,
 ) -> None:
     """Drive the vendored orchestrator_loop with our analyst injected, translate
     each yielded vendored chunk to our envelope, and push through the emitter.
@@ -493,6 +552,24 @@ async def _run_orchestrator(
                     tokens_in=tokens_in or None,
                     tokens_out=tokens_out or None,
                     duration_ms=latency_ms,
+                )
+            except Exception:  # noqa: BLE001
+                pass
+        if snapshot_record is not None:
+            try:
+                chunk_dicts = (
+                    [c.model_dump(mode="json") for c in (collected_chunks or [])]
+                )
+                await asyncio.to_thread(
+                    _record_conversation_snapshot,
+                    user_id=snapshot_record["user_id"],
+                    conversation_id=snapshot_record["conversation_id"],
+                    db_id=snapshot_record["db_id"],
+                    user_message=snapshot_record["question"],
+                    assistant_message=answer_text,
+                    chunks=chunk_dicts,
+                    tokens_in=tokens_in or None,
+                    tokens_out=tokens_out or None,
                 )
             except Exception:  # noqa: BLE001
                 pass
