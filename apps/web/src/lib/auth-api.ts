@@ -15,7 +15,7 @@ export interface CurrentUser {
 }
 
 export async function fetchMe(): Promise<CurrentUser | null> {
-  const res = await apiFetch("/api/v1/auth/me");
+  const res = await apiFetch("/api/v1/auth/me", { skipAuthRedirect: true });
   if (res.status === 401) return null;
   if (!res.ok) throw new Error(`GET /auth/me failed: ${res.status}`);
   return res.json();
