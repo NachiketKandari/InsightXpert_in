@@ -119,3 +119,46 @@ def fresh_db(tmp_path, monkeypatch):
 
     reset_engine_cache()
     get_settings.cache_clear()
+
+
+# --- auth fixtures --------------------------------------------------------
+
+
+@pytest.fixture()
+def user_client(fresh_db):
+    """TestClient pre-authenticated as a regular user.
+
+    Yields a tuple (client, user) so tests can assert on user.id when needed.
+    """
+    from fastapi.testclient import TestClient
+
+    from insightxpert_api.main import create_app
+    from insightxpert_api.users import service
+    from insightxpert_api.users.models import CreateUserInput
+
+    invited = service.invite(CreateUserInput(email="user@example.com", role="user"))
+    client = TestClient(create_app())
+    resp = client.post(
+        "/api/v1/auth/login",
+        json={"email": "user@example.com", "password": invited.temp_password},
+    )
+    assert resp.status_code == 200
+    yield client, invited.user
+
+
+@pytest.fixture()
+def admin_client(fresh_db):
+    from fastapi.testclient import TestClient
+
+    from insightxpert_api.main import create_app
+    from insightxpert_api.users import service
+    from insightxpert_api.users.models import CreateUserInput
+
+    invited = service.invite(CreateUserInput(email="admin@example.com", role="admin"))
+    client = TestClient(create_app())
+    resp = client.post(
+        "/api/v1/auth/login",
+        json={"email": "admin@example.com", "password": invited.temp_password},
+    )
+    assert resp.status_code == 200
+    yield client, invited.user
