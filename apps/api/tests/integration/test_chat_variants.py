@@ -83,6 +83,57 @@ class _ExecutorDictStage:
         return None
 
 
+def test_chat_poll_persists_user_and_assistant_messages(
+    authed_client: TestClient, patched_pipeline
+):
+    """QA FLAG 4: duplicate conversation created → returned id was always empty.
+    After the fix, the returned conversation should contain both the user message
+    and the assistant response.
+    """
+    r = authed_client.post(
+        "/api/v1/chat/poll",
+        json={"message": "count rows", "db_id": "california_schools"},
+    )
+    assert r.status_code == 200
+    cid = r.json()["conversation_id"]
+    g = authed_client.get(f"/api/v1/conversations/{cid}")
+    assert g.status_code == 200
+    messages = g.json()["messages"]
+    assert len(messages) == 2
+    roles = [m["role"] for m in messages]
+    assert roles == ["user", "assistant"]
+
+
+def test_chat_poll_persists_chunks(authed_client: TestClient, patched_pipeline):
+    """QA FLAG 4 follow-up: chunks should be appended to the conversation's
+    replay buffer so the UI can rehydrate on refresh.
+    """
+    r = authed_client.post(
+        "/api/v1/chat/poll",
+        json={"message": "count rows", "db_id": "california_schools"},
+    )
+    assert r.status_code == 200
+    cid = r.json()["conversation_id"]
+    g = authed_client.get(f"/api/v1/conversations/{cid}")
+    assert g.status_code == 200
+    assert len(g.json()["chunks"]) > 0
+
+
+def test_single_conversation_per_chat_call(authed_client: TestClient, patched_pipeline):
+    """QA FLAG 4: one /chat/poll with conversation_id=None used to create two
+    conversations (one returned to the caller, one where messages were stored).
+    Only one new conversation should exist after a single chat call.
+    """
+    before = authed_client.get("/api/v1/conversations").json()
+    r = authed_client.post(
+        "/api/v1/chat/poll",
+        json={"message": "count rows", "db_id": "california_schools"},
+    )
+    assert r.status_code == 200
+    after = authed_client.get("/api/v1/conversations").json()
+    assert len(after) == len(before) + 1
+
+
 def test_chat_poll_fallback_answer_uses_inner_row_count(authed_client: TestClient):
     """QA FLAG 3a: the fallback answer computed `len(ctx.state['rows'])` which
     (since rows is a dict {columns, rows, exec_ms}) was always 3. Confirm the

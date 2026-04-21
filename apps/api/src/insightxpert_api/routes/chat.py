@@ -52,20 +52,28 @@ def _build_pipeline_and_ctx(
     settings: Settings,
     convo_store: ConversationStore,
     emitter: EventEmitter | None,
+    conversation_id: str,
 ) -> tuple[PipelineContext, Any]:
+    """Build a pipeline + context for an already-resolved conversation_id.
+
+    Previously this helper called ``convo_store.get_or_create(body.conversation_id)``
+    a second time after the route had already done so — when ``body.conversation_id``
+    was None (the common first-turn case) the second call minted a different UUID,
+    so the route returned convo A but messages accumulated in convo B (QA FLAG 4).
+    The caller now owns ``get_or_create`` and passes the resolved id through.
+    """
     store = build_store(settings)
     db_svc = DatabaseService(bundled_dir=settings.bundled_dbs_dir, store=store)
     prof_svc = ProfileService(store)
     pipeline = default_pipeline(settings, db_svc, prof_svc)
 
-    convo = convo_store.get_or_create(claims.session_id, body.conversation_id)
     convo_store.append_message(
-        claims.session_id, convo.conversation_id, role="user", content=body.message
+        claims.session_id, conversation_id, role="user", content=body.message
     )
 
     ctx = PipelineContext(
         session_id=claims.session_id,
-        conversation_id=convo.conversation_id,
+        conversation_id=conversation_id,
         emitter=emitter,
     )
     ctx.state.update(db_id=body.db_id, question=body.message)
@@ -123,9 +131,15 @@ async def chat_sse(
 ) -> EventSourceResponse:
     """Run the pipeline and stream SSE chunks as they happen."""
     convo = convo_store.get_or_create(claims.session_id, body.conversation_id)
-    emitter = EventEmitter(convo.conversation_id)
+    emitter = EventEmitter(
+        convo.conversation_id,
+        on_emit=lambda chunk: convo_store.append_chunk(
+            claims.session_id, convo.conversation_id, chunk.model_dump(mode="json")
+        ),
+    )
     ctx, pipeline = _build_pipeline_and_ctx(
-        body=body, claims=claims, settings=settings, convo_store=convo_store, emitter=emitter
+        body=body, claims=claims, settings=settings, convo_store=convo_store,
+        emitter=emitter, conversation_id=convo.conversation_id,
     )
     # Fire pipeline on a background task so EventSourceResponse can start streaming
     # the emitter's queue before the pipeline finishes.
@@ -163,9 +177,15 @@ async def chat_poll(
 ) -> ChatPollResponse:
     """Run pipeline to completion and return the full list of chunks (non-streaming)."""
     convo = convo_store.get_or_create(claims.session_id, body.conversation_id)
-    emitter = EventEmitter(convo.conversation_id)
+    emitter = EventEmitter(
+        convo.conversation_id,
+        on_emit=lambda chunk: convo_store.append_chunk(
+            claims.session_id, convo.conversation_id, chunk.model_dump(mode="json")
+        ),
+    )
     ctx, pipeline = _build_pipeline_and_ctx(
-        body=body, claims=claims, settings=settings, convo_store=convo_store, emitter=emitter
+        body=body, claims=claims, settings=settings, convo_store=convo_store,
+        emitter=emitter, conversation_id=convo.conversation_id,
     )
     chunks = await _collect_chunks(pipeline, ctx, convo_store)
     return ChatPollResponse(
@@ -183,9 +203,15 @@ async def chat_answer(
 ) -> ChatAnswerResponse:
     """Run pipeline to completion; return final answer text + generated SQL list."""
     convo = convo_store.get_or_create(claims.session_id, body.conversation_id)
-    emitter = EventEmitter(convo.conversation_id)
+    emitter = EventEmitter(
+        convo.conversation_id,
+        on_emit=lambda chunk: convo_store.append_chunk(
+            claims.session_id, convo.conversation_id, chunk.model_dump(mode="json")
+        ),
+    )
     ctx, pipeline = _build_pipeline_and_ctx(
-        body=body, claims=claims, settings=settings, convo_store=convo_store, emitter=emitter
+        body=body, claims=claims, settings=settings, convo_store=convo_store,
+        emitter=emitter, conversation_id=convo.conversation_id,
     )
     chunks = await _collect_chunks(pipeline, ctx, convo_store)
 

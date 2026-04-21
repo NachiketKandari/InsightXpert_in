@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -15,15 +16,28 @@ class EventEmitter:
 
     _SENTINEL: None = None
 
-    def __init__(self, conversation_id: str) -> None:
+    def __init__(
+        self,
+        conversation_id: str,
+        on_emit: Callable[[ChatChunk], Any] | None = None,
+    ) -> None:
         self._queue: asyncio.Queue[ChatChunk | None] = asyncio.Queue()
         self._conversation_id = conversation_id
         self._closed = False
+        # Optional sync side-effect for each emitted chunk (e.g. append to the
+        # conversation's replay buffer). Kept sync + in-process to avoid adding
+        # latency to the streaming hot path.
+        self._on_emit = on_emit
 
     async def emit(self, chunk_type: ChunkType, data: BaseModel | dict[str, object]) -> None:
         if self._closed:
             return
         chunk = ChatChunk(type=chunk_type, data=data, conversation_id=self._conversation_id)
+        if self._on_emit is not None:
+            try:
+                self._on_emit(chunk)
+            except Exception:  # noqa: BLE001 — side-effect must not break the stream.
+                pass
         await self._queue.put(chunk)
 
     async def close(self) -> None:
