@@ -10,7 +10,13 @@ so these stay Gemini-free and fast.
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 from fastapi.testclient import TestClient
+
+from insightxpert_api.pipeline.pipeline import Pipeline
+from insightxpert_api.pipeline.stage import PipelineContext
+from insightxpert_api.sse.chunks import ChunkType, ErrorPayload
 
 
 # --- /chat/poll -----------------------------------------------------------------
@@ -59,3 +65,72 @@ def test_chat_answer_requires_session(client: TestClient, patched_pipeline):
         json={"message": "x", "db_id": "california_schools"},
     )
     assert r.status_code == 401
+
+
+class _ExecutorDictStage:
+    """Fake executor that writes rows in the real dict shape {columns, rows, exec_ms}
+    and does NOT write ctx.state["answer"] — to exercise the fallback path.
+    """
+
+    name = "sql_executor"
+
+    async def run(self, ctx: PipelineContext, _) -> None:
+        ctx.state["rows"] = {
+            "columns": ["n"],
+            "rows": [[343]],
+            "execution_time_ms": 5,
+        }
+        return None
+
+
+def test_chat_poll_fallback_answer_uses_inner_row_count(authed_client: TestClient):
+    """QA FLAG 3a: the fallback answer computed `len(ctx.state['rows'])` which
+    (since rows is a dict {columns, rows, exec_ms}) was always 3. Confirm the
+    fallback now inspects `rows['rows']` and reports the correct count.
+    """
+
+    def fake_factory(_s, _db, _pf):
+        return Pipeline([_ExecutorDictStage()])
+
+    with patch(
+        "insightxpert_api.routes.chat.default_pipeline", side_effect=fake_factory
+    ):
+        r = authed_client.post(
+            "/api/v1/chat/answer",
+            json={"message": "count rows", "db_id": "california_schools"},
+        )
+    assert r.status_code == 200, r.text
+    assert r.json()["answer"] == "Query returned 1 rows."
+
+
+class _ErrorStage:
+    """Stage that emits an ERROR chunk — simulates a pipeline failure path."""
+
+    name = "error_stage"
+
+    async def run(self, ctx: PipelineContext, _) -> None:
+        if ctx.emitter is not None:
+            await ctx.emitter.emit(
+                ChunkType.ERROR,
+                ErrorPayload(code="invalid_db", detail="database not found: x"),
+            )
+        return None
+
+
+def test_chat_answer_surfaces_unknown_db_error(authed_client: TestClient):
+    """QA FLAG 3b: /chat/answer used to swallow ERROR chunks, returning 200
+    with answer="". Any ERROR chunk should now raise HTTPException(500).
+    """
+
+    def fake_factory(_s, _db, _pf):
+        return Pipeline([_ErrorStage()])
+
+    with patch(
+        "insightxpert_api.routes.chat.default_pipeline", side_effect=fake_factory
+    ):
+        r = authed_client.post(
+            "/api/v1/chat/answer",
+            json={"message": "x", "db_id": "nonexistent"},
+        )
+    assert r.status_code >= 400
+    assert r.status_code == 500

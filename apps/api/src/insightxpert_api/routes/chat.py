@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
@@ -81,10 +81,14 @@ async def _run_pipeline(
     emitter = ctx.emitter
     try:
         await pipeline.run_scalar(ctx, None)
-        answer = str(ctx.state.get("answer", "")) or (
-            "Query returned "
-            f"{len(ctx.state.get('rows', []))} rows."
+        # executor_stage stores `rows` as a dict {columns, rows, execution_time_ms}.
+        # The previous fallback did `len(ctx.state['rows'])` which is always 3.
+        # Until an answerer LLM stage lands (Slice 1), compute the correct row count.
+        rows_payload = ctx.state.get("rows") or {}
+        inner_rows = (
+            rows_payload.get("rows", []) if isinstance(rows_payload, dict) else rows_payload
         )
+        answer = str(ctx.state.get("answer", "")) or f"Query returned {len(inner_rows)} rows."
         if emitter is not None:
             await emitter.emit(
                 ChunkType.ANSWER_GENERATED, AnswerGeneratedPayload(text=answer)
@@ -187,6 +191,7 @@ async def chat_answer(
 
     answer = ""
     sqls: list[str] = []
+    error_detail: str | None = None
     for chunk in chunks:
         # chunk.data may be a BaseModel or a dict; normalize to dict form.
         data = chunk.data if isinstance(chunk.data, dict) else chunk.data.model_dump(mode="json")
@@ -196,6 +201,13 @@ async def chat_answer(
             sql_text = data.get("sql")
             if sql_text:
                 sqls.append(str(sql_text))
+        elif chunk.type == ChunkType.ERROR:
+            # Surface pipeline errors — /chat/answer used to swallow them and
+            # return 200 with answer="" (QA FLAG 3b). /chat/poll intentionally
+            # passes errors through, so we only raise here.
+            error_detail = str(data.get("detail") or data.get("code") or "pipeline_error")
+    if error_detail is not None:
+        raise HTTPException(status_code=500, detail=error_detail)
     return ChatAnswerResponse(
         conversation_id=convo.conversation_id,
         answer=answer,
