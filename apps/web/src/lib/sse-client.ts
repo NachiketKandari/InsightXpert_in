@@ -6,7 +6,9 @@ export interface SSECallbacks {
   onError: (error: Error) => void;
 }
 
-export type AgentMode = "basic" | "agentic" | "deep";
+// Two-state toggle per spec F1. `deep_think` is deferred — see
+// `docs/deferred-features.md`. Do NOT add `"deep"` back here.
+export type AgentMode = "basic" | "agentic";
 
 export interface SSEOptions {
   skipClarification?: boolean;
@@ -16,7 +18,7 @@ export function createSSEStream(
   message: string,
   conversationId: string | null,
   callbacks: SSECallbacks,
-  agentMode: AgentMode = "basic",
+  agentMode: AgentMode = "agentic",
   options: SSEOptions = {},
   token?: string | null,
 ): AbortController {

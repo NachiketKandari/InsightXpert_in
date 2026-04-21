@@ -18,6 +18,32 @@ import { InsightChunk } from "./insight-chunk";
 import { ErrorChunk } from "./error-chunk";
 import { ClarificationChunk } from "./clarification-chunk";
 import { StatsContextChunk } from "./stats-context-chunk";
+import { ProfileLoadedChunk } from "./profile-loaded-chunk";
+import {
+  SchemaLinkingStartedChunk,
+  CandidateSqlsChunk,
+  LiteralsExtractedChunk,
+  SemanticMatchesChunk,
+  JoinPathsAddedChunk,
+  LinkedSchemaFinalChunk,
+} from "./schema-linking-chunk";
+import { SqlGeneratedChunk } from "./sql-generated-chunk";
+import { SqlExecutingChunk } from "./sql-executing-chunk";
+import { RowsReturnedChunk } from "./rows-returned-chunk";
+import { AnswerGeneratedChunk } from "./answer-generated-chunk";
+import type {
+  ProfileLoadedData,
+  SchemaLinkingStartedData,
+  CandidateSQLsGeneratedData,
+  LiteralsExtractedData,
+  SemanticMatchesData,
+  JoinPathsAddedData,
+  LinkedSchemaFinalData,
+  SqlGeneratedData,
+  SqlExecutingData,
+  RowsReturnedData,
+  AnswerGeneratedData,
+} from "@/types/chunks";
 
 /** Inline progress step: spinner → checkmark after a brief delay during streaming. */
 function ProgressStep({ label, isComplete }: { label: string; isComplete?: boolean }) {
@@ -82,20 +108,28 @@ function ChunkRendererInner({ chunk, isComplete, isStreaming, enrichmentTraces, 
     case "status": {
       const rawRag = chunk.data?.rag_context;
       const ragContext = Array.isArray(rawRag) ? (rawRag as string[]) : undefined;
-      content = <StatusChunk content={chunk.content ?? ""} isComplete={isComplete} ragContext={ragContext} />;
+      // Strict envelope: `data.message`. Legacy flat `content` kept as fallback.
+      const msg = (chunk.data?.message as string | undefined) ?? chunk.content ?? "";
+      content = <StatusChunk content={msg} isComplete={isComplete} ragContext={ragContext} />;
       break;
     }
     case "tool_call": {
+      // Strict envelope: `data.tool`; legacy flat `tool_name` kept as fallback.
+      const toolName =
+        (chunk.data?.tool as string | undefined) ?? chunk.tool_name ?? undefined;
       const toolLabel =
-        chunk.tool_name === "run_sql"
+        toolName === "run_sql"
           ? "Generating SQL query"
-          : chunk.content ?? "";
+          : chunk.content ?? toolName ?? "";
       content = <ToolCallChunk content={toolLabel} isComplete={isComplete} />;
       break;
     }
-    case "sql":
-      content = chunk.sql ? <SqlChunk sql={chunk.sql} /> : null;
+    case "sql": {
+      // Legacy Phase A shape — kept for back-compat with pre-B2 replay.
+      const legacySql = chunk.sql ?? (chunk.data?.sql as string | undefined);
+      content = legacySql ? <SqlChunk sql={legacySql} /> : null;
       break;
+    }
     case "tool_result":
       content = (
         <>
@@ -129,15 +163,22 @@ function ChunkRendererInner({ chunk, isComplete, isStreaming, enrichmentTraces, 
         </>
       );
       break;
-    case "answer":
+    case "answer": {
+      // Legacy Phase A shape. Kept for back-compat.
+      const legacyText =
+        chunk.content ?? (chunk.data?.text as string | undefined) ?? "";
       content = (
         <>
           <ProgressStep label="Generating answer" isComplete={isComplete} />
-          <AnswerChunk content={chunk.content ?? ""} />
+          <AnswerChunk content={legacyText} />
         </>
       );
       break;
-    case "insight":
+    }
+    case "insight": {
+      // Strict envelope: `data.content`; legacy flat `content` kept as fallback.
+      const insightText =
+        (chunk.data?.content as string | undefined) ?? chunk.content ?? "";
       content = (
         <>
           {orchestratorPlan && agentTraces && agentTraces.length > 0 && (
@@ -147,41 +188,141 @@ function ChunkRendererInner({ chunk, isComplete, isStreaming, enrichmentTraces, 
           )}
           <ProgressStep label="Synthesized enriched insight" isComplete={isComplete} />
           {enrichmentTraces && enrichmentTraces.length > 0 ? (
-            <InsightChunk content={chunk.content ?? ""} traces={enrichmentTraces} />
+            <InsightChunk content={insightText} traces={enrichmentTraces} />
           ) : (
-            <AnswerChunk content={chunk.content ?? ""} />
+            <AnswerChunk content={insightText} />
           )}
         </>
       );
       break;
+    }
     case "orchestrator_plan":
       return null;
     case "agent_trace":
       return null;
     case "enrichment_trace":
       return null;
-    case "error":
-      content = <ErrorChunk content={chunk.content ?? "An error occurred"} />;
+    case "error": {
+      // Strict envelope: `data.detail` / `data.code`; legacy `content` fallback.
+      const errText =
+        (chunk.data?.detail as string | undefined) ??
+        (chunk.data?.code as string | undefined) ??
+        chunk.content ??
+        "An error occurred";
+      content = <ErrorChunk content={errText} />;
       break;
-    case "clarification":
+    }
+    case "clarification": {
+      // Strict envelope: `data.question`; legacy `content` fallback.
+      const q =
+        (chunk.data?.question as string | undefined) ??
+        chunk.content ??
+        "Could you clarify your question?";
       content = (
         <ClarificationChunk
-          content={chunk.content ?? "Could you clarify your question?"}
+          content={q}
           skipAllowed={!!(chunk.data?.skip_allowed)}
         />
       );
       break;
-    case "stats_context":
+    }
+    case "stats_context": {
+      const sc = (chunk.data?.content as string | undefined) ?? chunk.content ?? "";
       content = (
         <>
           <ProgressStep label="Retrieved dataset statistics" isComplete={isComplete} />
           <StatsContextChunk
-            content={chunk.content ?? ""}
+            content={sc}
             groups={chunk.data?.groups as string[]}
           />
         </>
       );
       break;
+    }
+
+    // -------------------------------------------------------------------
+    // Tier-3: pipeline transparency
+    // -------------------------------------------------------------------
+    case "profile_loaded":
+      content = (
+        <ProfileLoadedChunk data={chunk.data as unknown as ProfileLoadedData} />
+      );
+      break;
+    case "schema_linking_started":
+      content = (
+        <SchemaLinkingStartedChunk
+          data={chunk.data as unknown as SchemaLinkingStartedData}
+        />
+      );
+      break;
+    case "candidate_sqls_generated":
+      content = (
+        <CandidateSqlsChunk
+          data={chunk.data as unknown as CandidateSQLsGeneratedData}
+        />
+      );
+      break;
+    case "literals_extracted":
+      content = (
+        <LiteralsExtractedChunk
+          data={chunk.data as unknown as LiteralsExtractedData}
+        />
+      );
+      break;
+    case "semantic_matches":
+      content = (
+        <SemanticMatchesChunk
+          data={chunk.data as unknown as SemanticMatchesData}
+        />
+      );
+      break;
+    case "join_paths_added":
+      content = (
+        <JoinPathsAddedChunk
+          data={chunk.data as unknown as JoinPathsAddedData}
+        />
+      );
+      break;
+    case "linked_schema_final":
+      content = (
+        <LinkedSchemaFinalChunk
+          data={chunk.data as unknown as LinkedSchemaFinalData}
+        />
+      );
+      break;
+    case "sql_generated":
+      content = (
+        <SqlGeneratedChunk data={chunk.data as unknown as SqlGeneratedData} />
+      );
+      break;
+    case "sql_executing":
+      content = (
+        <SqlExecutingChunk
+          data={chunk.data as unknown as SqlExecutingData}
+          isComplete={isComplete}
+        />
+      );
+      break;
+    case "rows_returned":
+      content = (
+        <RowsReturnedChunk data={chunk.data as unknown as RowsReturnedData} />
+      );
+      break;
+    case "answer_generated":
+      content = (
+        <>
+          <ProgressStep label="Generated answer" isComplete={isComplete} />
+          <AnswerGeneratedChunk
+            data={chunk.data as unknown as AnswerGeneratedData}
+          />
+        </>
+      );
+      break;
+
+    // Tier-1: metrics is consumed upstream for stats; no renderer here.
+    case "metrics":
+      return null;
+
     default:
       content = null;
   }

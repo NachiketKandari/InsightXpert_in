@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any
 
 from jinja2 import Template
 
-from ..llm.base import BaseLLM
+from ..llm import LLMProvider
 from ..sse.chunks import (
     CandidateSQLsGeneratedPayload,
     ChunkType,
@@ -56,7 +56,7 @@ class SchemaLinkerStage:
 
     def __init__(
         self,
-        llm: BaseLLM,
+        llm: LLMProvider,
         prompt_path: str,
         vector_index_path: str | None = None,
         lsh_index_path: str | None = None,

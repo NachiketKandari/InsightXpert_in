@@ -52,6 +52,13 @@ class Settings(BaseSettings):
     sql_timeout_seconds: int = 30
     max_refinement_iterations: int = 2
 
+    # --- orchestration (B2) ------------------------------------------------
+    # Read by the vendored orchestrator_loop — see agents_core/orchestrator.py.
+    enable_stats_context: bool = False  # off by default in v1; no StatsResolver wired yet
+    max_orchestrator_tasks: int = 10
+    clarification_enabled: bool = False
+    llm_provider: str = "gemini"
+
     # --- paths -------------------------------------------------------------
     bundled_dbs_dir: str = "./Databases"
 

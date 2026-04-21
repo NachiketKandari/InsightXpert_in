@@ -1,17 +1,33 @@
 export type ChunkType =
+  // Tier-1
   | "status"
-  | "tool_call"
-  | "sql"
-  | "tool_result"
-  | "answer"
   | "error"
-  | "clarification"
   | "metrics"
+  // Tier-2
+  | "tool_call"
+  | "tool_result"
+  | "clarification"
+  // Tier-3 — pipeline transparency
+  | "profile_loaded"
+  | "schema_linking_started"
+  | "candidate_sqls_generated"
+  | "literals_extracted"
+  | "semantic_matches"
+  | "join_paths_added"
+  | "linked_schema_final"
+  | "sql_generated"
+  | "sql_executing"
+  | "rows_returned"
+  | "answer_generated"
+  // Tier-4 — orchestration
   | "stats_context"
   | "insight"
   | "enrichment_trace"
   | "orchestrator_plan"
-  | "agent_trace";
+  | "agent_trace"
+  // Legacy aliases still referenced in some fork renderers; kept for back-compat
+  | "sql"
+  | "answer";
 
 export interface ChatChunk {
   type: ChunkType;

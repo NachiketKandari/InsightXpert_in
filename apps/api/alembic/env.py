@@ -11,6 +11,7 @@ from sqlalchemy import engine_from_config, pool
 from insightxpert_api.config import get_settings
 from insightxpert_api.db.base import metadata
 from insightxpert_api.users import table as _users_table  # noqa: F401
+from insightxpert_api.orchestration import table as _orch_tables  # noqa: F401
 
 config = context.config
 if config.config_file_name is not None:

@@ -24,7 +24,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   currentModel: "gemini-2.5-flash",
   providers: [],
   loading: false,
-  agentMode: "basic" as AgentMode,
+  // Default to agentic per spec F1 (B2 mode toggle).
+  agentMode: "agentic" as AgentMode,
 
   fetchConfig: async () => {
     set({ loading: true });
