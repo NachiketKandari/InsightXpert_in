@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     session_ttl_seconds: int = 60 * 60 * 24 * 30  # 30 days sliding
     session_cookie_name: str = "ix_session"
 
+    # Bootstrap admin (applied once on first boot, then ignored if any user exists)
+    bootstrap_admin_email: str | None = None
+    bootstrap_admin_password: str | None = None
+
     # --- llm ---------------------------------------------------------------
     gemini_api_key: str
     gemini_chat_model: str = "gemini-2.5-flash"
