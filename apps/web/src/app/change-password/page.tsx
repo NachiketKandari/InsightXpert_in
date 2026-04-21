@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { useState } from "react";
+import { Suspense, useState } from "react";
 
 import { AppLogo } from "@/components/ui/app-logo";
 import { Button } from "@/components/ui/button";
@@ -16,7 +16,17 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { changePassword } from "@/lib/auth-api";
 
+// Next 16: `useSearchParams()` bails out of CSR static generation unless the
+// consumer is wrapped in a Suspense boundary — wrap at the route level.
 export default function ChangePasswordPage() {
+  return (
+    <Suspense fallback={null}>
+      <ChangePasswordForm />
+    </Suspense>
+  );
+}
+
+function ChangePasswordForm() {
   const router = useRouter();
   const search = useSearchParams();
   const next = search.get("next") || "/";

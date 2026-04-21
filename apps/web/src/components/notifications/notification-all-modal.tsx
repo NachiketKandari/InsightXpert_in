@@ -196,9 +196,6 @@ function NotificationDetail({
           <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">User</h4>
           <div className="flex items-center gap-2 flex-wrap text-sm">
             <span className="font-medium">{notification.user_email}</span>
-            {notification.user_org_id && (
-              <Badge variant="outline" className="text-[10px]">{notification.user_org_id}</Badge>
-            )}
             {notification.user_is_admin !== undefined && (
               <Badge variant={notification.user_is_admin ? "default" : "secondary"} className="text-[10px]">
                 {notification.user_is_admin ? "admin" : "user"}

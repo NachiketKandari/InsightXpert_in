@@ -1,5 +1,17 @@
+// Notifications store (Phase C1).
+// Mirrors the chat-store pattern: hydrated via a REST poll, live-updated via
+// the SSE stream from `@/lib/automations/sse`. Components mount
+// `useNotificationsStream` once (gated on feature flag + auth) and push new
+// events into the store via `ingestStreamed`.
+
 import { create } from "zustand";
-import { apiCall } from "@/lib/api";
+import {
+  fetchAllNotifications,
+  fetchNotifications,
+  fetchUnreadCount,
+  markAllNotificationsRead,
+  markNotificationRead,
+} from "@/lib/automations/api";
 import type { Notification } from "@/types/automation";
 
 interface NotificationState {
@@ -14,24 +26,9 @@ interface NotificationState {
   fetchUnreadCount: () => Promise<void>;
   markAsRead: (id: string) => Promise<void>;
   markAllAsRead: () => Promise<void>;
+  /** Push a freshly-streamed notification event (from the SSE hook). */
+  ingestStreamed: (n: Notification) => void;
 }
-
-const _fetchSlice = async (
-  url: string,
-  stateKey: "notifications" | "allNotifications",
-  loadingKey: "isLoading" | "isLoadingAll",
-  unreadOnly: boolean,
-  set: (partial: Partial<NotificationState>) => void,
-) => {
-  set({ [loadingKey]: true });
-  try {
-    const params = unreadOnly ? "?unread_only=true" : "";
-    const data = await apiCall<Notification[]>(`${url}${params}`);
-    set({ [stateKey]: data ?? [], [loadingKey]: false });
-  } catch {
-    set({ [loadingKey]: false });
-  }
-};
 
 export const useNotificationStore = create<NotificationState>((set, get) => ({
   notifications: [],
@@ -41,15 +38,19 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
   isLoadingAll: false,
 
   fetchNotifications: async (unreadOnly = false) => {
-    await _fetchSlice("/api/v1/notifications", "notifications", "isLoading", unreadOnly, set);
+    set({ isLoading: true });
+    const data = await fetchNotifications(unreadOnly);
+    set({ notifications: data ?? [], isLoading: false });
   },
 
   fetchAllNotifications: async (unreadOnly = false) => {
-    await _fetchSlice("/api/v1/notifications/all", "allNotifications", "isLoadingAll", unreadOnly, set);
+    set({ isLoadingAll: true });
+    const data = await fetchAllNotifications(unreadOnly);
+    set({ allNotifications: data ?? [], isLoadingAll: false });
   },
 
   fetchUnreadCount: async () => {
-    const data = await apiCall<{ count: number }>("/api/v1/notifications/count");
+    const data = await fetchUnreadCount();
     if (data) set({ unreadCount: data.count });
   },
 
@@ -65,21 +66,17 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
       ),
       unreadCount: Math.max(0, s.unreadCount - 1),
     }));
-    // Fire-and-forget API call; revert on failure
-    apiCall<{ status: string }>(
-      `/api/v1/notifications/${id}/read`,
-      { method: "PATCH" },
-    ).catch(() => {
+    const ok = await markNotificationRead(id);
+    if (!ok) {
       set({
         notifications: prev.notifications,
         allNotifications: prev.allNotifications,
         unreadCount: prev.unreadCount,
       });
-    });
+    }
   },
 
   markAllAsRead: async () => {
-    // Optimistic update — dismiss all immediately
     const prev = get();
     set((s) => {
       const ownIds = new Set(s.notifications.map((n) => n.id));
@@ -91,16 +88,25 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
         unreadCount: 0,
       };
     });
-    // Fire-and-forget API call; revert on failure
-    apiCall<{ status: string; count: number }>(
-      "/api/v1/notifications/mark-all-read",
-      { method: "POST" },
-    ).catch(() => {
+    const ok = await markAllNotificationsRead();
+    if (!ok) {
       set({
         notifications: prev.notifications,
         allNotifications: prev.allNotifications,
         unreadCount: prev.unreadCount,
       });
+    }
+  },
+
+  ingestStreamed: (n) => {
+    set((s) => {
+      // Dedupe on id — SSE backlog can re-emit on reconnect.
+      if (s.notifications.some((x) => x.id === n.id)) return s;
+      const unread = n.is_read ? s.unreadCount : s.unreadCount + 1;
+      return {
+        notifications: [n, ...s.notifications],
+        unreadCount: unread,
+      };
     });
   },
 }));

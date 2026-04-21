@@ -7,7 +7,6 @@ import { ChunkRenderer } from "@/components/chunks/chunk-renderer";
 import { MessageActions } from "@/components/chat/message-actions";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useChatStore } from "@/stores/chat-store";
-import { useAutomationStore } from "@/stores/automation-store";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import type { Message, EnrichmentTrace, OrchestratorPlan, AgentTrace } from "@/types/chat";
 import { downloadMessageReport, downloadConversationReport } from "@/lib/export-report";
@@ -149,10 +148,17 @@ function MessageBubbleInner({
 
   const handleCreateAutomation = useCallback(() => {
     if (!activeConversationId) return;
-    useAutomationStore.getState().openWorkflowBuilder({
+    // Phase C1: workflow-canvas builder is deferred to C2. For now, we
+    // route the user to the Automations list page where the form-based
+    // "New automation" dialog lives. The message + conversation context
+    // is preserved in the URL query so a future builder can rehydrate it.
+    const params = new URLSearchParams({
       conversationId: activeConversationId,
-      focusMessageId: message.id,
+      messageId: message.id,
     });
+    if (typeof window !== "undefined") {
+      window.location.href = `/automations?${params.toString()}`;
+    }
   }, [message.id, activeConversationId]);
 
   return (

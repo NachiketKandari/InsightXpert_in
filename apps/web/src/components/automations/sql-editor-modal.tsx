@@ -1,5 +1,9 @@
 "use client";
 
+// Phase C1: reused by the new-automation dialog to run + edit a SQL query
+// ahead of saving. De-coupled from the workflow-builder store — callers pass
+// `onSave(newSql)` directly.
+
 import { useState, useCallback } from "react";
 import { Play, Save, X, Loader2, Database } from "lucide-react";
 import {
@@ -11,7 +15,6 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { useAutomationStore } from "@/stores/automation-store";
 import { apiCall } from "@/lib/api";
 
 interface SqlResult {
@@ -22,27 +25,26 @@ interface SqlResult {
 }
 
 interface SqlEditorModalProps {
-  blockId: string;
-  blockLabel: string;
+  title: string;
   sql: string;
   isOpen: boolean;
   onClose: () => void;
+  onSave: (sql: string) => void;
 }
 
 export function SqlEditorModal({
-  blockId,
-  blockLabel,
+  title,
   sql,
   isOpen,
   onClose,
+  onSave,
 }: SqlEditorModalProps) {
   const [editSql, setEditSql] = useState(sql);
   const [result, setResult] = useState<SqlResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
-  const updateBlock = useAutomationStore((s) => s.updateBlock);
 
-  // Reset state when modal opens or sql prop changes (render-time adjustment)
+  // Reset state when modal opens or sql prop changes.
   const [prevKey, setPrevKey] = useState({ isOpen, sql });
   if (isOpen && (isOpen !== prevKey.isOpen || sql !== prevKey.sql)) {
     setEditSql(sql);
@@ -73,10 +75,10 @@ export function SqlEditorModal({
   const handleSave = useCallback(() => {
     const trimmed = editSql.trim();
     if (trimmed && trimmed !== sql) {
-      updateBlock(blockId, { sql: trimmed });
+      onSave(trimmed);
     }
     onClose();
-  }, [blockId, editSql, sql, updateBlock, onClose]);
+  }, [editSql, sql, onSave, onClose]);
 
   const hasChanges = editSql.trim() !== sql.trim();
 
@@ -87,7 +89,7 @@ export function SqlEditorModal({
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Database className="size-3.5 text-muted-foreground" />
-              <DialogTitle className="text-sm font-medium">{blockLabel}</DialogTitle>
+              <DialogTitle className="text-sm font-medium">{title}</DialogTitle>
             </div>
             <button
               onClick={onClose}
@@ -98,19 +100,17 @@ export function SqlEditorModal({
             </button>
           </div>
           <DialogDescription className="sr-only">
-            View, edit and run the SQL query for this workflow block
+            View, edit and run the SQL query
           </DialogDescription>
         </DialogHeader>
 
         <div className="flex flex-col flex-1 overflow-hidden p-4 gap-3 min-h-0">
-          {/* SQL Editor */}
           <Textarea
             value={editSql}
             onChange={(e) => setEditSql(e.target.value)}
             className="font-mono text-xs resize-none flex-shrink-0 h-[140px] min-h-[80px]"
             placeholder="SELECT ..."
             onKeyDown={(e) => {
-              // Ctrl+Enter / Cmd+Enter to run
               if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
                 e.preventDefault();
                 handleRun();
@@ -118,7 +118,6 @@ export function SqlEditorModal({
             }}
           />
 
-          {/* Actions */}
           <div className="flex items-center gap-2 flex-shrink-0">
             <Button
               size="sm"
@@ -134,12 +133,7 @@ export function SqlEditorModal({
               {isRunning ? "Running..." : "Run SQL"}
             </Button>
             {hasChanges && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={handleSave}
-                title="Save SQL changes to the block"
-              >
+              <Button size="sm" variant="outline" onClick={handleSave}>
                 <Save className="size-3.5 mr-1.5" />
                 Save Changes
               </Button>
@@ -154,14 +148,12 @@ export function SqlEditorModal({
             </span>
           </div>
 
-          {/* Error */}
           {error && (
             <p className="text-xs text-destructive flex-shrink-0 bg-destructive/5 border border-destructive/20 rounded-md px-3 py-2">
               {error}
             </p>
           )}
 
-          {/* Results table */}
           {result && result.columns.length > 0 && (
             <div className="flex-1 overflow-auto border border-border rounded-md min-h-0">
               <table className="w-full text-xs border-collapse">
@@ -179,10 +171,7 @@ export function SqlEditorModal({
                 </thead>
                 <tbody>
                   {result.rows.slice(0, 200).map((row, i) => (
-                    <tr
-                      key={i}
-                      className={i % 2 === 0 ? "bg-background" : "bg-muted/20"}
-                    >
+                    <tr key={i} className={i % 2 === 0 ? "bg-background" : "bg-muted/20"}>
                       {result.columns.map((col) => (
                         <td
                           key={col}

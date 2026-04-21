@@ -53,11 +53,6 @@ export function NotificationCard({
               {n.user_email}
             </span>
           )}
-          {isSuperAdmin && n.user_org_id && (
-            <Badge variant="outline" className="text-[10px] h-4">
-              {n.user_org_id}
-            </Badge>
-          )}
           {isSuperAdmin && n.user_is_admin !== undefined && (
             <Badge
               variant={n.user_is_admin ? "default" : "secondary"}

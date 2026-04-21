@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useState } from "react";
+import { Suspense, useCallback, useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
 
 import { AppLogo } from "@/components/ui/app-logo";
@@ -18,6 +18,14 @@ import { Label } from "@/components/ui/label";
 import { login } from "@/lib/auth-api";
 
 export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginForm />
+    </Suspense>
+  );
+}
+
+function LoginForm() {
   const router = useRouter();
   const search = useSearchParams();
   const next = search.get("next") || "/";
