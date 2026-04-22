@@ -20,7 +20,16 @@ import re
 import sqlite3
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    UploadFile,
+    status,
+)
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
@@ -29,13 +38,16 @@ from ..config import Settings, get_settings
 from ..databases import service as visibility_service
 from ..db.schema import ddl as schema_ddl
 from ..logging import get_logger
-from ..pipeline.pipeline import Pipeline
-from ..pipeline.profiler_stage import ProfilerStage
-from ..pipeline.stage import PipelineContext
+from ..profiling.runner import (
+    ProfileFlags,
+    count_columns,
+    estimate_cost,
+    run_profile_stream,
+)
 from ..services.conversation_store import ConversationStore, get_conversation_store
 from ..services.database_service import DatabaseService
 from ..services.profile_service import ProfileService
-from ..sse.chunks import ChunkType, ErrorPayload
+from ..sse.chunks import ChunkType, ProfileCostEstimatePayload
 from ..sse.emitter import EventEmitter
 from ..storage import build_store
 
@@ -171,55 +183,140 @@ async def get_profile(
     return profile.model_dump(mode="json")
 
 
-async def _run_profile_pipeline(
-    pipeline: Pipeline, ctx: PipelineContext
+class ProfileRunRequest(BaseModel):
+    """Body for ``POST /databases/{db_id}/profile``.
+
+    All flags default to ``False`` — the base path (schema + stats only) is
+    free. Any of the four expensive flags triggers the cost-gate handshake
+    unless ``confirmed=true``:
+
+        1. FE POSTs {flags: on, confirmed: false}. Server replies with one
+           ``profile_cost_estimate`` chunk and closes the stream.
+        2. FE renders a confirmation modal, then re-POSTs with
+           ``confirmed=true``. Server runs every stage and streams the
+           six-stage progress contract.
+    """
+
+    with_summaries: bool = False
+    with_quirks: bool = False
+    with_lsh: bool = False
+    with_vectors: bool = False
+    confirmed: bool = False
+
+
+async def _run_profile_v2(
+    db_id: str,
+    db_path: str,
+    flags: ProfileFlags,
+    emitter: EventEmitter,
+    session_id: str,
+    prof_svc: ProfileService,
+    settings: Settings,
+    llm: object | None,
 ) -> None:
-    emitter = ctx.emitter
     try:
-        await pipeline.run_scalar(ctx, None)
-    except Exception as exc:  # noqa: BLE001
-        log.error(
-            "profile.pipeline_failed",
-            session_id=ctx.session_id,
-            db_id=ctx.state.get("db_id"),
-            error=str(exc),
-            error_type=type(exc).__name__,
+        profile = await run_profile_stream(
+            emitter,
+            db_id=db_id,
+            db_path=db_path,
+            flags=flags,
+            llm=llm,
+            batch_size=settings.profiling_batch_size,
+            max_columns_for_llm=settings.profiling_max_columns_for_llm,
+            batch_disabled=settings.profiling_batch_disabled,
         )
-        if emitter is not None:
-            await emitter.emit(
-                ChunkType.ERROR,
-                ErrorPayload(code="profile_failed", detail=str(exc)),
-            )
+        if profile is not None:
+            prof_svc.save(session_id, db_id, profile)
     finally:
-        if emitter is not None:
-            await emitter.close()
+        await emitter.close()
+
+
+async def _emit_cost_estimate_and_close(
+    emitter: EventEmitter, payload: ProfileCostEstimatePayload
+) -> None:
+    try:
+        await emitter.emit(ChunkType.profile_cost_estimate, payload)
+    finally:
+        await emitter.close()
 
 
 @router.post("/{db_id}/profile")
 async def run_profile(
     db_id: str,
+    request: Request,
+    body: ProfileRunRequest | None = None,
     cu: CurrentUser = Depends(get_current_user),
     settings: Settings = Depends(get_settings),
     convo_store: ConversationStore = Depends(get_conversation_store),
 ) -> EventSourceResponse:
-    """Kick off profiling as a single-stage Pipeline, stream SSE progress."""
+    """Run profiling with stepped SSE progress + cost-gate handshake."""
     db_svc = _db_svc(settings)
     prof_svc = _prof_svc(settings)
-    if db_svc.resolve(cu.id, db_id) is None:
+    ref = db_svc.resolve(cu.id, db_id)
+    if ref is None:
         raise HTTPException(status_code=404, detail="invalid_db")
 
     convo = convo_store.get_or_create(cu.id, None)
     emitter = EventEmitter(convo.conversation_id)
-    pipeline = Pipeline([ProfilerStage(db_svc=db_svc, prof_svc=prof_svc)])
 
-    ctx = PipelineContext(
-        session_id=cu.id,
-        conversation_id=convo.conversation_id,
-        emitter=emitter,
+    req = body or ProfileRunRequest()
+    flags = ProfileFlags(
+        with_summaries=req.with_summaries,
+        with_quirks=req.with_quirks,
+        with_lsh=req.with_lsh,
+        with_vectors=req.with_vectors,
     )
-    ctx.state["db_id"] = db_id
 
-    asyncio.create_task(_run_profile_pipeline(pipeline, ctx))
+    # --- cost-gate branch ------------------------------------------------
+    # Any expensive flag on + not confirmed → emit a single estimate chunk
+    # and close the stream. FE re-POSTs with confirmed=true to run.
+    if flags.any and not req.confirmed:
+        _, column_count = count_columns(ref.local_path, db_id)
+        estimate = estimate_cost(
+            column_count, flags, settings.profiling_batch_size
+        )
+        payload = ProfileCostEstimatePayload(
+            columns=estimate.columns,
+            batch_size=estimate.batch_size,
+            total_llm_calls=estimate.total_llm_calls,
+            estimated_seconds=estimate.estimated_seconds,
+        )
+        asyncio.create_task(_emit_cost_estimate_and_close(emitter, payload))
+        return EventSourceResponse(emitter.stream())
+
+    # --- full run branch -------------------------------------------------
+    # Resolve an LLM if any LLM stage is on. We don't construct one on the
+    # cheap (schema+stats only) path so tests can hit it without Gemini.
+    llm: object | None = None
+    if flags.any_llm or flags.with_vectors:
+        # Prefer an app-state LLM (populated by tests via app.state.llm) so
+        # the profile path can be exercised without a live Gemini key.
+        llm = getattr(request.app.state, "llm", None)
+        if llm is None:
+            try:
+                from ..llm.gemini import GeminiLLM
+
+                llm = GeminiLLM(
+                    api_key=settings.gemini_api_key,
+                    model=settings.gemini_chat_model,
+                    embed_model=settings.gemini_embed_model,
+                )
+            except Exception as exc:
+                log.warning("profile.llm_construct_failed", error=str(exc))
+                llm = None
+
+    asyncio.create_task(
+        _run_profile_v2(
+            db_id=db_id,
+            db_path=ref.local_path,
+            flags=flags,
+            emitter=emitter,
+            session_id=cu.id,
+            prof_svc=prof_svc,
+            settings=settings,
+            llm=llm,
+        )
+    )
     return EventSourceResponse(emitter.stream())
 
 

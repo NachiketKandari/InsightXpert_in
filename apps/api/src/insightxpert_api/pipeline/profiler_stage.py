@@ -5,11 +5,12 @@ The vendored ``Profiler`` class is BIRD-benchmark-aware (hard-coded ``Databases/
 that works over arbitrary SQLite files resolved by ``DatabaseService``. Rather than
 mutate the vendored tree, we compose the vendored primitives directly here:
 
-    SchemaExtractor → StatsCollector → (optional) SummaryGenerator
+    SchemaExtractor → StatsCollector → (optional) BatchedSummaryGenerator →
+      (optional) BatchedQuirkDetector → (optional) LSH → (optional) vectors
 
-LSH / vector / quirk-enrichment passes are intentionally skipped in v1; downstream
-stages handle ``None`` for those indexes. The linker uses LSH only if we pass one
-in, so this simplification is safe.
+Flags on :func:`build_profile` opt-in the expensive LLM / index stages one at a
+time. All four auto-disable when the total column count exceeds
+``settings.profiling_max_columns_for_llm``.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ..logging import get_logger
 from ..services.database_service import DatabaseService
 from ..services.profile_service import ProfileService
 from ..sse.chunks import ChunkType, ProfileLoadedPayload
@@ -28,28 +30,125 @@ from .stage import PipelineContext
 
 if TYPE_CHECKING:
     from ..llm import LLMProvider
+    from ..vendored.pipeline_core.models.schema import DatabaseSchema
+
+log = get_logger("pipeline.profiler_stage")
 
 
 async def build_profile(
     db_id: str,
     db_path: str,
-    llm: "LLMProvider | None" = None,
+    llm: LLMProvider | None = None,
+    *,
+    with_summaries: bool = False,
+    with_quirks: bool = False,
+    with_lsh: bool = False,
+    with_vectors: bool = False,
+    batch_size: int = 20,
+    batch_disabled: bool = False,
+    max_columns_for_llm: int = 500,
 ) -> DatabaseProfile:
-    """Run the minimal 2-step profiler (schema → stats) against a local SQLite file.
+    """Run the profiler against a local SQLite file.
 
-    ``llm`` is accepted for forward-compat but unused in v1: summary/quirk LLM passes
-    are skipped because they add latency and require the vendored prompts. Stages
-    downstream work fine with empty short/long summaries.
+    Default (all flags off) reproduces the pre-upgrade behaviour — a fast
+    ``schema → stats`` pass with empty summaries. When a flag is on the
+    matching stage is invoked via the batched wrapper (or the vendored
+    per-column path when ``batch_disabled`` is True).
+
+    The four optional stages **auto-disable** when the total column count
+    exceeds ``max_columns_for_llm``; a ``profiler.stage_auto_disabled``
+    warning explains the override.
     """
     path = Path(db_path)
     db = SQLiteDatabase(path)
-    # Override db_id so schema.db_id matches the logical id the user supplied
     db.db_id = db_id
     with db:
         schema = SchemaExtractor().extract(db)
+        all_columns = sum(len(t.columns) for t in schema.tables)
+
+        # --- auto-disable guard -----------------------------------------
+        any_flag = with_summaries or with_quirks or with_lsh or with_vectors
+        if any_flag and all_columns > max_columns_for_llm:
+            log.warning(
+                "profiler.stage_auto_disabled",
+                db_id=db_id,
+                columns=all_columns,
+                threshold=max_columns_for_llm,
+            )
+            with_summaries = False
+            with_quirks = False
+            with_lsh = False
+            with_vectors = False
+
         profile = StatsCollector(fast=False).collect(db, schema)
-    # profile.db_id defaults to schema.db_id (set by StatsCollector) → ensure match
+
+        if with_summaries and llm is not None:
+            profile = await _run_summaries(
+                schema, profile, llm, batch_size, batch_disabled
+            )
+        if with_quirks and llm is not None:
+            profile = await _run_quirks(
+                schema, profile, llm, batch_size, batch_disabled
+            )
+        if with_lsh:
+            _run_lsh(db, schema)
+        if with_vectors and llm is not None:
+            await _run_vectors(profile, llm)
+
     return profile
+
+
+async def _run_summaries(
+    schema: DatabaseSchema,
+    profile: DatabaseProfile,
+    llm: object,
+    batch_size: int,
+    batch_disabled: bool,
+) -> DatabaseProfile:
+    if batch_disabled:
+        from ..vendored.pipeline_core.profiler.summary_generator import (
+            SummaryGenerator,
+        )
+
+        return await SummaryGenerator(llm).async_generate(schema, profile)
+
+    from ..profiling.batched_summary import BatchedSummaryGenerator
+
+    return await BatchedSummaryGenerator(
+        llm, batch_size=batch_size
+    ).async_generate(schema, profile)
+
+
+async def _run_quirks(
+    schema: DatabaseSchema,
+    profile: DatabaseProfile,
+    llm: object,
+    batch_size: int,
+    batch_disabled: bool,
+) -> DatabaseProfile:
+    if batch_disabled:
+        from ..vendored.pipeline_core.profiler.quirk_detector import QuirkEnricher
+
+        profile, _calls = await QuirkEnricher(llm).async_enrich(profile, schema)
+        return profile
+
+    from ..profiling.batched_quirks import BatchedQuirkDetector
+
+    return await BatchedQuirkDetector(
+        llm, batch_size=batch_size
+    ).async_enrich(profile, schema)
+
+
+def _run_lsh(db: SQLiteDatabase, schema: DatabaseSchema) -> None:
+    from ..vendored.pipeline_core.profiler.lsh_builder import LSHBuilder
+
+    LSHBuilder().build(db, schema)
+
+
+async def _run_vectors(profile: DatabaseProfile, llm: object) -> None:
+    from ..vendored.pipeline_core.profiler.vector_builder import VectorBuilder
+
+    await VectorBuilder().async_build(profile, llm)  # type: ignore[arg-type]
 
 
 class ProfilerStage:
@@ -61,7 +160,7 @@ class ProfilerStage:
         self,
         db_svc: DatabaseService,
         prof_svc: ProfileService,
-        llm: "LLMProvider | None" = None,
+        llm: LLMProvider | None = None,
     ) -> None:
         self._db = db_svc
         self._prof = prof_svc

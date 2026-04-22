@@ -58,6 +58,14 @@ class ChunkType(str, Enum):
     rows_returned = "rows_returned"
     answer_generated = "answer_generated"
 
+    # --- Profiling-upgrade (standalone profile route) --------------------
+    profile_stage_started = "profile_stage_started"
+    profile_stage_completed = "profile_stage_completed"
+    profile_progress = "profile_progress"
+    profile_cost_estimate = "profile_cost_estimate"
+    profile_done = "profile_done"
+    profile_error = "profile_error"
+
     # --- Tier-4: orchestration transparency ------------------------------
     stats_context = "stats_context"
     orchestrator_plan = "orchestrator_plan"
@@ -83,6 +91,12 @@ class ChunkType(str, Enum):
     SQL_EXECUTING = "sql_executing"
     ROWS_RETURNED = "rows_returned"
     ANSWER_GENERATED = "answer_generated"
+    PROFILE_STAGE_STARTED = "profile_stage_started"
+    PROFILE_STAGE_COMPLETED = "profile_stage_completed"
+    PROFILE_PROGRESS = "profile_progress"
+    PROFILE_COST_ESTIMATE = "profile_cost_estimate"
+    PROFILE_DONE = "profile_done"
+    PROFILE_ERROR = "profile_error"
 
 
 # ---------------------------------------------------------------------------
@@ -220,6 +234,60 @@ class AnswerGeneratedPayload(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Profiling-upgrade payloads (standalone profile route)
+# ---------------------------------------------------------------------------
+
+
+class ProfileStageStartedPayload(BaseModel):
+    """One of: schema | stats | summaries | quirks | lsh | vectors."""
+
+    stage: str
+    db_id: str
+
+
+class ProfileStageCompletedPayload(BaseModel):
+    stage: str
+    db_id: str
+    duration_ms: int
+    # ``"skipped"`` when the flag was off; otherwise ``None``.
+    note: str | None = None
+
+
+class ProfileProgressPayload(BaseModel):
+    """Mid-stage tick — e.g. ``batch 3/5`` inside summaries or quirks."""
+
+    stage: str
+    batch_index: int
+    batch_total: int
+
+
+class ProfileCostEstimatePayload(BaseModel):
+    """Emitted once, as the sole chunk of an unconfirmed (cost-gated) request.
+
+    The FE uses ``total_llm_calls`` / ``estimated_seconds`` to render a
+    confirmation modal. A second POST with ``confirmed=true`` executes the
+    run for real.
+    """
+
+    columns: int
+    batch_size: int
+    total_llm_calls: int
+    estimated_seconds: int
+
+
+class ProfileDonePayload(BaseModel):
+    db_id: str
+    table_count: int
+    column_count: int
+    summaries_populated: int
+
+
+class ProfileErrorPayload(BaseModel):
+    db_id: str
+    message: str
+
+
+# ---------------------------------------------------------------------------
 # Tier-4: orchestration transparency payloads
 # ---------------------------------------------------------------------------
 
@@ -305,6 +373,13 @@ ChunkPayload = Union[
     SQLExecutingPayload,
     RowsReturnedPayload,
     AnswerGeneratedPayload,
+    # Profiling-upgrade
+    ProfileStageStartedPayload,
+    ProfileStageCompletedPayload,
+    ProfileProgressPayload,
+    ProfileCostEstimatePayload,
+    ProfileDonePayload,
+    ProfileErrorPayload,
     # Tier-4
     StatsContextPayload,
     OrchestratorPlanPayload,
