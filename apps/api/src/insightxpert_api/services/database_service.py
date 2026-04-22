@@ -27,11 +27,14 @@ _log = get_logger("database_service")
 
 @dataclass(frozen=True)
 class DatabaseRef:
-    """Resolved database, ready for ``sqlite3.connect(local_path)``."""
+    """Resolved database, ready for adapter.open_readonly()."""
 
     db_id: str
     source: str  # "bundled" | "uploaded"
-    local_path: str
+    local_path: str | None = None  # None for Postgres-backed DBs
+    dialect: str = "sqlite"
+    connection_url: str | None = None
+    connection_url_env_var: str | None = None
 
 
 class DatabaseService:
