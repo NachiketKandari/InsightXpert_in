@@ -117,7 +117,15 @@ export function DatasetViewer({ open, onOpenChange, tableName = "transactions", 
       }),
     });
     if (result && result.rows.length > 0) {
-      setTotalRows(Number(result.rows[0].total));
+      // Handle both shapes: column-aligned list[list] (new backend) or
+      // dict rows (legacy). For a `SELECT COUNT(*) AS total` query, the
+      // value lives at row[0] in the array shape and row.total in the
+      // dict shape.
+      const firstRow = result.rows[0];
+      const total = Array.isArray(firstRow)
+        ? firstRow[0]
+        : (firstRow as Record<string, unknown>).total;
+      setTotalRows(Number(total));
     }
   }, [tableName]);
 
@@ -254,11 +262,21 @@ export function DatasetViewer({ open, onOpenChange, tableName = "transactions", 
                 </div>
               )}
 
-              {data && data.columns.length > 0 && (
+              {data && data.columns.length > 0 && (() => {
+                // Normalize backend column-aligned rows into dict rows if needed.
+                const firstRow = data.rows[0];
+                const normalizedRows: Record<string, unknown>[] = Array.isArray(firstRow)
+                  ? (data.rows as unknown[][]).map((row) => {
+                      const obj: Record<string, unknown> = {};
+                      data.columns.forEach((c, i) => { obj[c] = row[i]; });
+                      return obj;
+                    })
+                  : (data.rows as Record<string, unknown>[]);
+                return (
                 <div ref={scrollRef} className="h-full overflow-auto">
                   <DataTable
                     columns={data.columns}
-                    rows={data.rows}
+                    rows={normalizedRows}
                     maxHeight="none"
                     showRowNumbers
                     rowNumberOffset={offset}
@@ -275,7 +293,8 @@ export function DatasetViewer({ open, onOpenChange, tableName = "transactions", 
                     cellClassName="border-b border-border/20 text-foreground/85"
                   />
                 </div>
-              )}
+                );
+              })()}
 
               {data && data.columns.length === 0 && (
                 <div className="flex items-center justify-center h-full text-sm text-muted-foreground">

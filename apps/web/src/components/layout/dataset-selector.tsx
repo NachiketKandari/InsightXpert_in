@@ -1,149 +1,72 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { ChevronDown, Database, Eye, Check, Loader2, Plus, Trash2 } from "lucide-react";
-import { toast } from "sonner";
+import { ChevronDown, Database, Check, Loader2, Plus, FileUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
-import { DatasetViewer } from "@/components/dataset/dataset-viewer";
 import { CsvUploadDialog } from "@/components/dataset/csv-upload-dialog";
-import { apiCall, apiFetch } from "@/lib/api";
-import { useCurrentUser } from "@/hooks/use-current-user";
-import type { DatasetInfo } from "@/types/dataset";
+import { SqliteUploadDialog } from "@/components/dataset/sqlite-upload-dialog";
+import { apiCall } from "@/lib/api";
+import { useChatStore } from "@/stores/chat-store";
+import type { DatabaseListItem } from "@/types/database";
 
+/**
+ * DatasetSelector — header affordance for picking the active database.
+ *
+ * Backend contract: `GET /api/v1/databases` returns
+ * `[{db_id, source}, ...]`. The selected `db_id` is persisted in the chat
+ * store (`selectedDbId`) and threaded into chat + sql/execute requests.
+ *
+ * This selector replaced a fork-era "datasets" implementation that was
+ * hitting the non-existent `/api/v1/datasets/public` endpoint, which
+ * silently returned null and left the UI showing "No dataset" forever.
+ */
 export function DatasetSelector() {
-  const [datasets, setDatasets] = useState<DatasetInfo[]>([]);
+  const [databases, setDatabases] = useState<DatabaseListItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [viewerOpen, setViewerOpen] = useState(false);
-  const [viewingDataset, setViewingDataset] = useState<DatasetInfo | null>(null);
-  const [uploadOpen, setUploadOpen] = useState(false);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [activatingId, setActivatingId] = useState<string | null>(null);
+  const [csvUploadOpen, setCsvUploadOpen] = useState(false);
+  const [sqliteUploadOpen, setSqliteUploadOpen] = useState(false);
 
-  const { user, isAdmin } = useCurrentUser();
+  const selectedDbId = useChatStore((s) => s.selectedDbId);
+  const setSelectedDbId = useChatStore((s) => s.setSelectedDbId);
 
-  const fetchDatasets = useCallback(async () => {
-    setLoading(true);
-    const data = await apiCall<DatasetInfo[]>("/api/v1/datasets/public");
-    if (data) setDatasets(data);
+  const fetchDatabases = useCallback(async () => {
+    const data = await apiCall<DatabaseListItem[]>("/api/v1/databases");
+    if (data) {
+      setDatabases(data);
+      // Auto-select first DB if nothing is selected or the previously
+      // selected one is no longer visible. Pull `selectedDbId` fresh via
+      // `getState()` to avoid threading it through this callback's deps
+      // (which would re-run the subscription on every change).
+      const current = useChatStore.getState().selectedDbId;
+      const stillVisible = data.some((d) => d.db_id === current);
+      if (!stillVisible && data.length > 0) {
+        setSelectedDbId(data[0].db_id);
+      }
+    }
     setLoading(false);
-  }, []);
+  }, [setSelectedDbId]);
 
   useEffect(() => {
-    fetchDatasets();
-  }, [fetchDatasets]);
+    // External sync — kick a fetch + subscribe to cross-component invalidations.
+    // The lint rule below flags any setState-in-effect; the set* calls here
+    // happen after an `await` in fetchDatabases (i.e. post-async-boundary),
+    // which is exactly the external-sync pattern the rule's docs endorse.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void fetchDatabases();
+    const handler = () => void fetchDatabases();
+    window.addEventListener("databases-changed", handler);
+    return () => window.removeEventListener("databases-changed", handler);
+  }, [fetchDatabases]);
 
-  // Listen for dataset-changed events fired from *any* CsvUploadDialog instance
-  useEffect(() => {
-    const handler = (e: Event) => {
-      const detail = (e as CustomEvent).detail;
-      if (detail?.id && detail?.name) {
-        // Immediately update local state with the confirmed dataset
-        setDatasets((prev) => {
-          const exists = prev.some((d) => d.id === detail.id);
-          const updated = prev.map((d) => ({ ...d, is_active: false }));
-          if (exists) {
-            return updated.map((d) =>
-              d.id === detail.id ? { ...d, is_active: true } : d,
-            );
-          }
-          return [
-            ...updated,
-            {
-              id: detail.id,
-              name: detail.name,
-              description: detail.description ?? null,
-              is_active: true,
-              table_name: detail.table_name ?? null,
-              created_by: detail.created_by ?? null,
-            } as DatasetInfo,
-          ];
-        });
-      } else {
-        // Fallback: full refetch
-        fetchDatasets();
-      }
-    };
-    window.addEventListener("dataset-changed", handler);
-    return () => window.removeEventListener("dataset-changed", handler);
-  }, [fetchDatasets]);
-
-  const activeDataset = datasets.find((d) => d.is_active);
-
-  const handleActivate = async (ds: DatasetInfo) => {
-    if (ds.is_active) return;
-    setActivatingId(ds.id);
-    try {
-      const res = await apiFetch(`/api/v1/datasets/${ds.id}/activate`, {
-        method: "POST",
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({ detail: `Activate failed (HTTP ${res.status})` }));
-        toast.error(body.detail || "Failed to activate dataset");
-        return;
-      }
-      // Optimistically update local state so the UI reflects immediately
-      setDatasets((prev) =>
-        prev.map((d) => ({ ...d, is_active: d.id === ds.id }))
-      );
-      toast.success(`Switched to "${ds.name}"`);
-    } catch {
-      toast.error("Network error while activating dataset");
-    } finally {
-      setActivatingId(null);
-    }
-  };
-
-  const handleView = (ds: DatasetInfo) => {
-    setViewingDataset(ds);
-    setViewerOpen(true);
-  };
-
-  const canDelete = (ds: DatasetInfo): boolean => {
-    // Seeded default dataset (created_by is null) can never be deleted
-    if (!ds.created_by) return false;
-    if (isAdmin) return true;
-    if (user && ds.created_by === user.id) return true;
-    return false;
-  };
-
-  const handleDelete = async (ds: DatasetInfo) => {
-    const confirmed = window.confirm(
-      `Delete dataset "${ds.name}"? This action cannot be undone.`
-    );
-    if (!confirmed) return;
-
-    setDeletingId(ds.id);
-    try {
-      const res = await apiFetch(`/api/v1/datasets/${ds.id}`, {
-        method: "DELETE",
-      });
-
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({ detail: `Delete failed (HTTP ${res.status})` }));
-        toast.error(body.detail || "Failed to delete dataset");
-        return;
-      }
-
-      toast.success(`Dataset "${ds.name}" deleted`);
-      fetchDatasets();
-    } catch {
-      toast.error("Network error while deleting dataset");
-    } finally {
-      setDeletingId(null);
-    }
-  };
+  const activeDb = databases.find((d) => d.db_id === selectedDbId);
 
   return (
     <>
@@ -154,111 +77,73 @@ export function DatasetSelector() {
             size="sm"
             className="gap-1.5 h-8 px-2.5 text-xs font-medium text-muted-foreground hover:text-foreground"
             disabled={loading}
+            aria-label="Select database"
           >
             {loading ? (
               <Loader2 className="size-3.5 animate-spin" />
             ) : (
               <Database className="size-3.5 text-primary dark:text-cyan-accent" />
             )}
-            <span className="hidden sm:inline max-w-[140px] truncate">
-              {loading ? "Loading..." : (activeDataset?.name ?? "No dataset")}
+            <span className="hidden sm:inline max-w-[160px] truncate">
+              {loading
+                ? "Loading..."
+                : (activeDb?.db_id ?? (databases.length === 0 ? "No databases" : "Select database"))}
             </span>
             <ChevronDown className="size-3 opacity-60" />
           </Button>
         </DropdownMenuTrigger>
 
         <DropdownMenuContent align="start" className="w-72">
-          {datasets.length === 0 && !loading && (
-            <DropdownMenuItem disabled>No datasets found</DropdownMenuItem>
+          <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground">
+            Databases
+          </DropdownMenuLabel>
+          {databases.length === 0 && !loading && (
+            <DropdownMenuItem disabled>No databases found</DropdownMenuItem>
           )}
-          {datasets.map((ds) => (
+          {databases.map((db) => (
             <DropdownMenuItem
-              key={ds.id}
-              onClick={() => handleActivate(ds)}
-              className="flex items-center gap-2 pr-1 cursor-pointer"
+              key={db.db_id}
+              onClick={() => setSelectedDbId(db.db_id)}
+              className="flex items-center gap-2 cursor-pointer"
             >
-              {ds.is_active ? (
+              {db.db_id === selectedDbId ? (
                 <Check className="size-3.5 shrink-0 text-primary dark:text-cyan-accent" />
-              ) : activatingId === ds.id ? (
-                <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
               ) : (
                 <span className="size-3.5 shrink-0" />
               )}
-              <span className="flex-1 truncate text-sm">{ds.name}</span>
-              <div className="flex items-center gap-0.5 shrink-0">
-                <Tooltip delayDuration={300}>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="size-6 opacity-50 hover:opacity-100 hover:bg-accent"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleView(ds);
-                      }}
-                      aria-label={`Preview ${ds.name}`}
-                    >
-                      <Eye className="size-3.5" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="right" className="text-xs">
-                    Preview data &amp; columns
-                  </TooltipContent>
-                </Tooltip>
-                {canDelete(ds) && (
-                  <Tooltip delayDuration={300}>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="size-6 opacity-40 hover:opacity-100 hover:bg-destructive/10 hover:text-destructive"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDelete(ds);
-                        }}
-                        disabled={deletingId === ds.id}
-                        aria-label={`Delete ${ds.name}`}
-                      >
-                        {deletingId === ds.id ? (
-                          <Loader2 className="size-3.5 animate-spin" />
-                        ) : (
-                          <Trash2 className="size-3.5" />
-                        )}
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="right" className="text-xs">
-                      Delete dataset
-                    </TooltipContent>
-                  </Tooltip>
-                )}
-              </div>
+              <span className="flex-1 truncate text-sm font-mono">{db.db_id}</span>
+              <span className="text-[10px] uppercase text-muted-foreground/70 shrink-0">
+                {db.source}
+              </span>
             </DropdownMenuItem>
           ))}
 
           <DropdownMenuSeparator />
           <DropdownMenuItem
-            onClick={() => setUploadOpen(true)}
+            onClick={() => setCsvUploadOpen(true)}
             className="gap-2 cursor-pointer text-primary dark:text-cyan-accent"
           >
             <Plus className="size-3.5" />
             <span className="text-sm font-medium">Upload CSV</span>
           </DropdownMenuItem>
+          <DropdownMenuItem
+            onClick={() => setSqliteUploadOpen(true)}
+            className="gap-2 cursor-pointer text-primary dark:text-cyan-accent"
+          >
+            <FileUp className="size-3.5" />
+            <span className="text-sm font-medium">Upload SQLite</span>
+          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <DatasetViewer
-        open={viewerOpen}
-        onOpenChange={setViewerOpen}
-        tableName={viewingDataset?.table_name ?? "transactions"}
-        datasetName={viewingDataset?.name}
-        description={viewingDataset?.description}
-        datasetId={viewingDataset?.id}
-      />
-
       <CsvUploadDialog
-        open={uploadOpen}
-        onOpenChange={setUploadOpen}
+        open={csvUploadOpen}
+        onOpenChange={setCsvUploadOpen}
         onUploadSuccess={() => {}}
+      />
+      <SqliteUploadDialog
+        open={sqliteUploadOpen}
+        onOpenChange={setSqliteUploadOpen}
       />
     </>
   );

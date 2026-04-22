@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Shuffle } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { SAMPLE_QUESTIONS } from "@/lib/sample-questions";
+import { DatabasePickerPanel } from "@/components/dataset/database-picker-panel";
 import { InputToolbar } from "./input-toolbar";
 import { useChatStore } from "@/stores/chat-store";
 import { useClientConfigStore } from "@/stores/client-config-store";
@@ -135,6 +136,10 @@ export function WelcomeScreen({ onSendMessage, onStop, isStreaming }: WelcomeScr
       <p className="mt-2 text-center text-[11px] text-muted-foreground/60">
         AI can make mistakes. Please double-check responses.
       </p>
+
+      {/* First-class database picker — shown only on the landing screen so
+          users don't have to hunt for the header dropdown. */}
+      <DatabasePickerPanel />
 
       {/* Suggestion chips */}
       <AnimatePresence mode="wait">
