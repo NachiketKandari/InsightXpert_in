@@ -5,23 +5,18 @@ registered for ``ref.dialect`` for connection-open + write-guard.
 """
 from __future__ import annotations
 
-import re
 import sqlite3
 import time
 from dataclasses import dataclass
 from typing import Any
 
 from .dialects import get_adapter
+from .dialects.sqlite import _FORBIDDEN_SQL_RE as _SQLITE_FORBIDDEN_SQL_RE
 
-# Re-exported for callers that need the regex directly (e.g. routes/automations.py
-# validates SQL in automation setup before a connector is constructed).
-# This is the SQLite-dialect guard; for future multi-dialect callers, use
-# get_adapter(dialect).forbidden_sql_re instead.
-FORBIDDEN_SQL_RE = re.compile(
-    r"(?:\b(?:INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|REPLACE|MERGE|GRANT|"
-    r"REVOKE|ATTACH|DETACH)\b)|(?:\bPRAGMA\s+\w+\s*=)",
-    re.IGNORECASE,
-)
+# Re-exported for callers that validate SQL before a connector is constructed
+# (e.g. routes/automations.py). Sourced from the SqliteAdapter to keep a single
+# source of truth; multi-dialect callers should use get_adapter(d).forbidden_sql_re.
+FORBIDDEN_SQL_RE = _SQLITE_FORBIDDEN_SQL_RE
 
 
 class ForbiddenSQLError(Exception):
