@@ -12,10 +12,37 @@ duplicating the OpenAI-style <-> Gemini native message translation logic.
 
 from __future__ import annotations
 
+import asyncio
+import os
+
 from google import genai
 
 from ..vendored.agents_core.llm.base import LLMResponse
 from ..vendored.agents_core.llm.gemini import GeminiProvider as _VendoredGemini
+
+# --------------------------------------------------------------------------
+# Phase 1.4 — global LLM concurrency cap.
+# A single bursty user must not be able to drive Gemini into 429 for every
+# other user. One semaphore at module scope, shared across every GeminiLLM
+# instance so per-turn adapters all funnel through the same cap. Lazy-init
+# so async tests can reset without monkeypatching asyncio internals.
+# --------------------------------------------------------------------------
+
+_LLM_SEMAPHORE: asyncio.Semaphore | None = None
+
+
+def _llm_semaphore() -> asyncio.Semaphore:
+    global _LLM_SEMAPHORE
+    if _LLM_SEMAPHORE is None:
+        cap = int(os.environ.get("LLM_MAX_CONCURRENCY", "3") or 3)
+        _LLM_SEMAPHORE = asyncio.Semaphore(max(1, cap))
+    return _LLM_SEMAPHORE
+
+
+def _reset_llm_semaphore(n: int) -> None:
+    """Test hook — reset the module-level LLM semaphore."""
+    global _LLM_SEMAPHORE
+    _LLM_SEMAPHORE = asyncio.Semaphore(max(1, int(n)))
 
 
 class GeminiLLM:
@@ -60,9 +87,10 @@ class GeminiLLM:
         tools: list[dict] | None = None,
         force_tool_use: bool = False,
     ) -> LLMResponse:
-        resp = await self._chat_impl.chat(
-            messages, tools=tools, force_tool_use=force_tool_use
-        )
+        async with _llm_semaphore():
+            resp = await self._chat_impl.chat(
+                messages, tools=tools, force_tool_use=force_tool_use
+            )
         # Gemini's ``usage_metadata`` is surfaced on LLMResponse by the
         # vendored provider (see vendored/agents_core/llm/gemini.py).
         # Accumulate so the route layer can emit it on the terminal
@@ -114,11 +142,12 @@ class GeminiLLM:
         temperature: float = 0.0,
         max_tokens: int = 4096,
     ) -> str:
-        resp = await self._client.aio.models.generate_content(
-            model=self._model,
-            contents=prompt,
-            config={"temperature": temperature, "max_output_tokens": max_tokens},
-        )
+        async with _llm_semaphore():
+            resp = await self._client.aio.models.generate_content(
+                model=self._model,
+                contents=prompt,
+                config={"temperature": temperature, "max_output_tokens": max_tokens},
+            )
         self._record_usage(resp)
         return resp.text or ""
 

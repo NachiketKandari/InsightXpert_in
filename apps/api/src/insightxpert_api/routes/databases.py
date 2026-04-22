@@ -21,6 +21,7 @@ import io
 import re
 import sqlite3
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -438,6 +439,7 @@ async def _run_profile_v2(
     prof_svc: ProfileService,
     settings: Settings,
     llm: object | None,
+    user_id: str | None = None,
 ) -> None:
     try:
         profile = await run_profile_stream(
@@ -449,6 +451,9 @@ async def _run_profile_v2(
             batch_size=settings.profiling_batch_size,
             max_columns_for_llm=settings.profiling_max_columns_for_llm,
             batch_disabled=settings.profiling_batch_disabled,
+            user_id=user_id,
+            provider="gemini",
+            model=settings.gemini_chat_model,
         )
         if profile is not None:
             prof_svc.save(session_id, db_id, profile)
@@ -528,6 +533,41 @@ async def run_profile(
         asyncio.create_task(_emit_cost_estimate_and_close(emitter, payload))
         return EventSourceResponse(emitter.stream())
 
+    # Phase 1.4 — per-user daily cap on LLM-driven profile runs. Only
+    # enforced when an LLM stage is on; the cheap schema+stats path is
+    # unmetered. Admins are exempt.
+    if (flags.any_llm or flags.with_vectors) and not is_admin:
+        from sqlalchemy import func, select
+
+        from ..db.engine import get_engine
+        from ..metrics.table import query_metrics
+
+        window_start = int(time.time()) - 86_400
+
+        def _count_recent_profile_runs() -> int:
+            engine = get_engine()
+            with engine.begin() as conn:
+                row = conn.execute(
+                    select(func.count())
+                    .select_from(query_metrics)
+                    .where(query_metrics.c.user_id == cu.id)
+                    .where(query_metrics.c.source == "profile")
+                    .where(query_metrics.c.created_at > window_start)
+                ).scalar()
+                return int(row or 0)
+
+        recent = await asyncio.to_thread(_count_recent_profile_runs)
+        if recent >= settings.profile_max_per_user_per_day:
+            reset_epoch = window_start + 86_400
+            raise HTTPException(
+                status_code=429,
+                detail=(
+                    f"profile_quota_exceeded: {recent}/"
+                    f"{settings.profile_max_per_user_per_day} profile runs in "
+                    f"the last 24h. Resets at epoch {reset_epoch}."
+                ),
+            )
+
     # --- full run branch -------------------------------------------------
     # Resolve an LLM if any LLM stage is on. We don't construct one on the
     # cheap (schema+stats only) path so tests can hit it without Gemini.
@@ -559,6 +599,7 @@ async def run_profile(
             prof_svc=prof_svc,
             settings=settings,
             llm=llm,
+            user_id=cu.id,
         )
     )
     return EventSourceResponse(emitter.stream())
