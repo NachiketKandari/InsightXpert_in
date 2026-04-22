@@ -67,6 +67,10 @@ export function NewAutomationDialog({ open, onOpenChange }: NewAutomationDialogP
   const [sqlEditorOpen, setSqlEditorOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
+  // Column preflight state — populated by a LIMIT 0 execute call when dbId is known.
+  const [columns, setColumns] = useState<string[]>([]);
+  const [columnsLoading, setColumnsLoading] = useState(false);
+
   // Reset form only on the open-transition (closed → open). Guarded by a ref
   // so the lint rule "set-state-in-effect" stays happy — no cascading renders
   // on each re-render while already open.
@@ -84,6 +88,8 @@ export function NewAutomationDialog({ open, onOpenChange }: NewAutomationDialogP
     setSchedulePreset("daily");
     setCustomCron("0 9 * * *");
     setConditions([]);
+    setColumns([]);
+    setColumnsLoading(false);
     fetchTemplates();
     // /api/v1/databases is the greenfield contract; map its {db_id, source}
     // shape to DatasetInfo so this older dialog keeps compiling. Active-DB
@@ -104,6 +110,52 @@ export function NewAutomationDialog({ open, onOpenChange }: NewAutomationDialogP
       }
     });
   }, [open, fetchTemplates]);
+
+  // When dbId changes, preflight GET /schema then POST /sql/execute LIMIT 0 to
+  // discover columns so TriggerConditionBuilder's column_expression dropdown is
+  // populated. LIMIT 0 executes no rows — pure column discovery at zero cost.
+  useEffect(() => {
+    if (!dbId) {
+      setColumns([]);
+      return;
+    }
+    let cancelled = false;
+    setColumnsLoading(true);
+    setColumns([]);
+
+    (async () => {
+      // Step 1: get first table name from /schema.
+      const schema = await apiCall<{ ddl: string; tables: string[] }>(
+        `/api/v1/databases/${encodeURIComponent(dbId)}/schema`,
+      );
+      if (cancelled || !schema || schema.tables.length === 0) {
+        if (!cancelled) setColumnsLoading(false);
+        return;
+      }
+      const firstTable = schema.tables[0];
+
+      // Step 2: LIMIT 0 query — returns column names without loading rows.
+      const result = await apiCall<{ columns: string[]; rows: unknown[] }>(
+        "/api/v1/sql/execute",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            db_id: dbId,
+            sql: `SELECT * FROM "${firstTable}" LIMIT 0`,
+          }),
+        },
+      );
+      if (cancelled) return;
+      setColumnsLoading(false);
+      if (result && result.columns.length > 0) {
+        setColumns(result.columns);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [dbId]);
 
   const cronExpression = useMemo(() => {
     if (schedulePreset === "custom") return customCron;
@@ -253,8 +305,9 @@ export function NewAutomationDialog({ open, onOpenChange }: NewAutomationDialogP
               <TriggerConditionBuilder
                 conditions={conditions}
                 onChange={setConditions}
-                columns={[]}
-                resultShape="scalar"
+                columns={columns}
+                resultShape={columns.length > 0 ? "tabular" : "scalar"}
+                columnsLoading={columnsLoading}
               />
               <p className="text-[11px] text-muted-foreground">
                 Leave empty to always notify on successful runs.

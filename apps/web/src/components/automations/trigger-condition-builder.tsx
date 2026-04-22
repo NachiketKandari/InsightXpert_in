@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, Sparkles, Loader2 } from "lucide-react";
+import { Plus, Sparkles, Loader2, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { apiCall } from "@/lib/api";
@@ -14,6 +14,8 @@ interface TriggerConditionBuilderProps {
   onChange: (conditions: TriggerCondition[]) => void;
   columns: string[];
   resultShape: ResultShape;
+  /** When true, columns are still being fetched — show a loading hint. */
+  columnsLoading?: boolean;
 }
 
 export function TriggerConditionBuilder({
@@ -21,6 +23,7 @@ export function TriggerConditionBuilder({
   onChange,
   columns,
   resultShape,
+  columnsLoading = false,
 }: TriggerConditionBuilderProps) {
   const [showNlInput, setShowNlInput] = useState(false);
   const [nlText, setNlText] = useState("");
@@ -87,6 +90,19 @@ export function TriggerConditionBuilder({
 
   return (
     <div className="space-y-3">
+      {/* Column loading indicator */}
+      {columnsLoading && (
+        <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+          <Loader2 className="size-3 animate-spin" />
+          <span>Loading column list…</span>
+        </div>
+      )}
+      {!columnsLoading && columns.length === 0 && (
+        <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground/70">
+          <Info className="size-3" />
+          <span>Select a database to enable column conditions.</span>
+        </div>
+      )}
       <div className="space-y-2">
         {conditions.map((cond, i) => (
           <ConditionRow
