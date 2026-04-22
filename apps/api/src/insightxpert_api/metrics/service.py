@@ -33,11 +33,37 @@ def record_turn(
     duration_ms: int | None,
     stage_timings: dict[str, Any] | None = None,
     agent_trace_summary: dict[str, Any] | None = None,
+    # Phase 1.2 — source/provider/model stamping. Defaults preserve the prior
+    # chat-only contract: callers that upgrade to new paths should use
+    # ``metrics.record_llm_usage`` directly.
+    source: str = "chat",
+    provider: str | None = "gemini",
+    model: str | None = None,
 ) -> str:
-    """Insert one row into query_metrics. Returns the new row id."""
+    """Insert one row into query_metrics. Returns the new row id.
+
+    When ``model`` is provided and ``tokens_in/out`` are non-null, we stamp
+    ``cost_usd`` + ``pricing_version`` via the registry so chat turns land
+    with the same spend shape as profile/automation/trigger_compile rows.
+    """
     row_id = uuid.uuid4().hex
     now = int(time.time())
     try:
+        # Import lazily to avoid a metrics → pricing cycle at startup.
+        from .pricing import PRICING_VERSION, cost_usd
+
+        cost: float | None = None
+        pricing_version: str | None = None
+        if model is not None and (tokens_in or tokens_out):
+            cost, pricing_version = cost_usd(
+                model, int(tokens_in or 0), int(tokens_out or 0)
+            )
+        elif model is None and (tokens_in or tokens_out):
+            # Still stamp pricing_version so ``legacy`` vs ``current`` rows
+            # are distinguishable; cost stays NULL because we don't know the
+            # model.
+            pricing_version = PRICING_VERSION
+
         engine = get_engine()
         with engine.begin() as conn:
             conn.execute(
@@ -62,6 +88,12 @@ def record_turn(
                         else None
                     ),
                     created_at=now,
+                    source=source,
+                    provider=provider,
+                    model=model,
+                    cost_usd=cost,
+                    pricing_version=pricing_version,
+                    source_ref_id=conversation_id,
                 )
             )
     except Exception as exc:  # noqa: BLE001 — best-effort, never user-facing

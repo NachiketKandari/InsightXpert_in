@@ -117,6 +117,11 @@ async def compile_trigger(
     user: CurrentUser = Depends(get_current_user),
 ):
     llm = _resolve_llm(request)
+    # Phase 1.2 — snapshot token counters before the LLM call so the emission
+    # fires even on parse-fallback or provider-error paths. Runs in a
+    # try/finally so any raised exception still gets recorded.
+    _tokens_before_in = int(getattr(llm, "input_tokens_used", 0) or 0)
+    _tokens_before_out = int(getattr(llm, "output_tokens_used", 0) or 0)
     try:
         return await nl_trigger_mod.compile_or_fallback(
             llm, body.nl_text, body.available_columns
@@ -133,6 +138,38 @@ async def compile_trigger(
         # misleading the user that their NL description was malformed.
         log.error("compile-trigger LLM infrastructure failure: %s", exc)
         raise HTTPException(status_code=502, detail="AI service unavailable")
+    finally:
+        # Phase 1.2 — emit usage record for the NL→JSON compile call.
+        try:
+            t_in = (
+                int(getattr(llm, "input_tokens_used", 0) or 0)
+                - _tokens_before_in
+            )
+            t_out = (
+                int(getattr(llm, "output_tokens_used", 0) or 0)
+                - _tokens_before_out
+            )
+            if t_in > 0 or t_out > 0:
+                from ..config import get_settings
+                from ..metrics.llm_usage import record_llm_usage
+
+                _settings = get_settings()
+                record_llm_usage(
+                    source="trigger_compile",
+                    provider="gemini",
+                    model=getattr(
+                        llm, "model", _settings.gemini_chat_model
+                    ),
+                    input_tokens=t_in,
+                    output_tokens=t_out,
+                    user_id=user.id,
+                    # source_ref_id is None until the trigger is persisted
+                    # against an automation; callers can later join by
+                    # user_id + created_at window.
+                    source_ref_id=None,
+                )
+        except Exception:  # noqa: BLE001
+            pass
 
 
 @router.post("/generate-sql")

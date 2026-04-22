@@ -97,6 +97,7 @@ def _schedule_record_turn(
     conversation_id: str,
     body: "ChatRequest",
     chunks: list[Any],
+    model: str | None = None,
 ) -> None:
     extracted = _extract_metrics_from_chunks(chunks)
     background_tasks.add_task(
@@ -110,6 +111,9 @@ def _schedule_record_turn(
         tokens_in=extracted["tokens_in"],
         tokens_out=extracted["tokens_out"],
         duration_ms=extracted["duration_ms"],
+        source="chat",
+        provider="gemini",
+        model=model,
     )
     chunk_dicts = [c.model_dump(mode="json") for c in chunks]
     background_tasks.add_task(
@@ -305,6 +309,9 @@ async def _run_pipeline(
                     tokens_in=tokens_in or None,
                     tokens_out=tokens_out or None,
                     duration_ms=latency_ms,
+                    source="chat",
+                    provider="gemini",
+                    model=model,
                 )
             except Exception:  # noqa: BLE001
                 pass
@@ -585,6 +592,9 @@ async def _run_orchestrator(
                     tokens_in=tokens_in or None,
                     tokens_out=tokens_out or None,
                     duration_ms=latency_ms,
+                    source="chat",
+                    provider="gemini",
+                    model=settings.gemini_chat_model,
                 )
             except Exception:  # noqa: BLE001
                 pass
@@ -686,6 +696,7 @@ async def chat_poll(
         conversation_id=convo.conversation_id,
         body=body,
         chunks=chunks,
+        model=settings.gemini_chat_model,
     )
     return ChatPollResponse(
         conversation_id=convo.conversation_id,
@@ -747,6 +758,7 @@ async def chat_answer(
         conversation_id=convo.conversation_id,
         body=body,
         chunks=chunks,
+        model=settings.gemini_chat_model,
     )
     return ChatAnswerResponse(
         conversation_id=convo.conversation_id,
