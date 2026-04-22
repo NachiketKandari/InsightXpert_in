@@ -9,7 +9,6 @@ def test_get_adapter_sqlite():
     assert a.name == "sqlite"
 
 
-@pytest.mark.xfail(reason="PostgresAdapter added in Task 9", strict=True)
 def test_get_adapter_postgres_registered():
     a = get_adapter("postgres")
     assert a.name == "postgres"
