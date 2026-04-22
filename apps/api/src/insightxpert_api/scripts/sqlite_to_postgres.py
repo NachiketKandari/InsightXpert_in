@@ -131,27 +131,46 @@ def convert(
 def _create_table(
     cur: Any, tname: str, src: sqlite3.Connection, pg_schema: str
 ) -> None:
+    """Emit CREATE TABLE via psycopg.sql composition — never raw f-strings.
+
+    Identifiers (table name, column names) originate from the source SQLite
+    file. If that file is ever not fully trusted, f-string concatenation would
+    be a SQL-injection vector. `psycopg.sql.Identifier` quote-escapes properly.
+    Column types are looked up from a closed-set map (`_TYPE_MAP`), so the
+    ``col_type`` token is safe to interpolate via `pg_sql.SQL`.
+    """
     pragma = src.execute(f'PRAGMA table_info("{tname}")').fetchall()
-    col_defs = []
-    pk_cols = []
+
+    col_clauses: list[pg_sql.Composable] = []
+    pk_cols: list[tuple[int, str]] = []
     for row in pragma:
         name = row["name"]
         col_type = _pg_type(row["type"])
-        notnull = "NOT NULL" if row["notnull"] else ""
-        col_defs.append(f'"{name}" {col_type} {notnull}'.strip())
+        null_clause = pg_sql.SQL(" NOT NULL") if row["notnull"] else pg_sql.SQL("")
+        col_clauses.append(
+            pg_sql.SQL("{name} {ctype}{nn}").format(
+                name=pg_sql.Identifier(name),
+                ctype=pg_sql.SQL(col_type),
+                nn=null_clause,
+            )
+        )
         if row["pk"]:
             pk_cols.append((row["pk"], name))
-    pk_cols.sort()
-    pk_clause = (
-        ", PRIMARY KEY (" + ", ".join(f'"{n}"' for _, n in pk_cols) + ")"
-        if pk_cols
-        else ""
-    )
-    ddl = (
-        f'CREATE TABLE "{pg_schema}"."{tname}" ('
-        + ", ".join(col_defs)
-        + pk_clause
-        + ")"
+
+    body = pg_sql.SQL(", ").join(col_clauses)
+    if pk_cols:
+        pk_cols.sort()
+        pk_body = pg_sql.SQL(", ").join(
+            pg_sql.Identifier(n) for _, n in pk_cols
+        )
+        body = pg_sql.SQL("{body}, PRIMARY KEY ({pk})").format(
+            body=body, pk=pk_body
+        )
+
+    ddl = pg_sql.SQL("CREATE TABLE {s}.{t} ({body})").format(
+        s=pg_sql.Identifier(pg_schema),
+        t=pg_sql.Identifier(tname),
+        body=body,
     )
     cur.execute(ddl)
 
@@ -161,12 +180,11 @@ def _copy_rows(
 ) -> None:
     pragma = src.execute(f'PRAGMA table_info("{tname}")').fetchall()
     cols = [row["name"] for row in pragma]
-    col_list = ", ".join(f'"{c}"' for c in cols)
 
     copy_stmt = pg_sql.SQL("COPY {s}.{t} ({cols}) FROM STDIN").format(
         s=pg_sql.Identifier(pg_schema),
         t=pg_sql.Identifier(tname),
-        cols=pg_sql.SQL(col_list),
+        cols=pg_sql.SQL(", ").join(pg_sql.Identifier(c) for c in cols),
     )
     with cur.copy(copy_stmt) as copy:
         for row in src.execute(f'SELECT * FROM "{tname}"'):
@@ -176,13 +194,17 @@ def _copy_rows(
 def _add_fks(
     cur: Any, tname: str, src: sqlite3.Connection, pg_schema: str
 ) -> None:
+    """Emit ALTER TABLE ... ADD FOREIGN KEY via psycopg.sql composition.
+
+    Same injection rationale as `_create_table`: every identifier comes from
+    `PRAGMA foreign_key_list` on the source SQLite file — quote it.
+    """
     fks = src.execute(f'PRAGMA foreign_key_list("{tname}")').fetchall()
     for fk in fks:
         ref_tab = fk["table"]
         from_col = fk["from"]
         to_col = fk["to"]
         if to_col is None:
-            # Implicit PK reference — resolve.
             pk_pragma = src.execute(
                 f'PRAGMA table_info("{ref_tab}")'
             ).fetchall()
@@ -195,9 +217,17 @@ def _add_fks(
                 continue
             to_col = pks[0]
         cur.execute(
-            f'ALTER TABLE "{pg_schema}"."{tname}" '
-            f'ADD FOREIGN KEY ("{from_col}") '
-            f'REFERENCES "{pg_schema}"."{ref_tab}" ("{to_col}")'
+            pg_sql.SQL(
+                "ALTER TABLE {s}.{t} "
+                "ADD FOREIGN KEY ({from_c}) "
+                "REFERENCES {s}.{ref_t} ({ref_c})"
+            ).format(
+                s=pg_sql.Identifier(pg_schema),
+                t=pg_sql.Identifier(tname),
+                from_c=pg_sql.Identifier(from_col),
+                ref_t=pg_sql.Identifier(ref_tab),
+                ref_c=pg_sql.Identifier(to_col),
+            )
         )
 
 

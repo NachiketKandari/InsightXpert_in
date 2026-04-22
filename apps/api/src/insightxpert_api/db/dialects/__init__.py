@@ -22,15 +22,11 @@ DIALECTS: dict[str, DialectAdapter] = {}
 
 def get_adapter(name: str) -> DialectAdapter:
     """Resolve a dialect name to its adapter. Raises UnknownDialectError."""
-    # Lazy import triggers registration.
+    # Lazy imports trigger self-registration via side-effect at module load.
+    # Both psycopg and sqlite3 are declared deps — if an import fails here, it
+    # IS a misconfiguration and we want it loud, not swallowed.
+    from . import postgres as _postgres  # noqa: F401
     from . import sqlite as _sqlite  # noqa: F401
-
-    # Postgres adapter registers itself when Task 9 lands; until then, only
-    # sqlite is importable.
-    try:
-        from . import postgres as _postgres  # noqa: F401
-    except ImportError:
-        pass
 
     try:
         return DIALECTS[name]

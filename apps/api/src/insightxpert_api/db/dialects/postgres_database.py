@@ -23,10 +23,18 @@ class PostgresDatabase(Database):
             ref.connection_url,
             options=(
                 "-c default_transaction_read_only=on "
-                "-c statement_timeout=30000"
+                "-c statement_timeout=30000 "
+                "-c idle_in_transaction_session_timeout=10000"
             ),
             autocommit=True,
         )
+
+    @property
+    def conn(self) -> psycopg.Connection:
+        """Underlying psycopg connection for callers that need cursor access
+        (e.g. PostgresSchemaExtractor). Kept read-only at the protocol level —
+        mutating the connection here breaks the ``Database`` ABC's abstraction."""
+        return self._conn
 
     def execute(self, sql: str, params: tuple = ()) -> list[tuple]:
         with self._conn.cursor() as cur:

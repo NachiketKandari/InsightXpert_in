@@ -62,12 +62,16 @@ ORDER BY tc.constraint_name
 """
 
 
-def extract_postgres_schema(conn: Any, schema_name: str = "toxicology") -> DatabaseSchema:
+def extract_postgres_schema(conn: Any, schema_name: str) -> DatabaseSchema:
     """Extract a DatabaseSchema from a Postgres connection.
 
     Uses a single cursor and runs 1 + 3N queries (one to list tables, then
     columns / PKs / FKs per table). All identifiers come from callers via
     parameterized queries; never string-concat user input into these SQL bodies.
+
+    ``schema_name`` is required — there is no safe default. The convention for
+    our bundled DBs is: a DB row with ``db_id='<x>_pg'`` has its tables in
+    Postgres schema ``<x>``. See ``_pg_schema_for_ref`` in profiling/runner.py.
     """
     with conn.cursor() as cur:
         cur.execute(_TABLES_SQL, (schema_name,))

@@ -160,13 +160,30 @@ def _open_database_for_ref(ref: DatabaseRef) -> Database:
     raise ValueError(f"Unknown dialect: {ref.dialect!r}")
 
 
+def _pg_schema_for_ref(ref: DatabaseRef) -> str:
+    """Derive the Postgres schema name from a DatabaseRef.
+
+    Convention: a DB row with db_id ending in ``_pg`` puts its tables in the
+    schema named by the prefix, e.g. ``toxicology_pg`` → ``toxicology``. Any
+    other db_id falls back to ``public`` (the Postgres default). This keeps
+    us moving without adding a column to the ``databases`` table; revisit
+    when a second Postgres-backed DB arrives.
+    """
+    if ref.db_id.endswith("_pg"):
+        return ref.db_id[: -len("_pg")]
+    return "public"
+
+
 def _extract_schema_from_db(ref: DatabaseRef, db: Database):
     """Extract a DatabaseSchema using the extractor appropriate for the dialect."""
     if ref.dialect == "sqlite":
         return SchemaExtractor().extract(db)
-    # postgres path — use psycopg connection directly
+    # postgres path — use the underlying psycopg connection
+    from ..db.dialects.postgres_database import PostgresDatabase
     from ..db.dialects.postgres_schema import extract_postgres_schema
-    return extract_postgres_schema(db._conn)  # type: ignore[attr-defined]
+
+    assert isinstance(db, PostgresDatabase)
+    return extract_postgres_schema(db.conn, schema_name=_pg_schema_for_ref(ref))
 
 
 # ---------------------------------------------------------------------------
