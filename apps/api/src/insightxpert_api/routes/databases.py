@@ -534,7 +534,7 @@ async def run_profile(
     # Any expensive flag on + not confirmed → emit a single estimate chunk
     # and close the stream. FE re-POSTs with confirmed=true to run.
     if flags.any and not req.confirmed:
-        _, column_count = count_columns(ref.local_path, db_id)
+        _, column_count = count_columns(ref)
         estimate = estimate_cost(
             column_count, flags, settings.profiling_batch_size
         )

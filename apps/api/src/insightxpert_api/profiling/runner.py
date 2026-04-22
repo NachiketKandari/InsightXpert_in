@@ -42,8 +42,9 @@ from ..sse.chunks import (
     ProfileStageCompletedPayload,
     ProfileStageStartedPayload,
 )
+from ..services.database_service import DatabaseRef
 from ..sse.emitter import EventEmitter
-from ..vendored.pipeline_core.db import SQLiteDatabase
+from ..vendored.pipeline_core.db import Database, SQLiteDatabase
 from ..vendored.pipeline_core.models.profile import DatabaseProfile
 from ..vendored.pipeline_core.profiler.schema_extractor import SchemaExtractor
 from ..vendored.pipeline_core.profiler.stats_collector import StatsCollector
@@ -142,21 +143,47 @@ def estimate_cost(
 
 
 # ---------------------------------------------------------------------------
+# Dialect helpers — open a vendored Database for either SQLite or Postgres,
+# and extract schema using the appropriate extractor.
+# ---------------------------------------------------------------------------
+
+
+def _open_database_for_ref(ref: DatabaseRef) -> Database:
+    """Open a vendored ``Database`` for either dialect."""
+    if ref.dialect == "sqlite":
+        if ref.local_path is None:
+            raise ValueError(f"SQLite ref {ref.db_id!r} has no local_path")
+        return SQLiteDatabase(Path(ref.local_path))
+    if ref.dialect == "postgres":
+        from ..db.dialects.postgres_database import PostgresDatabase
+        return PostgresDatabase(ref)
+    raise ValueError(f"Unknown dialect: {ref.dialect!r}")
+
+
+def _extract_schema_from_db(ref: DatabaseRef, db: Database):
+    """Extract a DatabaseSchema using the extractor appropriate for the dialect."""
+    if ref.dialect == "sqlite":
+        return SchemaExtractor().extract(db)
+    # postgres path — use psycopg connection directly
+    from ..db.dialects.postgres_schema import extract_postgres_schema
+    return extract_postgres_schema(db._conn)  # type: ignore[attr-defined]
+
+
+# ---------------------------------------------------------------------------
 # Column-count helper — used by the cost-gate route before running the full
 # pipeline. Cheap: schema extract only (no stats).
 # ---------------------------------------------------------------------------
 
 
-def count_columns(db_path: str, db_id: str) -> tuple[int, int]:
-    """Return ``(table_count, column_count)`` for a SQLite file.
+def count_columns(ref: DatabaseRef) -> tuple[int, int]:
+    """Return ``(table_count, column_count)`` for a DB — dialect-aware.
 
     Uses the vendored ``SchemaExtractor`` so the count matches exactly what
     the profiler will see.
     """
-    db = SQLiteDatabase(Path(db_path))
-    db.db_id = db_id
+    db = _open_database_for_ref(ref)
     with db:
-        schema = SchemaExtractor().extract(db)
+        schema = _extract_schema_from_db(ref, db)
     tables = len(schema.tables)
     cols = sum(len(t.columns) for t in schema.tables)
     return tables, cols
@@ -230,6 +257,7 @@ async def run_profile_stream(
     user_id: str | None = None,
     provider: str = "gemini",
     model: str | None = None,
+    ref: DatabaseRef | None = None,
 ) -> DatabaseProfile | None:
     """Run the full profile pipeline with per-stage SSE emissions.
 
@@ -255,14 +283,20 @@ async def run_profile_stream(
         await sem.acquire()
 
     try:
-        path = Path(db_path)
-        db = SQLiteDatabase(path)
-        db.db_id = db_id
+        if ref is not None:
+            db = _open_database_for_ref(ref)
+        else:
+            path = Path(db_path)
+            db = SQLiteDatabase(path)
+            db.db_id = db_id
         with db:
             # --- stage: schema -----------------------------------------
             t0 = _time.perf_counter()
             await _emit_stage_started(emitter, "schema", db_id)
-            schema = SchemaExtractor().extract(db)
+            if ref is not None:
+                schema = _extract_schema_from_db(ref, db)
+            else:
+                schema = SchemaExtractor().extract(db)
             schema_ms = int((_time.perf_counter() - t0) * 1000)
             await _emit_stage_completed(
                 emitter, "schema", db_id, duration_ms=schema_ms
@@ -499,7 +533,7 @@ async def _maybe_run_lsh(
     emitter: EventEmitter,
     db_id: str,
     schema: DatabaseSchema,
-    db: SQLiteDatabase,
+    db: Database,
     run: bool,
 ) -> None:
     import time as _time
