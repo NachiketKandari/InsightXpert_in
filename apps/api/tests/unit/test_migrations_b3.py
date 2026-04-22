@@ -66,6 +66,8 @@ def test_upgrade_creates_databases_and_shares(tmp_path, monkeypatch):
     db_cols = {c["name"] for c in insp.get_columns("databases")}
     assert db_cols == {
         "db_id", "owner_user_id", "visibility", "size_bytes", "created_at",
+        # Added by 20260424_0001 (Tier-1 full-schema mode).
+        "pipeline_mode_default",
     }
     share_cols = {c["name"] for c in insp.get_columns("database_shares")}
     assert share_cols == {"db_id", "user_id", "created_at"}

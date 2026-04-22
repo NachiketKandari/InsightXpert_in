@@ -5,6 +5,7 @@ import { useChatStore } from "@/stores/chat-store";
 import { createSSEStream, type AgentMode } from "@/lib/sse-client";
 import { parseChunk } from "@/lib/chunk-parser";
 import { useInsightStore } from "@/stores/insight-store";
+import { useSettingsStore } from "@/stores/settings-store";
 import type { AgentStep } from "@/types/chat";
 
 function generateStepId() {
@@ -279,7 +280,12 @@ export function useSSEChat() {
           });
           finishStreaming(convId!);
         },
-      }, agentMode, { skipClarification, dbId: useChatStore.getState().selectedDbId });
+      }, agentMode, {
+        skipClarification,
+        dbId: useChatStore.getState().selectedDbId,
+        // Tier-1: pipeline_mode override (admin only — the server enforces).
+        pipelineMode: useSettingsStore.getState().pipelineMode,
+      });
 
       abortRef.current = controller;
     },

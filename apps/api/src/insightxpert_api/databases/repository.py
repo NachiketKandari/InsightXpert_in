@@ -101,6 +101,7 @@ def list_all_admin() -> list[dict[str, Any]]:
                 databases_table.c.visibility,
                 databases_table.c.size_bytes,
                 databases_table.c.created_at,
+                databases_table.c.pipeline_mode_default,
                 users_table.c.email.label("owner_email"),
             ).select_from(
                 databases_table.outerjoin(
@@ -137,10 +138,27 @@ def list_all_admin() -> list[dict[str, Any]]:
                 "visibility": r.visibility,
                 "size_bytes": r.size_bytes,
                 "created_at": r.created_at,
+                "pipeline_mode_default": r.pipeline_mode_default,
                 "shared_with": shares_by_db.get(r.db_id, []),
             }
         )
     return out
+
+
+def set_pipeline_mode_default(db_id: str, mode: str | None) -> bool:
+    """Update the per-DB ``pipeline_mode_default`` column.
+
+    ``mode`` may be ``"linked"``, ``"full_schema"``, or ``None`` (clear the
+    override so the row inherits the system default ``"linked"``). Returns
+    ``True`` on success, ``False`` if the ``db_id`` does not exist.
+    """
+    with get_engine().begin() as conn:
+        result = conn.execute(
+            update(databases_table)
+            .where(databases_table.c.db_id == db_id)
+            .values(pipeline_mode_default=mode)
+        )
+        return bool(result.rowcount)
 
 
 def set_visibility(

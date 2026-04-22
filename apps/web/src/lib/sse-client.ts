@@ -10,10 +10,16 @@ export interface SSECallbacks {
 // `docs/deferred-features.md`. Do NOT add `"deep"` back here.
 export type AgentMode = "basic" | "agentic";
 
+// Tier-1 admin toggle. "auto" = no override (fall back to per-DB default or
+// system "linked"). Sent verbatim — "auto" translates to omitting the field.
+export type PipelineMode = "auto" | "linked" | "full_schema";
+
 export interface SSEOptions {
   skipClarification?: boolean;
   /** Required by the backend chat contract; see routes/chat.py `ChatRequest`. */
   dbId?: string | null;
+  /** Admin-only; non-admins will get 403 if this is non-"auto". */
+  pipelineMode?: PipelineMode;
 }
 
 export function createSSEStream(
@@ -68,6 +74,9 @@ export function createSSEStream(
           agent_mode: agentMode,
           ...(options.dbId ? { db_id: options.dbId } : {}),
           ...(options.skipClarification ? { skip_clarification: true } : {}),
+          ...(options.pipelineMode && options.pipelineMode !== "auto"
+            ? { pipeline_mode: options.pipelineMode }
+            : {}),
         }),
         signal: controller.signal,
       });

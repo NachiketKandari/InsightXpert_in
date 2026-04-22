@@ -15,6 +15,10 @@ import { apiFetch } from "@/lib/api";
 
 export type Visibility = "private" | "shared" | "public";
 
+// Tier-1 full-schema mode: per-DB override. ``null`` = inherit system
+// default (currently "linked"). Values: "linked" | "full_schema".
+export type PipelineModeDefault = "linked" | "full_schema" | null;
+
 export interface SharedWithEntry {
   user_id: string;
   email: string;
@@ -27,6 +31,7 @@ export interface AdminDatabase {
   visibility: Visibility;
   size_bytes: number | null;
   created_at: string | number | null;
+  pipeline_mode_default: PipelineModeDefault;
   shared_with: SharedWithEntry[];
 }
 
@@ -57,6 +62,43 @@ export function useSetDbVisibility() {
         {
           method: "POST",
           body: JSON.stringify({ visibility, shared_with: shared_with ?? null }),
+        },
+      );
+      if (!res.ok) {
+        let detail = "failed";
+        try {
+          const body = (await res.json()) as { detail?: string };
+          if (body?.detail) detail = body.detail;
+        } catch {
+          /* ignore */
+        }
+        throw new Error(detail);
+      }
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: LIST_KEY });
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Tier-1: per-DB pipeline mode default — PATCH /api/v1/admin/databases/{id}
+// ---------------------------------------------------------------------------
+
+export interface PipelineModeInput {
+  db_id: string;
+  pipeline_mode_default: PipelineModeDefault;
+}
+
+export function useSetDbPipelineMode() {
+  const qc = useQueryClient();
+  return useMutation<void, Error, PipelineModeInput>({
+    mutationFn: async ({ db_id, pipeline_mode_default }) => {
+      const res = await apiFetch(
+        `/api/v1/admin/databases/${encodeURIComponent(db_id)}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ pipeline_mode_default }),
         },
       );
       if (!res.ok) {
