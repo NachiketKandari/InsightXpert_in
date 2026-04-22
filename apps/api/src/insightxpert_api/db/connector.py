@@ -1,21 +1,21 @@
 """Read-only database connector — dialect-dispatched.
 
 The connector itself doesn't know SQL dialects; it calls into the adapter
-registered for ``ref.dialect`` for connection-open + write-guard.
+registered for ``ref.dialect`` for connection-open, write-guard, teardown, and
+timeout-exception classification.
 """
 from __future__ import annotations
 
-import sqlite3
 import time
 from dataclasses import dataclass
 from typing import Any
 
 from .dialects import get_adapter
-from .dialects.sqlite import _FORBIDDEN_SQL_RE as _SQLITE_FORBIDDEN_SQL_RE
+from .dialects.sqlite import FORBIDDEN_SQL_RE as _SQLITE_FORBIDDEN_SQL_RE
 
 # Re-exported for callers that validate SQL before a connector is constructed
-# (e.g. routes/automations.py). Sourced from the SqliteAdapter to keep a single
-# source of truth; multi-dialect callers should use get_adapter(d).forbidden_sql_re.
+# (e.g. routes/automations.py). Sourced from the SqliteAdapter; multi-dialect
+# callers should use get_adapter(dialect).forbidden_sql_re instead.
 FORBIDDEN_SQL_RE = _SQLITE_FORBIDDEN_SQL_RE
 
 
@@ -35,7 +35,7 @@ class QueryResult:
 
 
 class DatabaseConnector:
-    """Per-request connector. Dispatches to the dialect adapter for open + guard."""
+    """Per-request connector. Dispatches to the dialect adapter for all DB ops."""
 
     def __init__(self, ref: Any, *, row_limit: int = 1000, timeout_s: int = 30) -> None:
         """``ref`` is a DatabaseRef; Any-typed to avoid circular import."""
@@ -53,16 +53,13 @@ class DatabaseConnector:
         try:
             try:
                 cursor = con.execute(sql)
-            except sqlite3.OperationalError as e:
-                if "interrupted" in str(e).lower() or "timeout" in str(e).lower():
+            except Exception as e:
+                if self._adapter.is_timeout_error(e):
                     raise SQLTimeoutError(str(e)) from e
                 raise
             columns = [d[0] for d in cursor.description] if cursor.description else []
             rows = [list(r) for r in cursor.fetchmany(self._row_limit)]
-            # For SQLite, the adapter set PRAGMA query_only=ON; reset it on success so
-            # the (about-to-close) connection state doesn't leak in any pooling scheme.
-            if self._ref.dialect == "sqlite":
-                con.execute("PRAGMA query_only = OFF")
+            self._adapter.teardown_readonly(con)
         finally:
             con.close()
 

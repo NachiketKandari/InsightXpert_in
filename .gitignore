@@ -52,3 +52,4 @@ apps/api/Databases/**/*.sqlite
 
 # Worktrees
 .worktrees/
+/apps/api/Databases/_shared
