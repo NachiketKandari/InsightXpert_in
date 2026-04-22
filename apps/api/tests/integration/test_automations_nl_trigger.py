@@ -62,6 +62,44 @@ async def test_generate_sql_returns_json(user_client_automations):
     assert r.json()["sql"].startswith("SELECT")
 
 
+async def test_compile_trigger_propagates_llm_outage(user_client_automations):
+    """MF5 regression: when the LLM itself fails (TimeoutError, etc.) the
+    compile_or_fallback path must NOT silently return the threshold-fallback
+    — that would mask outages and let a "fire on anything > 0" trigger land
+    in the DB. The narrowed except (ValueError, JSONDecodeError) ensures
+    non-parse exceptions propagate out.
+    """
+    from insightxpert_api.automations import nl_trigger
+
+    class _BoomLLM:
+        async def chat(self, messages):
+            raise TimeoutError("upstream LLM timed out")
+
+    raised = False
+    try:
+        await nl_trigger.compile_or_fallback(_BoomLLM(), "anything")
+    except TimeoutError:
+        raised = True
+    assert raised, (
+        "TimeoutError from LLM must propagate (not be swallowed by the "
+        "fallback clause)"
+    )
+
+
+async def test_compile_trigger_fallback_on_invalid_json_only(user_client_automations):
+    """MF5 regression companion: invalid JSON output still falls back
+    (the narrow except must cover the ValueError/JSONDecodeError path)."""
+    from insightxpert_api.automations import nl_trigger
+
+    class _BadJsonLLM:
+        async def chat(self, messages):
+            return _FakeResp(content="definitely not json")
+
+    result = await nl_trigger.compile_or_fallback(_BadJsonLLM(), "hello")
+    assert result["type"] == "threshold"
+    assert result["nl_text"] == "hello"
+
+
 async def test_generate_sql_422_on_bad_output(user_client_automations):
     client, _ = user_client_automations
     fake_llm = AsyncMock()
