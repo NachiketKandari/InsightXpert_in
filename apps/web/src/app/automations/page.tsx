@@ -5,6 +5,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { PageContainer } from "@/components/layout/page-container";
 import { useAutomationStore } from "@/stores/automation-store";
 import { AutomationList } from "@/components/automations/automation-list";
 import { NewAutomationDialog } from "@/components/automations/new-automation-dialog";
@@ -52,7 +53,7 @@ export default function AutomationsPage() {
   return (
     <div className="min-h-screen bg-background">
       <header className="sticky top-0 z-10 glass border-b border-border px-4 py-3 sm:px-6">
-        <div className="mx-auto flex max-w-5xl items-center gap-3">
+        <div className="mx-auto flex max-w-6xl items-center gap-3">
           <Link href="/">
             <Button variant="ghost" size="icon" className="size-9">
               <ArrowLeft className="size-4" />
@@ -68,9 +69,11 @@ export default function AutomationsPage() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-5xl px-4 py-6 sm:px-6">
-        <AutomationList onDelete={handleDelete} onNew={openDialog} />
-      </main>
+      <PageContainer as="main">
+        <div className="space-y-4">
+          <AutomationList onDelete={handleDelete} onNew={openDialog} />
+        </div>
+      </PageContainer>
 
       <ConfirmDialog />
       <NewAutomationDialog open={dialogOpen} onOpenChange={(v) => (v ? openDialog() : closeDialog())} />

@@ -10,6 +10,7 @@ import { ArrowLeft } from "lucide-react";
 
 import { AuthGuard } from "@/components/auth/auth-guard";
 import { Button } from "@/components/ui/button";
+import { PageContainer } from "@/components/layout/page-container";
 import { useClientConfig } from "@/hooks/use-client-config";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { cn } from "@/lib/utils";
@@ -62,7 +63,7 @@ function AdminTabs() {
   const pathname = usePathname() ?? "";
   return (
     <nav className="overflow-x-auto border-b border-border">
-      <ul className="mx-auto flex max-w-7xl min-w-max items-center gap-1 px-4 sm:px-6">
+      <ul className="mx-auto flex max-w-6xl min-w-max items-center gap-1 px-6 sm:px-8 lg:px-10">
         {TABS.map((t) => {
           const active = pathname.startsWith(t.href);
           return (
@@ -70,7 +71,7 @@ function AdminTabs() {
               <Link
                 href={t.href}
                 className={cn(
-                  "inline-block whitespace-nowrap px-3 py-3 text-sm font-medium transition-colors",
+                  "inline-block whitespace-nowrap px-4 py-3.5 text-sm font-medium transition-colors",
                   "border-b-2 -mb-px",
                   active
                     ? "border-primary text-foreground"
@@ -93,7 +94,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       <AdminGuard>
         <div className="min-h-screen bg-background">
           <header className="sticky top-0 z-20 glass border-b border-border">
-            <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 sm:px-6">
+            <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3 sm:px-8 lg:px-10">
               <div className="flex items-center gap-3">
                 <Link href="/">
                   <Button variant="ghost" size="icon" className="size-9">
@@ -105,9 +106,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             </div>
             <AdminTabs />
           </header>
-          <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
-            {children}
-          </main>
+          <PageContainer as="main">{children}</PageContainer>
         </div>
       </AdminGuard>
     </AuthGuard>

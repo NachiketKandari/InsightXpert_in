@@ -130,7 +130,7 @@ export default function MetricsPage() {
   ];
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <div>
         <h2 className="text-lg font-semibold">Query metrics</h2>
         <p className="text-sm text-muted-foreground">
