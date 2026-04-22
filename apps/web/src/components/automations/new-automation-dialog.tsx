@@ -85,12 +85,22 @@ export function NewAutomationDialog({ open, onOpenChange }: NewAutomationDialogP
     setCustomCron("0 9 * * *");
     setConditions([]);
     fetchTemplates();
-    apiCall<DatasetInfo[]>("/api/v1/datasets/public").then((data) => {
+    // /api/v1/databases is the greenfield contract; map its {db_id, source}
+    // shape to DatasetInfo so this older dialog keeps compiling. Active-DB
+    // selection is now driven by the chat store's selectedDbId; fall back
+    // to the first database if not set.
+    apiCall<Array<{ db_id: string; source?: string }>>("/api/v1/databases").then((data) => {
       if (data) {
-        setDatasets(data);
-        const active = data.find((d) => d.is_active);
-        if (active) setDbId(active.id);
-        else if (data[0]) setDbId(data[0].id);
+        const mapped: DatasetInfo[] = data.map((d) => ({
+          id: d.db_id,
+          name: d.db_id,
+          description: d.source ? `bundled (${d.source})` : null,
+          is_active: false,
+          table_name: null,
+          created_by: null,
+        }));
+        setDatasets(mapped);
+        if (mapped[0]) setDbId(mapped[0].id);
       }
     });
   }, [open, fetchTemplates]);

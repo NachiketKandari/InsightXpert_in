@@ -143,25 +143,29 @@ export function SqliteUploadDialog({ open, onOpenChange }: SqliteUploadDialogPro
           setError("Invalid response from server.");
         }
       } else {
+        let msg: string;
         try {
           const body = JSON.parse(xhr.responseText);
           const detail = body?.detail;
-          const msg = typeof detail === "string"
+          msg = typeof detail === "string"
             ? detail
             : Array.isArray(detail)
               ? detail.map((e: { msg?: string }) => e?.msg ?? JSON.stringify(e)).join("; ")
               : `Upload failed (HTTP ${xhr.status})`;
-          setError(msg);
         } catch {
-          setError(`Upload failed (HTTP ${xhr.status})`);
+          msg = `Upload failed (HTTP ${xhr.status})`;
         }
+        setError(msg);
+        toast.error(msg);
       }
       setUploading(false);
     };
 
     xhr.onerror = () => {
       xhrRef.current = null;
-      setError("Network error during upload.");
+      const msg = "Network error during upload.";
+      setError(msg);
+      toast.error(msg);
       setUploading(false);
     };
 
