@@ -11,9 +11,13 @@ from insightxpert_api.pipeline.stage import PipelineContext
 from insightxpert_api.sse.chunks import ChunkType
 from insightxpert_api.sse.emitter import EventEmitter
 
+# SF15: pipeline now uses the production 163-line prompt at
+# vendored/pipeline_core/prompts/sql_generation.j2 (the prompts_clean
+# stub was deleted). Path renamed for clarity but still exported as
+# CLEAN_PROMPT to avoid touching downstream test references.
 CLEAN_PROMPT = str(
     Path(__file__).resolve().parents[2]
-    / "src/insightxpert_api/vendored/pipeline_core/prompts_clean/sql_generation.j2"
+    / "src/insightxpert_api/vendored/pipeline_core/prompts/sql_generation.j2"
 )
 
 

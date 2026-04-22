@@ -52,7 +52,10 @@ def default_pipeline(
         ),
         SqlGeneratorStage(
             llm=llm,
-            prompt_path=_vendored_prompt("prompts_clean", "sql_generation.j2"),
+            # SF15: switched from the greenfield-only 11-line prompts_clean
+            # stub to the production 163-line prompt with CoT, JOIN guidance,
+            # and rule includes that ships with Private/InsightXpert.
+            prompt_path=_vendored_prompt("prompts", "sql_generation.j2"),
         ),
         SqlValidatorStage(),
         SqlExecutorStage(db_svc=db_svc, row_limit=settings.sql_row_limit),
