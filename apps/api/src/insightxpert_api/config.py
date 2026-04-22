@@ -109,6 +109,22 @@ class Settings(BaseSettings):
     # is re-evaluated. Keep ≥5s to avoid pegging SQLite.
     automations_scheduler_tick_seconds: int = 30
 
+    # --- observability: Sentry --------------------------------------------
+    # Empty DSN → Sentry is a no-op (safe default for tests / fresh clones).
+    # DSN itself is not secret (it's used in browser SDKs) but we still load
+    # from env so production and local can target different projects.
+    sentry_dsn: str = ""
+    # Defaults to app_env when blank; explicit override wins.
+    sentry_environment: str = ""
+    sentry_release: str = ""
+    # Traces sample rate — 0.0 disables performance tracing; 1.0 captures all.
+    # Keep low in prod to control cost.
+    sentry_traces_sample_rate: float = 0.0
+    sentry_profiles_sample_rate: float = 0.0
+    # Send PII (IP, headers, user email) with events. OFF by default; flip in
+    # prod if your privacy posture allows.
+    sentry_send_default_pii: bool = False
+
     @model_validator(mode="after")
     def _check_automations(self) -> Settings:
         if (

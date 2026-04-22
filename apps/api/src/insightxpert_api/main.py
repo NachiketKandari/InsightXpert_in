@@ -170,6 +170,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 def create_app() -> FastAPI:
     """Construct the FastAPI app. Kept thin on purpose — all work in routers/services."""
     settings = get_settings()
+
+    # Sentry must init before FastAPI() so its FastApiIntegration can patch
+    # the ASGI app on construction. No-op when SENTRY_DSN is empty.
+    from .sentry import init_sentry
+    init_sentry(settings)
+
     app = FastAPI(
         title="insightxpert.ai API",
         version="0.1.0",
@@ -201,6 +207,9 @@ def create_app() -> FastAPI:
     app.include_router(admin_prompts.router)
     app.include_router(admin_rag.router)
     app.include_router(admin_databases.router)
+
+    from .routes import sentry_debug as sentry_debug_route
+    app.include_router(sentry_debug_route.router)
 
     # Internal scheduler endpoint is always mounted — it returns 503 when
     # automations are disabled, which external callers can detect.
