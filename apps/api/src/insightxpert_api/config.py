@@ -62,6 +62,19 @@ class Settings(BaseSettings):
     # --- paths -------------------------------------------------------------
     bundled_dbs_dir: str = "./Databases"
 
+    # --- profiling ---------------------------------------------------------
+    # Columns per LLM call in the batched summary / quirk generators. One
+    # prompt requests JSON keyed by column name. Drops summary-pass cost
+    # from 2×columns LLM calls to ceil(columns / batch_size).
+    profiling_batch_size: int = 20
+    # Escape hatch — force the vendored per-column path (1 LLM call per
+    # column per artifact). Expensive, kept as a safety valve.
+    profiling_batch_disabled: bool = False
+    # Hard cap above which all LLM-driven profiling stages auto-disable.
+    # Wide DBs are rare (Snowflake landscape) and profiling them cost-free
+    # is out of scope. The runner emits a warning if this fires.
+    profiling_max_columns_for_llm: int = 500
+
     # --- automations (C1) --------------------------------------------------
     # Master switch. When false all automations/notifications routes are
     # unmounted and the scheduler lifespan hook is a no-op.
@@ -77,7 +90,7 @@ class Settings(BaseSettings):
     automations_scheduler_tick_seconds: int = 30
 
     @model_validator(mode="after")
-    def _check_automations(self) -> "Settings":
+    def _check_automations(self) -> Settings:
         if (
             self.automations_enabled
             and self.automations_scheduler_mode == "external"

@@ -58,6 +58,62 @@ def test_upload_sqlite_roundtrip(authed_client: TestClient):
     assert "test_upload" in [it["db_id"] for it in r2.json()]
 
 
+def test_upload_collision_blocks_bundled_overwrite(authed_client: TestClient):
+    """MF-PR-4: a user cannot upload over a bundled-public db_id (toxicology,
+    california_schools) — the visibility row is public/owner-null and must
+    be protected. The route 409s BEFORE reading the body."""
+    data = _make_sqlite_bytes()
+    r = authed_client.post(
+        "/api/v1/databases/upload",
+        data={"db_id": "toxicology"},
+        files={"file": ("x.sqlite", io.BytesIO(data), "application/octet-stream")},
+    )
+    assert r.status_code == 409, r.text
+    assert "already" in r.json()["detail"].lower()
+
+
+def test_upload_idempotent_for_same_owner(authed_client: TestClient):
+    """MF-PR-4 companion: re-upload by the SAME owner must still work so
+    users can refresh their own DB without a 409."""
+    data = _make_sqlite_bytes()
+    for _ in range(2):
+        r = authed_client.post(
+            "/api/v1/databases/upload",
+            data={"db_id": "test_reup"},
+            files={"file": ("x.sqlite", io.BytesIO(data), "application/octet-stream")},
+        )
+        assert r.status_code == 200, r.text
+
+
+def test_upload_rejects_oversize(authed_client: TestClient, monkeypatch):
+    """MF-PR-1: a file larger than max_upload_mb gets 413 without being
+    fully read into memory. We monkeypatch the cap down to 1 byte so a tiny
+    valid SQLite payload trips it; the server should 413 after peeking the
+    first chunk rather than buffering the rest."""
+    from insightxpert_api.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "max_upload_mb", 0)  # anything > 0 bytes → 413
+    data = _make_sqlite_bytes()
+    r = authed_client.post(
+        "/api/v1/databases/upload",
+        data={"db_id": "test_oversize"},
+        files={"file": ("x.sqlite", io.BytesIO(data), "application/octet-stream")},
+    )
+    assert r.status_code == 413, r.text
+
+
+def test_upload_rejects_empty_body(authed_client: TestClient):
+    """MF-PR-2 companion: empty file body must 400 (not 200 with a 0-byte
+    save), because the magic-byte check otherwise slides through."""
+    r = authed_client.post(
+        "/api/v1/databases/upload",
+        data={"db_id": "test_empty"},
+        files={"file": ("empty.sqlite", io.BytesIO(b""), "application/octet-stream")},
+    )
+    assert r.status_code == 400
+
+
 def test_upload_rejects_non_sqlite(authed_client: TestClient):
     r = authed_client.post(
         "/api/v1/databases/upload",

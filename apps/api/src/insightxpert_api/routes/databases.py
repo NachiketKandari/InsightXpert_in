@@ -20,22 +20,35 @@ import re
 import sqlite3
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    UploadFile,
+    status,
+)
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
 from ..auth.current_user import CurrentUser, get_current_user, require_admin
 from ..config import Settings, get_settings
+from ..databases import repository as databases_repo
 from ..databases import service as visibility_service
 from ..db.schema import ddl as schema_ddl
 from ..logging import get_logger
-from ..pipeline.pipeline import Pipeline
-from ..pipeline.profiler_stage import ProfilerStage
-from ..pipeline.stage import PipelineContext
+from ..profiling.runner import (
+    ProfileFlags,
+    count_columns,
+    estimate_cost,
+    run_profile_stream,
+)
 from ..services.conversation_store import ConversationStore, get_conversation_store
 from ..services.database_service import DatabaseService
 from ..services.profile_service import ProfileService
-from ..sse.chunks import ChunkType, ErrorPayload
+from ..sse.chunks import ChunkType, ProfileCostEstimatePayload
 from ..sse.emitter import EventEmitter
 from ..storage import build_store
 
@@ -129,16 +142,50 @@ async def upload_database(
     settings: Settings = Depends(get_settings),
 ) -> UploadResponse:
     _validate_db_id(db_id)
+
+    # Block upload collisions BEFORE reading the body: a bundled public row
+    # (owner=NULL) or a row owned by a different user must 409 — otherwise
+    # user B uploading db_id="toxicology" would silently overwrite user A's
+    # ownership/visibility via upsert_private (MF-PR-4).
+    existing = await asyncio.to_thread(databases_repo.get, db_id)
+    if existing is not None:
+        owner = existing.get("owner_user_id")
+        if owner is None or owner != cu.id:
+            raise HTTPException(
+                status_code=409,
+                detail=f"db_id '{db_id}' is already registered to another owner or is bundled-public; pick a different db_id",
+            )
+
+    # Stream the upload in chunks, tracking size as we go, so a 5 GB file
+    # can't OOM us before the 413 fires (MF-PR-1). Peek the first 16 bytes
+    # of the first chunk for the SQLite magic (MF-PR-2) so we reject
+    # non-sqlite uploads before reading further.
     max_bytes = settings.max_upload_mb * 1024 * 1024
-    data = await file.read()
-    if len(data) > max_bytes:
-        raise HTTPException(status_code=413, detail="upload_too_large")
-    if not data[:16].startswith(_SQLITE_MAGIC):
+    chunks: list[bytes] = []
+    size = 0
+    first_chunk = True
+    while True:
+        chunk = await file.read(1 << 20)  # 1 MiB
+        if not chunk:
+            break
+        if first_chunk:
+            if not chunk[:16].startswith(_SQLITE_MAGIC):
+                raise HTTPException(status_code=400, detail="invalid_file")
+            first_chunk = False
+        size += len(chunk)
+        if size > max_bytes:
+            raise HTTPException(status_code=413, detail="upload_too_large")
+        chunks.append(chunk)
+    if first_chunk:
+        # Empty body — never got a first chunk; still fail-closed.
         raise HTTPException(status_code=400, detail="invalid_file")
+    data = b"".join(chunks)
+
     svc = _db_svc(settings)
     ref = svc.save_upload(cu.id, db_id, data)
     # Register in the visibility table so the DB shows up in GET /databases and
-    # admins can change its visibility later. Idempotent for re-uploads.
+    # admins can change its visibility later. Idempotent for re-uploads by the
+    # SAME user (cross-owner collision was blocked above).
     await asyncio.to_thread(
         visibility_service.upsert_private, db_id, cu.id, len(data)
     )
@@ -171,55 +218,159 @@ async def get_profile(
     return profile.model_dump(mode="json")
 
 
-async def _run_profile_pipeline(
-    pipeline: Pipeline, ctx: PipelineContext
+class ProfileRunRequest(BaseModel):
+    """Body for ``POST /databases/{db_id}/profile``.
+
+    All flags default to ``False`` — the base path (schema + stats only) is
+    free. Any of the four expensive flags triggers the cost-gate handshake
+    unless ``confirmed=true``:
+
+        1. FE POSTs {flags: on, confirmed: false}. Server replies with one
+           ``profile_cost_estimate`` chunk and closes the stream.
+        2. FE renders a confirmation modal, then re-POSTs with
+           ``confirmed=true``. Server runs every stage and streams the
+           six-stage progress contract.
+    """
+
+    with_summaries: bool = False
+    with_quirks: bool = False
+    with_lsh: bool = False
+    with_vectors: bool = False
+    confirmed: bool = False
+
+
+async def _run_profile_v2(
+    db_id: str,
+    db_path: str,
+    flags: ProfileFlags,
+    emitter: EventEmitter,
+    session_id: str,
+    prof_svc: ProfileService,
+    settings: Settings,
+    llm: object | None,
 ) -> None:
-    emitter = ctx.emitter
     try:
-        await pipeline.run_scalar(ctx, None)
-    except Exception as exc:  # noqa: BLE001
-        log.error(
-            "profile.pipeline_failed",
-            session_id=ctx.session_id,
-            db_id=ctx.state.get("db_id"),
-            error=str(exc),
-            error_type=type(exc).__name__,
+        profile = await run_profile_stream(
+            emitter,
+            db_id=db_id,
+            db_path=db_path,
+            flags=flags,
+            llm=llm,
+            batch_size=settings.profiling_batch_size,
+            max_columns_for_llm=settings.profiling_max_columns_for_llm,
+            batch_disabled=settings.profiling_batch_disabled,
         )
-        if emitter is not None:
-            await emitter.emit(
-                ChunkType.ERROR,
-                ErrorPayload(code="profile_failed", detail=str(exc)),
-            )
+        if profile is not None:
+            prof_svc.save(session_id, db_id, profile)
     finally:
-        if emitter is not None:
-            await emitter.close()
+        await emitter.close()
+
+
+async def _emit_cost_estimate_and_close(
+    emitter: EventEmitter, payload: ProfileCostEstimatePayload
+) -> None:
+    try:
+        await emitter.emit(ChunkType.profile_cost_estimate, payload)
+    finally:
+        await emitter.close()
 
 
 @router.post("/{db_id}/profile")
 async def run_profile(
     db_id: str,
+    request: Request,
+    body: ProfileRunRequest | None = None,
     cu: CurrentUser = Depends(get_current_user),
     settings: Settings = Depends(get_settings),
     convo_store: ConversationStore = Depends(get_conversation_store),
 ) -> EventSourceResponse:
-    """Kick off profiling as a single-stage Pipeline, stream SSE progress."""
+    """Run profiling with stepped SSE progress + cost-gate handshake."""
     db_svc = _db_svc(settings)
     prof_svc = _prof_svc(settings)
-    if db_svc.resolve(cu.id, db_id) is None:
+    ref = db_svc.resolve(cu.id, db_id)
+    if ref is None:
         raise HTTPException(status_code=404, detail="invalid_db")
+
+    # Ownership gate (MF-PR-3). BEFORE any LLM spend — including the cost-gate
+    # branch, so a non-owner can't even learn the column count of a private DB.
+    # Admin + owner + public-bundled + shared-with-user all pass; everyone else
+    # 403s. Uploads (no `databases` row) fall through because svc.resolve only
+    # returns the ref when the user can see it via _list_uploaded.
+    is_admin = cu.role == "admin"
+    db_row = await asyncio.to_thread(databases_repo.get, db_id)
+    if db_row is not None and not is_admin:
+        owner = db_row.get("owner_user_id")
+        visibility = db_row.get("visibility")
+        is_owner = owner == cu.id
+        is_public = visibility == "public"
+        visible = await asyncio.to_thread(
+            visibility_service.visible_ids, cu.id, False
+        )
+        is_shared = db_id in visible
+        if not (is_owner or is_public or is_shared):
+            raise HTTPException(status_code=403, detail="forbidden")
 
     convo = convo_store.get_or_create(cu.id, None)
     emitter = EventEmitter(convo.conversation_id)
-    pipeline = Pipeline([ProfilerStage(db_svc=db_svc, prof_svc=prof_svc)])
 
-    ctx = PipelineContext(
-        session_id=cu.id,
-        conversation_id=convo.conversation_id,
-        emitter=emitter,
+    req = body or ProfileRunRequest()
+    flags = ProfileFlags(
+        with_summaries=req.with_summaries,
+        with_quirks=req.with_quirks,
+        with_lsh=req.with_lsh,
+        with_vectors=req.with_vectors,
     )
-    ctx.state["db_id"] = db_id
 
-    asyncio.create_task(_run_profile_pipeline(pipeline, ctx))
+    # --- cost-gate branch ------------------------------------------------
+    # Any expensive flag on + not confirmed → emit a single estimate chunk
+    # and close the stream. FE re-POSTs with confirmed=true to run.
+    if flags.any and not req.confirmed:
+        _, column_count = count_columns(ref.local_path, db_id)
+        estimate = estimate_cost(
+            column_count, flags, settings.profiling_batch_size
+        )
+        payload = ProfileCostEstimatePayload(
+            columns=estimate.columns,
+            batch_size=estimate.batch_size,
+            total_llm_calls=estimate.total_llm_calls,
+            estimated_seconds=estimate.estimated_seconds,
+        )
+        asyncio.create_task(_emit_cost_estimate_and_close(emitter, payload))
+        return EventSourceResponse(emitter.stream())
+
+    # --- full run branch -------------------------------------------------
+    # Resolve an LLM if any LLM stage is on. We don't construct one on the
+    # cheap (schema+stats only) path so tests can hit it without Gemini.
+    llm: object | None = None
+    if flags.any_llm or flags.with_vectors:
+        # Prefer an app-state LLM (populated by tests via app.state.llm) so
+        # the profile path can be exercised without a live Gemini key.
+        llm = getattr(request.app.state, "llm", None)
+        if llm is None:
+            try:
+                from ..llm.gemini import GeminiLLM
+
+                llm = GeminiLLM(
+                    api_key=settings.gemini_api_key,
+                    model=settings.gemini_chat_model,
+                    embed_model=settings.gemini_embed_model,
+                )
+            except Exception as exc:
+                log.warning("profile.llm_construct_failed", error=str(exc))
+                llm = None
+
+    asyncio.create_task(
+        _run_profile_v2(
+            db_id=db_id,
+            db_path=ref.local_path,
+            flags=flags,
+            emitter=emitter,
+            session_id=cu.id,
+            prof_svc=prof_svc,
+            settings=settings,
+            llm=llm,
+        )
+    )
     return EventSourceResponse(emitter.stream())
 
 
