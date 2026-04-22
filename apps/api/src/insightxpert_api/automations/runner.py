@@ -14,13 +14,13 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 import time
 from typing import Any
 
 from fastapi import FastAPI
 
 from ..db.connector import DatabaseConnector
+from ..logging import get_logger
 from ..services.database_service import DatabaseService
 from . import notifications as notif_module
 from . import repository
@@ -28,10 +28,15 @@ from .evaluator import TriggerEvaluator
 from .models import RunBatchItem, RunBatchResult
 from .service import AutomationService
 
-logger = logging.getLogger("insightxpert_api.automations.runner")
+log = get_logger("automations.runner")
 
 # Per-automation-id lock to prevent overlapping runs of the same automation.
 _locks: dict[str, asyncio.Lock] = {}
+
+# Max concurrent automations in one batch. Bounded to keep DB / thread-pool
+# pressure sane — a single tick fanning out to 100 automations must not
+# swamp the process. Tunable via follow-up config.
+_BATCH_CONCURRENCY = 8
 
 
 def _lock_for(automation_id: str) -> asyncio.Lock:
@@ -76,6 +81,13 @@ async def _execute_one(
                 error="inactive",
             )
 
+        log.info(
+            "automation.run_started",
+            automation_id=automation_id,
+            db_id=auto.get("db_id"),
+            owner_user_id=auto.get("owner_user_id"),
+        )
+
         try:
             sql_queries = json.loads(auto.get("sql_queries_json") or "[]")
         except json.JSONDecodeError:
@@ -87,6 +99,11 @@ async def _execute_one(
                 "error_message": "no sql queries configured",
             })
             AutomationService().mark_run_completed(automation_id, int(time.time()))
+            log.error(
+                "automation.run_error",
+                automation_id=automation_id,
+                reason="no_sql_queries",
+            )
             return RunBatchItem(
                 automation_id=automation_id, status="error",
                 error="no sql queries",
@@ -116,6 +133,12 @@ async def _execute_one(
                 "error_message": f"db not found: {auto['db_id']}",
             })
             AutomationService().mark_run_completed(automation_id, int(time.time()))
+            log.error(
+                "automation.run_error",
+                automation_id=automation_id,
+                reason="db_not_found",
+                db_id=auto["db_id"],
+            )
             return RunBatchItem(
                 automation_id=automation_id, status="error",
                 error=f"db_not_found:{auto['db_id']}",
@@ -129,13 +152,21 @@ async def _execute_one(
                     await asyncio.to_thread(_run_sql, db_path, sql)
                 )
         except Exception as exc:  # noqa: BLE001
+            execution_ms = int((time.perf_counter() - start) * 1000)
             repository.insert_run({
                 "automation_id": automation_id,
                 "status": "error",
                 "error_message": str(exc),
-                "execution_time_ms": int((time.perf_counter() - start) * 1000),
+                "execution_time_ms": execution_ms,
             })
             AutomationService().mark_run_completed(automation_id, int(time.time()))
+            log.error(
+                "automation.run_error",
+                automation_id=automation_id,
+                error=str(exc),
+                error_type=type(exc).__name__,
+                exc_info=True,
+            )
             return RunBatchItem(
                 automation_id=automation_id, status="error", error=str(exc)
             )
@@ -180,7 +211,7 @@ async def _execute_one(
                         pass
 
         if not conditions:
-            repository.insert_run({
+            run = repository.insert_run({
                 "automation_id": automation_id,
                 "status": "success",
                 "result_json": json.dumps(result_to_store),
@@ -188,6 +219,15 @@ async def _execute_one(
                 "execution_time_ms": execution_ms,
             })
             AutomationService().mark_run_completed(automation_id, int(time.time()))
+            log.info(
+                "automation.run_completed",
+                automation_id=automation_id,
+                run_id=run["id"],
+                status="success",
+                row_count=row_count,
+                execution_time_ms=execution_ms,
+                triggers_fired=0,
+            )
             return RunBatchItem(
                 automation_id=automation_id, status="success",
                 execution_time_ms=execution_ms,
@@ -198,6 +238,17 @@ async def _execute_one(
         any_fired = evaluator.any_fired(trigger_results)
         status = "success" if any_fired else "no_trigger"
 
+        # Emit one structured event per fired trigger so operators can grep
+        # for "trigger_fired" without joining to the runs table.
+        for tr in trigger_results:
+            if tr.get("fired"):
+                log.info(
+                    "automation.trigger_fired",
+                    automation_id=automation_id,
+                    trigger_type=tr.get("type"),
+                    actual_value=tr.get("actual_value"),
+                )
+
         run = repository.insert_run({
             "automation_id": automation_id,
             "status": status,
@@ -207,6 +258,17 @@ async def _execute_one(
             "triggers_fired_json": json.dumps(trigger_results),
         })
         AutomationService().mark_run_completed(automation_id, int(time.time()))
+
+        triggers_fired_count = sum(1 for t in trigger_results if t.get("fired"))
+        log.info(
+            "automation.run_completed",
+            automation_id=automation_id,
+            run_id=run["id"],
+            status=status,
+            row_count=row_count,
+            execution_time_ms=execution_ms,
+            triggers_fired=triggers_fired_count,
+        )
 
         if any_fired:
             fired_msgs = [r["message"] for r in trigger_results if r.get("fired")]
@@ -222,7 +284,7 @@ async def _execute_one(
                 try:
                     await notif_module.dispatch(app, auto["owner_user_id"], notif)
                 except Exception as exc:  # noqa: BLE001
-                    logger.warning("notif dispatch failed: %s", exc)
+                    log.warning("automation.notif_dispatch_failed", error=str(exc))
 
         return RunBatchItem(
             automation_id=automation_id,
@@ -242,6 +304,8 @@ async def run_due_automations(
     * ``automation_id`` set → run that single automation (manual trigger /
       scheduled per-job callback).
     * Otherwise → pick up all active automations with ``next_run_at <= now``.
+      Batch execution is parallelized via ``asyncio.gather`` bounded by a
+      ``Semaphore`` so a single slow automation doesn't stall the rest.
     """
     now_ts = now if now is not None else int(time.time())
     if automation_id is not None:
@@ -249,10 +313,39 @@ async def run_due_automations(
         return RunBatchResult(ran=[item])
 
     due = repository.list_due_automations(now_ts)
-    items = []
-    for auto in due:
-        items.append(await _execute_one(app, auto["id"]))
-    return RunBatchResult(ran=items)
+    if not due:
+        return RunBatchResult(ran=[])
+
+    # Fresh semaphore per batch — we never want cross-batch serialization and
+    # a module-level semaphore would make testing under pytest-asyncio awkward
+    # (each test gets its own event loop).
+    semaphore = asyncio.Semaphore(_BATCH_CONCURRENCY)
+
+    # Resolve the executor via module lookup so tests that
+    # ``monkeypatch.setattr(runner, "_execute_one", ...)`` take effect.
+    import sys
+
+    _module = sys.modules[__name__]
+
+    async def _gated(aid: str) -> RunBatchItem:
+        async with semaphore:
+            return await _module._execute_one(app, aid)
+
+    results = await asyncio.gather(
+        *(_gated(a["id"]) for a in due),
+        return_exceptions=True,
+    )
+    ran: list[RunBatchItem] = []
+    for item in results:
+        if isinstance(item, BaseException):
+            log.error(
+                "automation.batch_exception",
+                error=str(item),
+                error_type=type(item).__name__,
+            )
+            continue
+        ran.append(item)
+    return RunBatchResult(ran=ran)
 
 
 __all__ = ["run_due_automations"]

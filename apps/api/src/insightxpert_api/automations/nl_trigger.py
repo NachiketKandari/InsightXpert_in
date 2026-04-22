@@ -95,8 +95,16 @@ async def compile_or_fallback(
     """Compile NL trigger with a threshold fallback on parse failure."""
     try:
         return await compile_nl_trigger(llm, nl_text, available_columns)
-    except (ValueError, Exception) as exc:  # noqa: BLE001
-        logger.warning("NL trigger compile failed, using fallback: %s", exc)
+    except (ValueError, json.JSONDecodeError) as exc:
+        # Narrow catch (MF5): only parse/validation failures fall back to a
+        # safe threshold template. Any other exception — LLM provider error,
+        # timeout, network failure — must propagate so the route returns 502
+        # instead of silently producing a surprise "fire on anything > 0"
+        # trigger.
+        logger.warning(
+            "nl_trigger.parse_failed",
+            extra={"reason": str(exc), "nl_text": nl_text},
+        )
         fallback = dict(DEFAULT_FALLBACK)
         fallback["nl_text"] = nl_text
         return fallback
