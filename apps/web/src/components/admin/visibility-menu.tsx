@@ -113,7 +113,7 @@ export function VisibilityMenu({
             <DialogTitle>{label}</DialogTitle>
           </DialogHeader>
 
-          <div className="space-y-3">
+          <div className="space-y-4">
             <div className="grid grid-cols-3 gap-2">
               {(["private", "shared", "public"] as Visibility[]).map((v) => (
                 <button

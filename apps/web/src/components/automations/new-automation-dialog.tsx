@@ -205,7 +205,7 @@ export function NewAutomationDialog({ open, onOpenChange }: NewAutomationDialogP
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-5 py-2">
+          <div className="space-y-5">
             {/* Name + description */}
             <div className="space-y-2">
               <Label htmlFor="automation-name">Name</Label>

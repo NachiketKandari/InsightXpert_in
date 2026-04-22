@@ -199,7 +199,7 @@ export function CsvUploadDialog({ open, onOpenChange, onUploadSuccess }: CsvUplo
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleUpload} className="space-y-4 px-4">
+        <form onSubmit={handleUpload} className="space-y-4">
           {/* File picker */}
           <div className="space-y-2">
             <Label htmlFor="csv-file" className="text-xs font-medium">

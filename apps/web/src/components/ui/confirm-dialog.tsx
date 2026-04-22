@@ -4,6 +4,7 @@ import { useCallback, useRef, useState } from "react";
 import {
   Dialog,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogDescription,
@@ -52,7 +53,7 @@ export function useConfirm() {
               {options.description}
             </DialogDescription>
           </DialogHeader>
-          <div className="flex items-center justify-end gap-2 pt-2">
+          <DialogFooter>
             <Button variant="outline" onClick={() => handleClose(false)}>
               {options.cancelLabel ?? "Cancel"}
             </Button>
@@ -62,7 +63,7 @@ export function useConfirm() {
             >
               {options.confirmLabel ?? "Confirm"}
             </Button>
-          </div>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     ),
