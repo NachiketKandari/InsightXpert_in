@@ -192,7 +192,7 @@ export function SqliteUploadDialog({ open, onOpenChange }: SqliteUploadDialogPro
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleUpload} className="space-y-4 px-4">
+        <form onSubmit={handleUpload} className="space-y-4">
           {/* File picker */}
           <div className="space-y-2">
             <Label htmlFor="sqlite-file" className="text-xs font-medium">SQLite File</Label>

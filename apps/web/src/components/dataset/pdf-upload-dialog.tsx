@@ -143,7 +143,7 @@ export function PdfUploadDialog({
               Successfully extracted text from {result.page_count} page{result.page_count !== 1 ? "s" : ""}.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-3 px-4">
+          <div className="space-y-3">
             <div className="flex items-center gap-2">
               <BookOpen className="size-4 text-primary" />
               <span className="text-sm font-medium">{result.name}</span>
@@ -178,7 +178,7 @@ export function PdfUploadDialog({
             Upload a PDF document to use as context for analysis.
           </DialogDescription>
         </DialogHeader>
-        <form onSubmit={handleUpload} className="space-y-4 px-4">
+        <form onSubmit={handleUpload} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="pdf-file" className="text-xs font-medium">PDF File</Label>
             {!file ? (

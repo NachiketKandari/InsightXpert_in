@@ -39,7 +39,7 @@ export function CostConfirmModal({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="px-4 pb-2">
+        <div>
           {estimate ? (
             <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
               <dt className="text-muted-foreground">Columns</dt>
