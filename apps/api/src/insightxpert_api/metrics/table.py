@@ -9,6 +9,7 @@ from __future__ import annotations
 from sqlalchemy import (
     CheckConstraint,
     Column,
+    Float,
     Index,
     Integer,
     String,
@@ -35,6 +36,13 @@ query_metrics = Table(
     Column("stage_timings_json", Text, nullable=True),
     Column("agent_trace_summary_json", Text, nullable=True),
     Column("created_at", Integer, nullable=False),
+    # Phase 1.2 — spend/quota columns (see alembic 20260425_0001).
+    Column("source", String(32), nullable=True),
+    Column("provider", String(32), nullable=True),
+    Column("model", String(64), nullable=True),
+    Column("cost_usd", Float, nullable=True),
+    Column("pricing_version", String(32), nullable=True),
+    Column("source_ref_id", String(255), nullable=True),
     CheckConstraint(
         "thumbs IN ('up','down') OR thumbs IS NULL",
         name="query_metrics_thumbs_check",
@@ -48,3 +56,8 @@ Index(
     query_metrics.c.created_at.desc(),
 )
 Index("ix_query_metrics_db_id", query_metrics.c.db_id)
+Index(
+    "ix_query_metrics_source_created_at",
+    query_metrics.c.source,
+    query_metrics.c.created_at.desc(),
+)

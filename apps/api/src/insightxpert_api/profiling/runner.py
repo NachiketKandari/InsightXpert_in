@@ -25,7 +25,9 @@ Cost-estimate formula (documented for parity with the FE)::
 
 from __future__ import annotations
 
+import asyncio
 import math
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -50,6 +52,31 @@ if TYPE_CHECKING:  # pragma: no cover
     from ..vendored.pipeline_core.models.schema import DatabaseSchema
 
 log = get_logger("profiling.runner")
+
+# --------------------------------------------------------------------------
+# Phase 1.4 — profile-specific concurrency cap.
+# Stricter than the general LLM semaphore (llm/gemini.py). One user running
+# a 90-column profile must not block every other user's chat turn. The
+# semaphore is module-level + lazy so tests can override via
+# ``_reset_profile_semaphore`` below.
+# --------------------------------------------------------------------------
+
+_PROFILE_SEMAPHORE: asyncio.Semaphore | None = None
+
+
+def _profile_semaphore() -> asyncio.Semaphore:
+    global _PROFILE_SEMAPHORE
+    if _PROFILE_SEMAPHORE is None:
+        cap = int(os.environ.get("PROFILE_MAX_CONCURRENCY", "2") or 2)
+        _PROFILE_SEMAPHORE = asyncio.Semaphore(max(1, cap))
+    return _PROFILE_SEMAPHORE
+
+
+def _reset_profile_semaphore(n: int) -> None:
+    """Test hook — reset the module-level profile semaphore."""
+    global _PROFILE_SEMAPHORE
+    _PROFILE_SEMAPHORE = asyncio.Semaphore(max(1, int(n)))
+
 
 # Stage order the FE renders. Keep stable — the FE progress bar depends on
 # this ordering. "mechanical" covers schema + stats together.
@@ -196,6 +223,13 @@ async def run_profile_stream(
     batch_size: int,
     max_columns_for_llm: int,
     batch_disabled: bool = False,
+    # Phase 1.2 + 1.4 — when provided, the runner emits a usage record for
+    # every profile run (summaries + quirks LLM batches) tagged with this
+    # user. The runner also honours a module-level profile semaphore to cap
+    # concurrent LLM-driven profile runs globally.
+    user_id: str | None = None,
+    provider: str = "gemini",
+    model: str | None = None,
 ) -> DatabaseProfile | None:
     """Run the full profile pipeline with per-stage SSE emissions.
 
@@ -203,6 +237,22 @@ async def run_profile_stream(
     (``profile_error`` is emitted before returning).
     """
     import time as _time
+
+    # Snapshot token counters before the run so we can attribute only the
+    # delta to this db_id. Wrap the entire run in try/finally so usage fires
+    # on success, error, AND cancellation (spend-quota design §3.3).
+    tokens_before_in = int(getattr(llm, "input_tokens_used", 0) or 0)
+    tokens_before_out = int(getattr(llm, "output_tokens_used", 0) or 0)
+    run_start = _time.perf_counter()
+
+    # Phase 1.4 — cap concurrent LLM-driven profile runs globally. Only
+    # gate when an LLM stage will actually fire; the cheap schema+stats path
+    # should never be rate-limited by another user's 90-column profile.
+    needs_semaphore = llm is not None and (flags.any_llm or flags.with_vectors)
+    sem = _profile_semaphore() if needs_semaphore else None
+
+    if sem is not None:
+        await sem.acquire()
 
     try:
         path = Path(db_path)
@@ -316,6 +366,42 @@ async def run_profile_stream(
             ProfileErrorPayload(db_id=db_id, message=str(exc)),
         )
         return None
+    finally:
+        # Phase 1.4 — release the profile semaphore under all paths.
+        if sem is not None:
+            try:
+                sem.release()
+            except (ValueError, RuntimeError):
+                pass
+        # Phase 1.2 — always emit a usage record for this profile run, even on
+        # error or cancel, so quota accounting is accurate (spend-quota §3.3).
+        if user_id is not None and llm is not None:
+            try:
+                from ..metrics.llm_usage import record_llm_usage
+
+                tokens_in = (
+                    int(getattr(llm, "input_tokens_used", 0) or 0)
+                    - tokens_before_in
+                )
+                tokens_out = (
+                    int(getattr(llm, "output_tokens_used", 0) or 0)
+                    - tokens_before_out
+                )
+                if tokens_in > 0 or tokens_out > 0:
+                    duration_ms = int((_time.perf_counter() - run_start) * 1000)
+                    record_llm_usage(
+                        source="profile",
+                        provider=provider,
+                        model=model or "gemini-2.5-flash",
+                        input_tokens=tokens_in,
+                        output_tokens=tokens_out,
+                        user_id=user_id,
+                        source_ref_id=db_id,
+                        db_id=db_id,
+                        duration_ms=duration_ms,
+                    )
+            except Exception:  # noqa: BLE001 — helper already swallows, belt & braces
+                pass
 
 
 # ---------------------------------------------------------------------------

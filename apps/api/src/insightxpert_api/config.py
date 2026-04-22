@@ -75,6 +75,17 @@ class Settings(BaseSettings):
     # is out of scope. The runner emits a warning if this fires.
     profiling_max_columns_for_llm: int = 500
 
+    # --- Phase 1.4: rate limiting -----------------------------------------
+    # Global LLM concurrency cap — see llm/gemini.py _llm_semaphore. One
+    # user hammering chat cannot drive Gemini into 429 for everyone.
+    llm_max_concurrency: int = 3
+    # Profiling-specific semaphore. Stricter than the general cap because a
+    # single 90-column profile = dozens of batched LLM calls.
+    profile_max_concurrency: int = 2
+    # Per-user daily cap on POST /databases/{id}/profile. When exceeded the
+    # route returns HTTP 429 with a reset-time in the detail.
+    profile_max_per_user_per_day: int = 10
+
     # --- automations (C1) --------------------------------------------------
     # Master switch. When false all automations/notifications routes are
     # unmounted and the scheduler lifespan hook is a no-op.

@@ -69,228 +69,280 @@ async def _execute_one(
 ) -> RunBatchItem:
     lock = _lock_for(automation_id)
     async with lock:
-        auto = repository.get_automation(automation_id)
-        if auto is None:
-            return RunBatchItem(
-                automation_id=automation_id, status="skipped",
-                error="not_found",
-            )
-        if not auto.get("is_active"):
-            return RunBatchItem(
-                automation_id=automation_id, status="skipped",
-                error="inactive",
-            )
-
-        log.info(
-            "automation.run_started",
-            automation_id=automation_id,
-            db_id=auto.get("db_id"),
-            owner_user_id=auto.get("owner_user_id"),
+        # Phase 1.2 — read LLM token counters before/after the run so we can
+        # attribute any ai_sql generation spend to this automation. Today
+        # automation runs don't invoke the LLM inline (sql_queries are
+        # pre-generated via /generate-sql), but we wire the emission path now
+        # so future per-run regeneration lands with zero extra plumbing.
+        llm_for_run = getattr(app.state, "llm", None) if app is not None else None
+        tokens_before_in = int(
+            getattr(llm_for_run, "input_tokens_used", 0) or 0
         )
+        tokens_before_out = int(
+            getattr(llm_for_run, "output_tokens_used", 0) or 0
+        )
+        auto_for_usage: dict[str, Any] | None = None
 
         try:
-            sql_queries = json.loads(auto.get("sql_queries_json") or "[]")
-        except json.JSONDecodeError:
-            sql_queries = []
-        if not sql_queries:
-            repository.insert_run({
-                "automation_id": automation_id,
-                "status": "error",
-                "error_message": "no sql queries configured",
-            })
-            AutomationService().mark_run_completed(automation_id, int(time.time()))
-            log.error(
-                "automation.run_error",
-                automation_id=automation_id,
-                reason="no_sql_queries",
-            )
-            return RunBatchItem(
-                automation_id=automation_id, status="error",
-                error="no sql queries",
-            )
-
-        # Resolve DB path
-        db_path: str | None
-        if app is not None and hasattr(app.state, "db_service"):
-            db_svc: DatabaseService = app.state.db_service
-            db_path = _resolve_db_path(db_svc, auto["db_id"])
-        else:
-            # Fallback — construct a DatabaseService from settings.
-            from ..config import get_settings
-            from ..storage import build_store
-
-            settings = get_settings()
-            db_svc = DatabaseService(
-                bundled_dir=settings.bundled_dbs_dir,
-                store=build_store(settings),
-            )
-            db_path = _resolve_db_path(db_svc, auto["db_id"])
-
-        if db_path is None:
-            repository.insert_run({
-                "automation_id": automation_id,
-                "status": "error",
-                "error_message": f"db not found: {auto['db_id']}",
-            })
-            AutomationService().mark_run_completed(automation_id, int(time.time()))
-            log.error(
-                "automation.run_error",
-                automation_id=automation_id,
-                reason="db_not_found",
-                db_id=auto["db_id"],
-            )
-            return RunBatchItem(
-                automation_id=automation_id, status="error",
-                error=f"db_not_found:{auto['db_id']}",
-            )
-
-        start = time.perf_counter()
-        step_results: list[dict[str, Any]] = []
-        try:
-            for sql in sql_queries:
-                step_results.append(
-                    await asyncio.to_thread(_run_sql, db_path, sql)
+            auto = repository.get_automation(automation_id)
+            auto_for_usage = auto
+            if auto is None:
+                return RunBatchItem(
+                    automation_id=automation_id, status="skipped",
+                    error="not_found",
                 )
-        except Exception as exc:  # noqa: BLE001
-            execution_ms = int((time.perf_counter() - start) * 1000)
-            repository.insert_run({
-                "automation_id": automation_id,
-                "status": "error",
-                "error_message": str(exc),
-                "execution_time_ms": execution_ms,
-            })
-            AutomationService().mark_run_completed(automation_id, int(time.time()))
-            log.error(
-                "automation.run_error",
+            if not auto.get("is_active"):
+                return RunBatchItem(
+                    automation_id=automation_id, status="skipped",
+                    error="inactive",
+                )
+
+            log.info(
+                "automation.run_started",
                 automation_id=automation_id,
-                error=str(exc),
-                error_type=type(exc).__name__,
-                exc_info=True,
-            )
-            return RunBatchItem(
-                automation_id=automation_id, status="error", error=str(exc)
+                db_id=auto.get("db_id"),
+                owner_user_id=auto.get("owner_user_id"),
             )
 
-        execution_ms = int((time.perf_counter() - start) * 1000)
-        final_result = step_results[-1]
-        row_count = len(final_result.get("rows", []))
-        result_to_store = (
-            final_result if len(step_results) == 1
-            else {**final_result, "step_results": step_results}
-        )
+            try:
+                sql_queries = json.loads(auto.get("sql_queries_json") or "[]")
+            except json.JSONDecodeError:
+                sql_queries = []
+            if not sql_queries:
+                repository.insert_run({
+                    "automation_id": automation_id,
+                    "status": "error",
+                    "error_message": "no sql queries configured",
+                })
+                AutomationService().mark_run_completed(automation_id, int(time.time()))
+                log.error(
+                    "automation.run_error",
+                    automation_id=automation_id,
+                    reason="no_sql_queries",
+                )
+                return RunBatchItem(
+                    automation_id=automation_id, status="error",
+                    error="no sql queries",
+                )
 
-        # Gather trigger conditions + previous result for change_detection
-        trigger_rows = repository.list_triggers(automation_id)
-        conditions = [
-            {
-                "type": t["type"],
-                "column": t["column"],
-                "operator": t["operator"],
-                "value": t["value"],
-                "change_percent": t["change_percent"],
-                "scope": t["scope"],
-                "nl_text": t["nl_text"],
-            }
-            for t in trigger_rows
-        ]
+            # Resolve DB path
+            db_path: str | None
+            if app is not None and hasattr(app.state, "db_service"):
+                db_svc: DatabaseService = app.state.db_service
+                db_path = _resolve_db_path(db_svc, auto["db_id"])
+            else:
+                # Fallback — construct a DatabaseService from settings.
+                from ..config import get_settings
+                from ..storage import build_store
 
-        previous_result: dict | None = None
-        if conditions:
-            prev_runs = repository.list_runs(automation_id, limit=1)
-            if prev_runs:
-                raw = prev_runs[0].get("result_json")
-                if isinstance(raw, str):
-                    try:
-                        parsed = json.loads(raw)
-                        if isinstance(parsed, dict):
-                            previous_result = {
-                                "columns": parsed.get("columns", []),
-                                "rows": parsed.get("rows", []),
-                            }
-                    except json.JSONDecodeError:
-                        pass
+                settings = get_settings()
+                db_svc = DatabaseService(
+                    bundled_dir=settings.bundled_dbs_dir,
+                    store=build_store(settings),
+                )
+                db_path = _resolve_db_path(db_svc, auto["db_id"])
 
-        if not conditions:
+            if db_path is None:
+                repository.insert_run({
+                    "automation_id": automation_id,
+                    "status": "error",
+                    "error_message": f"db not found: {auto['db_id']}",
+                })
+                AutomationService().mark_run_completed(automation_id, int(time.time()))
+                log.error(
+                    "automation.run_error",
+                    automation_id=automation_id,
+                    reason="db_not_found",
+                    db_id=auto["db_id"],
+                )
+                return RunBatchItem(
+                    automation_id=automation_id, status="error",
+                    error=f"db_not_found:{auto['db_id']}",
+                )
+
+            start = time.perf_counter()
+            step_results: list[dict[str, Any]] = []
+            try:
+                for sql in sql_queries:
+                    step_results.append(
+                        await asyncio.to_thread(_run_sql, db_path, sql)
+                    )
+            except Exception as exc:  # noqa: BLE001
+                execution_ms = int((time.perf_counter() - start) * 1000)
+                repository.insert_run({
+                    "automation_id": automation_id,
+                    "status": "error",
+                    "error_message": str(exc),
+                    "execution_time_ms": execution_ms,
+                })
+                AutomationService().mark_run_completed(automation_id, int(time.time()))
+                log.error(
+                    "automation.run_error",
+                    automation_id=automation_id,
+                    error=str(exc),
+                    error_type=type(exc).__name__,
+                    exc_info=True,
+                )
+                return RunBatchItem(
+                    automation_id=automation_id, status="error", error=str(exc)
+                )
+
+            execution_ms = int((time.perf_counter() - start) * 1000)
+            final_result = step_results[-1]
+            row_count = len(final_result.get("rows", []))
+            result_to_store = (
+                final_result if len(step_results) == 1
+                else {**final_result, "step_results": step_results}
+            )
+
+            # Gather trigger conditions + previous result for change_detection
+            trigger_rows = repository.list_triggers(automation_id)
+            conditions = [
+                {
+                    "type": t["type"],
+                    "column": t["column"],
+                    "operator": t["operator"],
+                    "value": t["value"],
+                    "change_percent": t["change_percent"],
+                    "scope": t["scope"],
+                    "nl_text": t["nl_text"],
+                }
+                for t in trigger_rows
+            ]
+
+            previous_result: dict | None = None
+            if conditions:
+                prev_runs = repository.list_runs(automation_id, limit=1)
+                if prev_runs:
+                    raw = prev_runs[0].get("result_json")
+                    if isinstance(raw, str):
+                        try:
+                            parsed = json.loads(raw)
+                            if isinstance(parsed, dict):
+                                previous_result = {
+                                    "columns": parsed.get("columns", []),
+                                    "rows": parsed.get("rows", []),
+                                }
+                        except json.JSONDecodeError:
+                            pass
+
+            if not conditions:
+                run = repository.insert_run({
+                    "automation_id": automation_id,
+                    "status": "success",
+                    "result_json": json.dumps(result_to_store),
+                    "row_count": row_count,
+                    "execution_time_ms": execution_ms,
+                })
+                AutomationService().mark_run_completed(automation_id, int(time.time()))
+                log.info(
+                    "automation.run_completed",
+                    automation_id=automation_id,
+                    run_id=run["id"],
+                    status="success",
+                    row_count=row_count,
+                    execution_time_ms=execution_ms,
+                    triggers_fired=0,
+                )
+                return RunBatchItem(
+                    automation_id=automation_id, status="success",
+                    execution_time_ms=execution_ms,
+                )
+
+            evaluator = TriggerEvaluator()
+            trigger_results = evaluator.evaluate(conditions, final_result, previous_result)
+            any_fired = evaluator.any_fired(trigger_results)
+            status = "success" if any_fired else "no_trigger"
+
+            # Emit one structured event per fired trigger so operators can grep
+            # for "trigger_fired" without joining to the runs table.
+            for tr in trigger_results:
+                if tr.get("fired"):
+                    log.info(
+                        "automation.trigger_fired",
+                        automation_id=automation_id,
+                        trigger_type=tr.get("type"),
+                        actual_value=tr.get("actual_value"),
+                    )
+
             run = repository.insert_run({
                 "automation_id": automation_id,
-                "status": "success",
+                "status": status,
                 "result_json": json.dumps(result_to_store),
                 "row_count": row_count,
                 "execution_time_ms": execution_ms,
+                "triggers_fired_json": json.dumps(trigger_results),
             })
             AutomationService().mark_run_completed(automation_id, int(time.time()))
+
+            triggers_fired_count = sum(1 for t in trigger_results if t.get("fired"))
             log.info(
                 "automation.run_completed",
                 automation_id=automation_id,
                 run_id=run["id"],
-                status="success",
+                status=status,
                 row_count=row_count,
                 execution_time_ms=execution_ms,
-                triggers_fired=0,
+                triggers_fired=triggers_fired_count,
             )
+
+            if any_fired:
+                fired_msgs = [r["message"] for r in trigger_results if r.get("fired")]
+                notif = notif_module.create(
+                    user_id=auto["owner_user_id"],
+                    automation_id=automation_id,
+                    run_id=run["id"],
+                    title=f"Alert: {auto['name']}",
+                    message="\n".join(fired_msgs),
+                    severity="warning",
+                )
+                if app is not None:
+                    try:
+                        await notif_module.dispatch(app, auto["owner_user_id"], notif)
+                    except Exception as exc:  # noqa: BLE001
+                        log.warning("automation.notif_dispatch_failed", error=str(exc))
+
             return RunBatchItem(
-                automation_id=automation_id, status="success",
+                automation_id=automation_id,
+                status=status,
                 execution_time_ms=execution_ms,
             )
-
-        evaluator = TriggerEvaluator()
-        trigger_results = evaluator.evaluate(conditions, final_result, previous_result)
-        any_fired = evaluator.any_fired(trigger_results)
-        status = "success" if any_fired else "no_trigger"
-
-        # Emit one structured event per fired trigger so operators can grep
-        # for "trigger_fired" without joining to the runs table.
-        for tr in trigger_results:
-            if tr.get("fired"):
-                log.info(
-                    "automation.trigger_fired",
-                    automation_id=automation_id,
-                    trigger_type=tr.get("type"),
-                    actual_value=tr.get("actual_value"),
+        finally:
+            # Phase 1.2 — emit a usage row when LLM tokens were consumed
+            # during this run. Today the inline run path is pre-generated SQL
+            # (no LLM call), but /generate-sql invocations and any future
+            # in-run regeneration flow through here so the seam is in place.
+            try:
+                tokens_in_delta = (
+                    int(getattr(llm_for_run, "input_tokens_used", 0) or 0)
+                    - tokens_before_in
                 )
+                tokens_out_delta = (
+                    int(getattr(llm_for_run, "output_tokens_used", 0) or 0)
+                    - tokens_before_out
+                )
+                if (
+                    (tokens_in_delta > 0 or tokens_out_delta > 0)
+                    and auto_for_usage is not None
+                ):
+                    from ..config import get_settings
+                    from ..metrics.llm_usage import record_llm_usage
 
-        run = repository.insert_run({
-            "automation_id": automation_id,
-            "status": status,
-            "result_json": json.dumps(result_to_store),
-            "row_count": row_count,
-            "execution_time_ms": execution_ms,
-            "triggers_fired_json": json.dumps(trigger_results),
-        })
-        AutomationService().mark_run_completed(automation_id, int(time.time()))
-
-        triggers_fired_count = sum(1 for t in trigger_results if t.get("fired"))
-        log.info(
-            "automation.run_completed",
-            automation_id=automation_id,
-            run_id=run["id"],
-            status=status,
-            row_count=row_count,
-            execution_time_ms=execution_ms,
-            triggers_fired=triggers_fired_count,
-        )
-
-        if any_fired:
-            fired_msgs = [r["message"] for r in trigger_results if r.get("fired")]
-            notif = notif_module.create(
-                user_id=auto["owner_user_id"],
-                automation_id=automation_id,
-                run_id=run["id"],
-                title=f"Alert: {auto['name']}",
-                message="\n".join(fired_msgs),
-                severity="warning",
-            )
-            if app is not None:
-                try:
-                    await notif_module.dispatch(app, auto["owner_user_id"], notif)
-                except Exception as exc:  # noqa: BLE001
-                    log.warning("automation.notif_dispatch_failed", error=str(exc))
-
-        return RunBatchItem(
-            automation_id=automation_id,
-            status=status,
-            execution_time_ms=execution_ms,
-        )
+                    _settings = get_settings()
+                    record_llm_usage(
+                        source="automation",
+                        provider="gemini",
+                        model=getattr(
+                            llm_for_run, "model", _settings.gemini_chat_model
+                        ),
+                        input_tokens=tokens_in_delta,
+                        output_tokens=tokens_out_delta,
+                        user_id=str(auto_for_usage.get("owner_user_id") or ""),
+                        source_ref_id=automation_id,
+                        db_id=auto_for_usage.get("db_id"),
+                    )
+            except Exception:  # noqa: BLE001
+                pass
 
 
 async def run_due_automations(
