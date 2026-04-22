@@ -26,7 +26,7 @@ def test_notifications_route_404_when_flag_off(fresh_db):
 
 def test_trigger_templates_route_404_when_flag_off(fresh_db):
     client = TestClient(create_app())
-    r = client.get("/api/v1/trigger-templates")
+    r = client.get("/api/v1/automations/templates")
     assert r.status_code == 404
 
 
