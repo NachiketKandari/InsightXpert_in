@@ -12,6 +12,8 @@ export type AgentMode = "basic" | "agentic";
 
 export interface SSEOptions {
   skipClarification?: boolean;
+  /** Required by the backend chat contract; see routes/chat.py `ChatRequest`. */
+  dbId?: string | null;
 }
 
 export function createSSEStream(
@@ -56,7 +58,7 @@ export function createSSEStream(
         headers["Authorization"] = `Bearer ${token}`;
       }
 
-      const response = await fetch(`${SSE_BASE_URL}/api/chat`, {
+      const response = await fetch(`${SSE_BASE_URL}/api/v1/chat`, {
         method: "POST",
         headers,
         credentials: "include",
@@ -64,6 +66,7 @@ export function createSSEStream(
           message,
           conversation_id: conversationId,
           agent_mode: agentMode,
+          ...(options.dbId ? { db_id: options.dbId } : {}),
           ...(options.skipClarification ? { skip_clarification: true } : {}),
         }),
         signal: controller.signal,

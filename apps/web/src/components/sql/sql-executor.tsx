@@ -9,7 +9,37 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DataTable } from "@/components/chunks/data-table";
 import { ChartConfigurator } from "@/components/sql/chart-configurator";
 import { apiFetch } from "@/lib/api";
-import type { QueryResult, QueryError } from "@/types/api";
+import { useChatStore } from "@/stores/chat-store";
+import type { QueryResult } from "@/types/api";
+
+/**
+ * Coerce a FastAPI error body's `detail` field to a string.
+ *
+ * FastAPI returns 422 ValidationError as `{detail: [{type, loc, msg, input}, ...]}`.
+ * Assigning that array to React state and rendering as `<p>{error}</p>` throws
+ * "Objects are not valid as a React child". This helper handles the three
+ * shapes we see in the wild: string, array-of-objects, missing/unknown.
+ */
+function coerceDetail(body: { detail?: unknown } | null, fallback: string): string {
+  const detail = body?.detail;
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    return detail
+      .map((e) => {
+        if (typeof e === "string") return e;
+        if (e && typeof e === "object" && "msg" in e && typeof (e as { msg: unknown }).msg === "string") {
+          return (e as { msg: string }).msg;
+        }
+        try {
+          return JSON.stringify(e);
+        } catch {
+          return String(e);
+        }
+      })
+      .join("; ");
+  }
+  return fallback;
+}
 
 // Monaco is SSR-incompatible — load client-side only.
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
@@ -26,6 +56,7 @@ export function SqlExecutor({ onClose }: { onClose: () => void }) {
   const [result, setResult] = useState<QueryResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const selectedDbId = useChatStore((s) => s.selectedDbId);
 
   // Detect dark mode to pick Monaco theme; keeps in sync with the app theme.
   const [isDark, setIsDark] = useState<boolean>(() =>
@@ -45,6 +76,10 @@ export function SqlExecutor({ onClose }: { onClose: () => void }) {
   const execute = useCallback(async () => {
     const trimmed = sql.trim();
     if (!trimmed || loading) return;
+    if (!selectedDbId) {
+      setError("Select a database first (use the picker in the header).");
+      return;
+    }
 
     setError(null);
     setResult(null);
@@ -53,12 +88,12 @@ export function SqlExecutor({ onClose }: { onClose: () => void }) {
     try {
       const res = await apiFetch("/api/v1/sql/execute", {
         method: "POST",
-        body: JSON.stringify({ sql: trimmed }),
+        body: JSON.stringify({ sql: trimmed, db_id: selectedDbId }),
       });
 
       if (!res.ok) {
-        const body: QueryError = await res.json();
-        setError(body.detail || `HTTP ${res.status}`);
+        const body = await res.json().catch(() => null);
+        setError(coerceDetail(body, `HTTP ${res.status}`));
         return;
       }
 
@@ -69,7 +104,7 @@ export function SqlExecutor({ onClose }: { onClose: () => void }) {
     } finally {
       setLoading(false);
     }
-  }, [sql, loading]);
+  }, [sql, loading, selectedDbId]);
 
   return (
     <div className="flex flex-col h-full bg-background">
@@ -108,6 +143,13 @@ export function SqlExecutor({ onClose }: { onClose: () => void }) {
                   // capturing a stale closure over the `execute` callback.
                   const current = editor.getValue().trim();
                   if (!current) return;
+                  // Read `selectedDbId` fresh at keypress time to avoid a
+                  // stale closure when the user switches DBs mid-editing.
+                  const dbId = useChatStore.getState().selectedDbId;
+                  if (!dbId) {
+                    setError("Select a database first (use the picker in the header).");
+                    return;
+                  }
                   void (async () => {
                     setError(null);
                     setResult(null);
@@ -115,11 +157,11 @@ export function SqlExecutor({ onClose }: { onClose: () => void }) {
                     try {
                       const res = await apiFetch("/api/v1/sql/execute", {
                         method: "POST",
-                        body: JSON.stringify({ sql: current }),
+                        body: JSON.stringify({ sql: current, db_id: dbId }),
                       });
                       if (!res.ok) {
-                        const body: QueryError = await res.json();
-                        setError(body.detail || `HTTP ${res.status}`);
+                        const body = await res.json().catch(() => null);
+                        setError(coerceDetail(body, `HTTP ${res.status}`));
                         return;
                       }
                       const data: QueryResult = await res.json();
@@ -180,7 +222,19 @@ export function SqlExecutor({ onClose }: { onClose: () => void }) {
           </div>
         )}
 
-        {result && (
+        {result && (() => {
+          // Normalize backend rows (list[list]) into dict-shaped rows for
+          // the existing DataTable/ChartConfigurator consumers. Safe for
+          // both shapes — detect by sniffing the first row.
+          const firstRow = result.rows[0];
+          const normalizedRows: Record<string, unknown>[] = Array.isArray(firstRow)
+            ? (result.rows as unknown[][]).map((row) => {
+                const obj: Record<string, unknown> = {};
+                result.columns.forEach((col, i) => { obj[col] = row[i]; });
+                return obj;
+              })
+            : (result.rows as Record<string, unknown>[]);
+          return (
           <div className="flex flex-col h-full">
             {result.columns.length > 0 ? (
               <Tabs defaultValue="results" className="flex flex-col flex-1 min-h-0">
@@ -211,7 +265,7 @@ export function SqlExecutor({ onClose }: { onClose: () => void }) {
                   <div className="rounded-lg border border-border bg-card overflow-auto h-full">
                     <DataTable
                       columns={result.columns}
-                      rows={result.rows}
+                      rows={normalizedRows}
                       maxHeight="none"
                       headerRowClassName="bg-card sticky top-0 z-10"
                       headerCellClassName="border-b border-border font-semibold"
@@ -230,7 +284,7 @@ export function SqlExecutor({ onClose }: { onClose: () => void }) {
                   <div className="rounded-lg border border-border bg-card overflow-hidden">
                     <ChartConfigurator
                       columns={result.columns}
-                      rows={result.rows}
+                      rows={normalizedRows}
                     />
                   </div>
                 </TabsContent>
@@ -241,7 +295,8 @@ export function SqlExecutor({ onClose }: { onClose: () => void }) {
               </div>
             )}
           </div>
-        )}
+          );
+        })()}
 
         {!result && !error && (
           <div className="flex flex-col items-center justify-center h-full text-muted-foreground/50 gap-2 px-4">

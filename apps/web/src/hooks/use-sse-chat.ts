@@ -279,7 +279,7 @@ export function useSSEChat() {
           });
           finishStreaming(convId!);
         },
-      }, agentMode, { skipClarification });
+      }, agentMode, { skipClarification, dbId: useChatStore.getState().selectedDbId });
 
       abortRef.current = controller;
     },

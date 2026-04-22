@@ -4,12 +4,10 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import {
   ChevronLeft,
   ChevronRight,
-  Download,
   Loader2,
   Rows3,
   AlertTriangle,
   Database,
-  BookOpen,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -19,44 +17,11 @@ import {
   DialogContent,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  Tooltip,
-  TooltipTrigger,
-  TooltipContent,
-} from "@/components/ui/tooltip";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { apiFetch, apiCall } from "@/lib/api";
-import { API_BASE_URL } from "@/lib/constants";
 import type { QueryResult } from "@/types/api";
 
 const PAGE_SIZE = 100;
-
-/** Badge color class per column type — matches the upload review modal. */
-function typeBadgeVariant(type: string): string {
-  switch (type) {
-    case "TEXT":
-      return "border-blue-500/40 text-blue-600 dark:text-blue-400";
-    case "INTEGER":
-    case "REAL":
-      return "border-emerald-500/40 text-emerald-600 dark:text-emerald-400";
-    case "BOOLEAN":
-      return "border-orange-500/40 text-orange-600 dark:text-orange-400";
-    case "DATETIME":
-      return "border-purple-500/40 text-purple-600 dark:text-purple-400";
-    default:
-      return "border-border text-muted-foreground";
-  }
-}
-
-interface ColumnMeta {
-  id: string;
-  column_name: string;
-  column_type: string;
-  description: string | null;
-  domain_values: string | null;
-  domain_rules: string | null;
-  ordinal_position: number;
-}
 
 interface DatasetViewerProps {
   open: boolean;
@@ -75,11 +40,6 @@ export function DatasetViewer({ open, onOpenChange, tableName = "transactions", 
   const [loading, setLoading] = useState(false);
   const [offset, setOffset] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
-
-  // Column metadata state
-  const [columns, setColumns] = useState<ColumnMeta[] | null>(null);
-  const [columnsLoading, setColumnsLoading] = useState(false);
-  const [columnsError, setColumnsError] = useState<string | null>(null);
 
   const fetchPage = useCallback(async (pageOffset: number) => {
     setLoading(true);
@@ -117,25 +77,17 @@ export function DatasetViewer({ open, onOpenChange, tableName = "transactions", 
       }),
     });
     if (result && result.rows.length > 0) {
-      setTotalRows(Number(result.rows[0].total));
+      // Handle both shapes: column-aligned list[list] (new backend) or
+      // dict rows (legacy). For a `SELECT COUNT(*) AS total` query, the
+      // value lives at row[0] in the array shape and row.total in the
+      // dict shape.
+      const firstRow = result.rows[0];
+      const total = Array.isArray(firstRow)
+        ? firstRow[0]
+        : (firstRow as Record<string, unknown>).total;
+      setTotalRows(Number(total));
     }
   }, [tableName]);
-
-  const fetchColumns = useCallback(async () => {
-    if (!datasetId) return;
-    setColumnsLoading(true);
-    setColumnsError(null);
-    try {
-      const result = await apiCall<ColumnMeta[]>(`/api/v1/datasets/public/${datasetId}/columns`);
-      if (result) {
-        setColumns(result);
-      }
-    } catch (err) {
-      setColumnsError((err as Error).message || "Failed to load columns");
-    } finally {
-      setColumnsLoading(false);
-    }
-  }, [datasetId]);
 
   useEffect(() => {
     if (open) {
@@ -144,19 +96,10 @@ export function DatasetViewer({ open, onOpenChange, tableName = "transactions", 
       setData(null);
       setTotalRows(null);
       setError(null);
-      setColumns(null);
-      setColumnsError(null);
       fetchPage(0);
       fetchTotalCount();
     }
   }, [open, tableName, fetchPage, fetchTotalCount]);
-
-  // Lazy-load columns when switching to columns tab
-  useEffect(() => {
-    if (open && activeTab === "columns" && columns === null && !columnsLoading) {
-      fetchColumns();
-    }
-  }, [open, activeTab, columns, columnsLoading, fetchColumns]);
 
   const goNext = () => {
     const next = offset + PAGE_SIZE;
@@ -174,17 +117,6 @@ export function DatasetViewer({ open, onOpenChange, tableName = "transactions", 
   const totalPages = totalRows != null ? Math.ceil(totalRows / PAGE_SIZE) : null;
   const hasNext = totalRows != null ? offset + PAGE_SIZE < totalRows : (data?.row_count === PAGE_SIZE);
   const hasPrev = offset > 0;
-
-  const parseDomainValues = (raw: string | null): string[] => {
-    if (!raw) return [];
-    try {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed;
-    } catch {
-      // Not JSON — treat as comma-separated
-    }
-    return raw.split(",").map((s) => s.trim()).filter(Boolean);
-  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -230,10 +162,6 @@ export function DatasetViewer({ open, onOpenChange, tableName = "transactions", 
                 <Rows3 className="size-3.5" />
                 Data
               </TabsTrigger>
-              <TabsTrigger value="columns" className="gap-1.5 text-xs px-3">
-                <BookOpen className="size-3.5" />
-                Columns
-              </TabsTrigger>
             </TabsList>
           </div>
 
@@ -254,11 +182,21 @@ export function DatasetViewer({ open, onOpenChange, tableName = "transactions", 
                 </div>
               )}
 
-              {data && data.columns.length > 0 && (
+              {data && data.columns.length > 0 && (() => {
+                // Normalize backend column-aligned rows into dict rows if needed.
+                const firstRow = data.rows[0];
+                const normalizedRows: Record<string, unknown>[] = Array.isArray(firstRow)
+                  ? (data.rows as unknown[][]).map((row) => {
+                      const obj: Record<string, unknown> = {};
+                      data.columns.forEach((c, i) => { obj[c] = row[i]; });
+                      return obj;
+                    })
+                  : (data.rows as Record<string, unknown>[]);
+                return (
                 <div ref={scrollRef} className="h-full overflow-auto">
                   <DataTable
                     columns={data.columns}
-                    rows={data.rows}
+                    rows={normalizedRows}
                     maxHeight="none"
                     showRowNumbers
                     rowNumberOffset={offset}
@@ -275,7 +213,8 @@ export function DatasetViewer({ open, onOpenChange, tableName = "transactions", 
                     cellClassName="border-b border-border/20 text-foreground/85"
                   />
                 </div>
-              )}
+                );
+              })()}
 
               {data && data.columns.length === 0 && (
                 <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
@@ -298,25 +237,8 @@ export function DatasetViewer({ open, onOpenChange, tableName = "transactions", 
                       Page {currentPage} of {totalPages}
                     </span>
                   )}
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          window.open(
-                            `${API_BASE_URL}/api/sql/export-csv?table=${tableName}`,
-                            "_blank",
-                          );
-                        }}
-                        className="gap-1 h-7 px-2.5 text-xs"
-                        aria-label="Download CSV"
-                      >
-                        <Download className="size-3.5" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="top">Download CSV</TooltipContent>
-                  </Tooltip>
+                  {/* Export-CSV removed — backend route /api/v1/sql/export-csv
+                      does not exist yet. Track as a follow-up (SF16). */}
                   <Button
                     variant="outline"
                     size="sm"
@@ -342,115 +264,6 @@ export function DatasetViewer({ open, onOpenChange, tableName = "transactions", 
             )}
           </TabsContent>
 
-          {/* Columns metadata tab */}
-          <TabsContent value="columns" className="flex-1 min-h-0 flex flex-col">
-            <div className="flex-1 min-h-0 overflow-auto">
-              {columnsLoading && (
-                <div className="flex items-center justify-center h-full gap-2.5 text-muted-foreground">
-                  <Loader2 className="size-5 animate-spin text-primary dark:text-cyan-accent" />
-                  <span className="text-sm">Loading columns...</span>
-                </div>
-              )}
-
-              {columnsError && (
-                <div className="mx-5 mt-4 rounded-lg border border-destructive/30 bg-destructive/10 p-3 flex items-start gap-2">
-                  <AlertTriangle className="size-4 text-destructive shrink-0 mt-0.5" />
-                  <p className="text-sm text-destructive">{columnsError}</p>
-                </div>
-              )}
-
-              {columns && columns.length > 0 && (
-                <div>
-                  {/* Table header */}
-                  <div className="sticky top-0 z-10 grid grid-cols-[1fr_80px_1fr_1fr] gap-3 border-b border-border/60 bg-muted px-5 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    <span>Column</span>
-                    <span>Type</span>
-                    <span>Values</span>
-                    <span>Description</span>
-                  </div>
-
-                  {/* Column rows */}
-                  <div className="divide-y divide-border/40">
-                    {columns.map((col) => {
-                      const domainValues = parseDomainValues(col.domain_values);
-                      return (
-                        <div
-                          key={col.id}
-                          className="grid grid-cols-[1fr_80px_1fr_1fr] gap-3 items-start px-5 py-2.5 hover:bg-accent/30 transition-colors"
-                        >
-                          {/* Column name */}
-                          <code className="font-mono text-xs font-medium text-foreground">
-                            {col.column_name}
-                          </code>
-
-                          {/* Type badge */}
-                          <div>
-                            <Badge
-                              variant="outline"
-                              className={`text-[10px] px-1.5 py-0 font-mono ${typeBadgeVariant(col.column_type)}`}
-                            >
-                              {col.column_type}
-                            </Badge>
-                          </div>
-
-                          {/* Domain values */}
-                          <div className="min-w-0">
-                            {domainValues.length > 0 ? (
-                              <div className="flex flex-wrap gap-1">
-                                {domainValues.slice(0, 10).map((v) => (
-                                  <span
-                                    key={v}
-                                    className="inline-block rounded bg-muted/60 border border-border/40 px-1.5 py-px text-[10px] text-muted-foreground truncate max-w-[120px]"
-                                  >
-                                    {v}
-                                  </span>
-                                ))}
-                                {domainValues.length > 10 && (
-                                  <span className="text-[10px] text-muted-foreground/60 self-center">
-                                    +{domainValues.length - 10} more
-                                  </span>
-                                )}
-                              </div>
-                            ) : (
-                              <span className="text-xs text-muted-foreground/50">—</span>
-                            )}
-                          </div>
-
-                          {/* Description */}
-                          <div className="min-w-0">
-                            {col.description ? (
-                              <p className="text-xs text-muted-foreground leading-snug">
-                                {col.description}
-                              </p>
-                            ) : (
-                              <span className="text-xs text-muted-foreground/50">—</span>
-                            )}
-                            {col.domain_rules && (
-                              <p className="mt-0.5 text-[11px] text-muted-foreground/60 italic">
-                                {col.domain_rules}
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {columns && columns.length === 0 && (
-                <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
-                  No column metadata available.
-                </div>
-              )}
-
-              {!datasetId && !columnsLoading && (
-                <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
-                  No dataset selected.
-                </div>
-              )}
-            </div>
-          </TabsContent>
         </Tabs>
       </DialogContent>
     </Dialog>

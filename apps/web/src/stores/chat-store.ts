@@ -28,6 +28,11 @@ interface ChatState {
   skipClarificationNext: boolean;
   currentAgentPhase: string | null;
 
+  // The currently selected database id (backend contract: `db_id`).
+  // Populated from `GET /api/v1/databases`; persisted across reloads via
+  // sessionStorage (see `partialize` at the bottom of this file).
+  selectedDbId: string | null;
+
   isLoadingConversation: boolean;
 
   // Derived
@@ -63,6 +68,7 @@ interface ChatState {
   setPendingClarification: (text: string | null) => void;
   setSkipClarificationNext: (skip: boolean) => void;
   setCurrentAgentPhase: (phase: string | null) => void;
+  setSelectedDbId: (dbId: string | null) => void;
 }
 
 export const useChatStore = create<ChatState>()(persist((set, get) => ({
@@ -80,6 +86,7 @@ export const useChatStore = create<ChatState>()(persist((set, get) => ({
   pendingClarification: null,
   skipClarificationNext: false,
   currentAgentPhase: null,
+  selectedDbId: null,
   isLoadingConversation: false,
 
   activeConversation: () => {
@@ -432,6 +439,10 @@ export const useChatStore = create<ChatState>()(persist((set, get) => ({
   setCurrentAgentPhase: (phase) => {
     set({ currentAgentPhase: phase });
   },
+
+  setSelectedDbId: (dbId) => {
+    set({ selectedDbId: dbId });
+  },
 }), {
   name: "insightxpert-chat",
   storage: {
@@ -455,5 +466,6 @@ export const useChatStore = create<ChatState>()(persist((set, get) => ({
       ...c,
       messages: [] as Message[],
     })),
+    selectedDbId: state.selectedDbId,
   }) as unknown as ChatState,
 }));
