@@ -193,6 +193,40 @@ async def list_conversations(
     return await asyncio.to_thread(_list, cu.id)
 
 
+def _search(user_id: str, query: str, limit: int = 50) -> list[dict[str, Any]]:
+    needle = f"%{query.strip()}%"
+    q = (
+        select(
+            conversations.c.id,
+            conversations.c.title,
+            conversations.c.is_starred,
+            conversations.c.db_id,
+            conversations.c.created_at,
+            conversations.c.updated_at,
+        )
+        .where(conversations.c.user_id == user_id)
+        .where(conversations.c.title.ilike(needle))
+        .order_by(
+            conversations.c.updated_at.desc(),
+            conversations.c.created_at.desc(),
+        )
+        .limit(limit)
+    )
+    with get_engine().connect() as conn:
+        rows = conn.execute(q).all()
+    return [_row_to_summary(r) for r in rows]
+
+
+@router.get("/search")
+async def search_conversations(
+    q: str,
+    cu: CurrentUser = Depends(get_current_user),
+) -> list[dict[str, Any]]:
+    if len(q.strip()) < 2:
+        return []
+    return await asyncio.to_thread(_search, cu.id, q)
+
+
 @router.get("/{conversation_id}")
 async def get_conversation(
     conversation_id: str,

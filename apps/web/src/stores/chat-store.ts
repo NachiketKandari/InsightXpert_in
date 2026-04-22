@@ -103,12 +103,12 @@ export const useChatStore = create<ChatState>()(persist((set, get) => ({
       }
       const data = await res.json();
       const conversations: Conversation[] = data.map(
-        (c: { id: string; title: string; messages?: Message[]; created_at: string; updated_at: string }) => ({
+        (c: { id: string; title: string; messages?: Message[]; created_at: number | string; updated_at: number | string }) => ({
           id: c.id,
           title: c.title,
           messages: c.messages || [],
-          createdAt: new Date(c.created_at).getTime(),
-          updatedAt: new Date(c.updated_at).getTime(),
+          createdAt: typeof c.created_at === "number" ? c.created_at * 1000 : new Date(c.created_at).getTime(),
+          updatedAt: typeof c.updated_at === "number" ? c.updated_at * 1000 : new Date(c.updated_at).getTime(),
         })
       );
       set((state) => {
