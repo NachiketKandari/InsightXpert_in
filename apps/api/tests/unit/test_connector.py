@@ -60,6 +60,6 @@ def test_row_limit_applies(tiny_db):
 
 
 def test_ddl_returns_create_statements(tiny_db):
-    schema = ddl(tiny_db)
+    schema = ddl(_ref(tiny_db))
     assert "CREATE TABLE" in schema.upper()
     assert "x" in schema

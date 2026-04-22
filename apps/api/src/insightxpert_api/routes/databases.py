@@ -42,6 +42,7 @@ from ..auth.current_user import CurrentUser, get_current_user, require_admin
 from ..config import Settings, get_settings
 from ..databases import repository as databases_repo
 from ..databases import service as visibility_service
+from ..db.dialects import get_adapter
 from ..db.schema import ddl as schema_ddl
 from ..logging import get_logger
 from ..profiling.runner import (
@@ -99,15 +100,28 @@ def _prof_svc(settings: Settings) -> ProfileService:
     return ProfileService(build_store(settings))
 
 
-def _list_tables(path: str) -> list[str]:
-    con = sqlite3.connect(path)
-    try:
-        rows = con.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
-        ).fetchall()
-    finally:
-        con.close()
-    return [r[0] for r in rows]
+def _list_tables(ref: Any) -> list[str]:
+    """List table names in the database described by ``ref``.
+
+    For SQLite: queries sqlite_master directly.
+    For Postgres: intentional stub — table listing via information_schema lands in Task 10.
+    """
+    if ref.dialect == "sqlite":
+        adapter = get_adapter(ref.dialect)
+        con = adapter.open_readonly(ref)
+        try:
+            rows = con.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+            ).fetchall()
+        finally:
+            con.close()
+        return [r[0] for r in rows]
+
+    # Intentional stub: Postgres table listing via information_schema lands in Task 10.
+    raise NotImplementedError(
+        f"Table listing for dialect {ref.dialect!r} is not yet implemented "
+        "(Postgres table listing lands in Task 10)"
+    )
 
 
 @router.get("", response_model=list[DatabaseListItem])
@@ -393,7 +407,7 @@ async def get_schema(
     ref = svc.resolve(cu.id, db_id)
     if ref is None:
         raise HTTPException(status_code=404, detail="invalid_db")
-    return SchemaResponse(ddl=schema_ddl(ref.local_path), tables=_list_tables(ref.local_path))
+    return SchemaResponse(ddl=schema_ddl(ref), tables=_list_tables(ref))
 
 
 @router.get("/{db_id}/profile")
