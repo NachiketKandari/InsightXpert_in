@@ -68,13 +68,43 @@ class PostgresAdapter:
         """Postgres surfaces statement_timeout via psycopg.errors.QueryCanceled."""
         return isinstance(exc, psycopg.errors.QueryCanceled)
 
-    def extract_schema(self, conn: Any) -> Any:
-        # Split into its own module to keep this file focused on the adapter contract.
+    def open_database(self, ref: Any) -> Any:
+        """Return a vendored-ABC Database wrapping a read-only psycopg connection."""
+        from .postgres_database import PostgresDatabase
+        return PostgresDatabase(ref)
+
+    def extract_schema(self, db: Any, ref: Any) -> Any:
+        """Extract a DatabaseSchema. ``db`` is a ``PostgresDatabase`` (vendored
+        ABC); we reach into its underlying psycopg connection via ``db.conn``
+        and delegate to ``extract_postgres_schema`` with the schema name
+        derived from the ref.
+        """
+        from .postgres_database import PostgresDatabase
         from .postgres_schema import extract_postgres_schema
-        return extract_postgres_schema(conn)
+
+        if not isinstance(db, PostgresDatabase):
+            raise TypeError(
+                "PostgresAdapter.extract_schema expects a PostgresDatabase; "
+                "got {} — use open_database(ref) to build one.".format(type(db).__name__)
+            )
+        return extract_postgres_schema(db.conn, schema_name=_pg_schema_for_ref(ref))
 
     def profiling_queries(self) -> ProfilingQueryPack:
         return _PROFILING
+
+
+def _pg_schema_for_ref(ref: Any) -> str:
+    """Derive the Postgres schema name from a DatabaseRef.
+
+    Convention: a DB row with db_id ending in ``_pg`` puts its tables in the
+    schema named by the prefix (e.g. ``toxicology_pg`` → ``toxicology``).
+    Any other db_id falls back to ``public``. This keeps us moving without
+    adding a column to the ``databases`` table; revisit when a second
+    Postgres-backed DB arrives that doesn't fit the convention.
+    """
+    if ref.db_id.endswith("_pg"):
+        return ref.db_id[: -len("_pg")]
+    return "public"
 
 
 DIALECTS["postgres"] = PostgresAdapter()

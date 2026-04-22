@@ -7,9 +7,10 @@ from __future__ import annotations
 
 import re
 import sqlite3
+from pathlib import Path
 from typing import Any
 
-from ...vendored.pipeline_core.db import SQLiteDatabase
+from ...vendored.pipeline_core.db import Database, SQLiteDatabase
 from ...vendored.pipeline_core.profiler.schema_extractor import SchemaExtractor
 from . import DIALECTS
 from .base import DialectAdapter, ProfilingQueryPack
@@ -54,18 +55,23 @@ class SqliteAdapter:
         msg = str(exc).lower()
         return "interrupted" in msg or "timeout" in msg
 
-    def extract_schema(self, conn: Any) -> Any:
+    def open_database(self, ref: Any) -> Database:
+        """Return a vendored-ABC Database wrapping a read-only SQLite connection."""
+        if ref.local_path is None:
+            raise ValueError(f"SQLite ref {ref.db_id!r} missing local_path")
+        return SQLiteDatabase(Path(ref.local_path))
+
+    def extract_schema(self, db: Any, ref: Any) -> Any:
         """Schema extraction via the vendored SQLiteDatabase wrapper.
 
-        Expects a vendored SQLiteDatabase instance (not a raw sqlite3.Connection).
-        Downstream callers that have only a raw connection should wrap.
+        ``ref`` is unused for SQLite (the schema lives in the single file); it
+        stays on the signature for protocol uniformity so Postgres / other
+        dialects can consume metadata (like pg_schema) from the ref.
         """
-        if isinstance(conn, SQLiteDatabase):
-            db = conn
-        else:
+        if not isinstance(db, SQLiteDatabase):
             raise TypeError(
                 "SqliteAdapter.extract_schema expects a SQLiteDatabase; "
-                "got a raw sqlite3.Connection. Use open_readonly() + a wrapper."
+                "got {} — use open_database(ref) to build one.".format(type(db).__name__)
             )
         return SchemaExtractor().extract(db)
 
