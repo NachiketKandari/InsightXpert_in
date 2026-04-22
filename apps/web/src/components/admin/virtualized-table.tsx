@@ -44,7 +44,7 @@ export interface VirtualizedTableProps<T> {
 export function VirtualizedTable<T>({
   rows,
   columns,
-  estimateSize = 44,
+  estimateSize = 52,
   rowKey,
   onEndReached,
   isFetchingMore,
@@ -84,7 +84,7 @@ export function VirtualizedTable<T>({
     return (
       <div className="rounded-lg border border-border bg-card">
         <div
-          className="grid gap-3 border-b border-border px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground"
+          className="grid gap-3 border-b border-border px-5 py-3 text-xs font-medium uppercase tracking-wide text-muted-foreground"
           style={{ gridTemplateColumns: gridTemplate }}
         >
           {renderExpanded && <div />}
@@ -141,7 +141,7 @@ export function VirtualizedTable<T>({
               >
                 <div
                   className={cn(
-                    "grid items-center gap-3 border-b border-border/50 px-4 py-2 text-sm",
+                    "grid items-center gap-3 border-b border-border/50 px-5 py-3 text-sm",
                     renderExpanded && "cursor-pointer hover:bg-muted/40",
                     isOpen && "bg-muted/30",
                   )}
