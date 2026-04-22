@@ -3,6 +3,7 @@ import sqlite3
 import pytest
 
 from insightxpert_api.db import DatabaseConnector, ForbiddenSQLError, ddl
+from insightxpert_api.services.database_service import DatabaseRef
 
 
 @pytest.fixture
@@ -16,8 +17,12 @@ def tiny_db(tmp_path):
     return str(p)
 
 
+def _ref(path: str) -> DatabaseRef:
+    return DatabaseRef(db_id="test", source="bundled", local_path=path)
+
+
 def test_read_returns_rows(tiny_db):
-    c = DatabaseConnector(tiny_db)
+    c = DatabaseConnector(_ref(tiny_db))
     result = c.execute("SELECT id, name FROM x ORDER BY id")
     assert result.columns == ["id", "name"]
     assert result.rows == [[1, "a"], [2, "b"]]
@@ -25,7 +30,7 @@ def test_read_returns_rows(tiny_db):
 
 
 def test_write_is_blocked(tiny_db):
-    c = DatabaseConnector(tiny_db)
+    c = DatabaseConnector(_ref(tiny_db))
     with pytest.raises(ForbiddenSQLError):
         c.execute("INSERT INTO x VALUES (3,'c')")
 
@@ -43,13 +48,13 @@ def test_write_is_blocked(tiny_db):
     ],
 )
 def test_all_write_variants_blocked(tiny_db, sql):
-    c = DatabaseConnector(tiny_db)
+    c = DatabaseConnector(_ref(tiny_db))
     with pytest.raises(ForbiddenSQLError):
         c.execute(sql)
 
 
 def test_row_limit_applies(tiny_db):
-    c = DatabaseConnector(tiny_db, row_limit=1)
+    c = DatabaseConnector(_ref(tiny_db), row_limit=1)
     result = c.execute("SELECT * FROM x")
     assert len(result.rows) == 1
 

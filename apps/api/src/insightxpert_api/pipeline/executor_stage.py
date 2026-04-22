@@ -42,7 +42,7 @@ class SqlExecutorStage:
             await ctx.emitter.emit(ChunkType.SQL_EXECUTING, SQLExecutingPayload(sql=sql))
 
         try:
-            result = DatabaseConnector(ref.local_path, row_limit=self._row_limit).execute(sql)
+            result = DatabaseConnector(ref, row_limit=self._row_limit).execute(sql)
         except Exception as exc:
             ctx.state["error"] = f"sql_execution_failed: {exc}"
             if ctx.emitter is not None:

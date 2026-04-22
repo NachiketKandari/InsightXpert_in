@@ -46,7 +46,7 @@ async def execute_sql(
         raise HTTPException(status_code=404, detail="invalid_db")
 
     connector = DatabaseConnector(
-        ref.local_path,
+        ref,
         row_limit=settings.sql_row_limit,
         timeout_s=settings.sql_timeout_seconds,
     )
