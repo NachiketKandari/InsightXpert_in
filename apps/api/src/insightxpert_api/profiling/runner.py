@@ -299,6 +299,11 @@ async def run_profile_stream(
             )
             return profile
 
+    except asyncio.CancelledError:
+        # Client disconnected mid-run. Re-raise so FastAPI / starlette can
+        # tear down cleanly instead of logging this as a real error (MF-PR-5).
+        log.info("profiling.run_cancelled", db_id=db_id)
+        raise
     except Exception as exc:
         log.error(
             "profiling.run_failed",

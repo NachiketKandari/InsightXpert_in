@@ -35,6 +35,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from ..auth.current_user import CurrentUser, get_current_user, require_admin
 from ..config import Settings, get_settings
+from ..databases import repository as databases_repo
 from ..databases import service as visibility_service
 from ..db.schema import ddl as schema_ddl
 from ..logging import get_logger
@@ -141,16 +142,50 @@ async def upload_database(
     settings: Settings = Depends(get_settings),
 ) -> UploadResponse:
     _validate_db_id(db_id)
+
+    # Block upload collisions BEFORE reading the body: a bundled public row
+    # (owner=NULL) or a row owned by a different user must 409 — otherwise
+    # user B uploading db_id="toxicology" would silently overwrite user A's
+    # ownership/visibility via upsert_private (MF-PR-4).
+    existing = await asyncio.to_thread(databases_repo.get, db_id)
+    if existing is not None:
+        owner = existing.get("owner_user_id")
+        if owner is None or owner != cu.id:
+            raise HTTPException(
+                status_code=409,
+                detail=f"db_id '{db_id}' is already registered to another owner or is bundled-public; pick a different db_id",
+            )
+
+    # Stream the upload in chunks, tracking size as we go, so a 5 GB file
+    # can't OOM us before the 413 fires (MF-PR-1). Peek the first 16 bytes
+    # of the first chunk for the SQLite magic (MF-PR-2) so we reject
+    # non-sqlite uploads before reading further.
     max_bytes = settings.max_upload_mb * 1024 * 1024
-    data = await file.read()
-    if len(data) > max_bytes:
-        raise HTTPException(status_code=413, detail="upload_too_large")
-    if not data[:16].startswith(_SQLITE_MAGIC):
+    chunks: list[bytes] = []
+    size = 0
+    first_chunk = True
+    while True:
+        chunk = await file.read(1 << 20)  # 1 MiB
+        if not chunk:
+            break
+        if first_chunk:
+            if not chunk[:16].startswith(_SQLITE_MAGIC):
+                raise HTTPException(status_code=400, detail="invalid_file")
+            first_chunk = False
+        size += len(chunk)
+        if size > max_bytes:
+            raise HTTPException(status_code=413, detail="upload_too_large")
+        chunks.append(chunk)
+    if first_chunk:
+        # Empty body — never got a first chunk; still fail-closed.
         raise HTTPException(status_code=400, detail="invalid_file")
+    data = b"".join(chunks)
+
     svc = _db_svc(settings)
     ref = svc.save_upload(cu.id, db_id, data)
     # Register in the visibility table so the DB shows up in GET /databases and
-    # admins can change its visibility later. Idempotent for re-uploads.
+    # admins can change its visibility later. Idempotent for re-uploads by the
+    # SAME user (cross-owner collision was blocked above).
     await asyncio.to_thread(
         visibility_service.upsert_private, db_id, cu.id, len(data)
     )
@@ -255,6 +290,25 @@ async def run_profile(
     ref = db_svc.resolve(cu.id, db_id)
     if ref is None:
         raise HTTPException(status_code=404, detail="invalid_db")
+
+    # Ownership gate (MF-PR-3). BEFORE any LLM spend — including the cost-gate
+    # branch, so a non-owner can't even learn the column count of a private DB.
+    # Admin + owner + public-bundled + shared-with-user all pass; everyone else
+    # 403s. Uploads (no `databases` row) fall through because svc.resolve only
+    # returns the ref when the user can see it via _list_uploaded.
+    is_admin = cu.role == "admin"
+    db_row = await asyncio.to_thread(databases_repo.get, db_id)
+    if db_row is not None and not is_admin:
+        owner = db_row.get("owner_user_id")
+        visibility = db_row.get("visibility")
+        is_owner = owner == cu.id
+        is_public = visibility == "public"
+        visible = await asyncio.to_thread(
+            visibility_service.visible_ids, cu.id, False
+        )
+        is_shared = db_id in visible
+        if not (is_owner or is_public or is_shared):
+            raise HTTPException(status_code=403, detail="forbidden")
 
     convo = convo_store.get_or_create(cu.id, None)
     emitter = EventEmitter(convo.conversation_id)
