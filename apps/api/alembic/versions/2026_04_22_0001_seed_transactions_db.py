@@ -1,6 +1,6 @@
 """Seed the ``transactions`` bundled DB row.
 
-Synced from Turso (source of truth) into apps/api/Databases/transactions.sqlite
+Synced from Turso (source of truth) into apps/api/Databases/_shared/transactions.sqlite
 by scripts/sync-turso-transactions.sh. The B3 migration seeding loop only runs
 on the initial schema bootstrap, so this one-off migration is how the new
 bundled DB gets a visibility=public row on existing app.db instances.
@@ -34,8 +34,12 @@ def upgrade() -> None:
         return
 
     # Size is advisory; fall back to None if the file hasn't been synced yet.
+    # Primary location: Databases/_shared/ (Phase 1.3+).
+    # Fallback: flat Databases/ layout (pre-1.3 dev setups).
     api_dir = Path(__file__).resolve().parents[2]  # apps/api
-    sqlite_path = api_dir / "Databases" / f"{_DB_ID}.sqlite"
+    sqlite_path = api_dir / "Databases" / "_shared" / f"{_DB_ID}.sqlite"
+    if not sqlite_path.exists():
+        sqlite_path = api_dir / "Databases" / f"{_DB_ID}.sqlite"
     try:
         size_bytes = sqlite_path.stat().st_size if sqlite_path.exists() else None
     except OSError:

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Sync the `transactions` Turso database down to a local SQLite file
-# at apps/api/Databases/transactions.sqlite.
+# at apps/api/Databases/_shared/transactions.sqlite.
 #
 # Turso is the source of truth; this produces a local read-only mirror that
 # the pipeline consumes as a bundled DB (same treatment as the BIRD samples).
@@ -11,7 +11,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DEST="${SCRIPT_DIR}/../Databases/transactions.sqlite"
+DEST="${SCRIPT_DIR}/../Databases/_shared/transactions.sqlite"
 DB_NAME="${TURSO_TRANSACTIONS_DB:-transactions}"
 
 command -v turso >/dev/null || { echo "turso CLI not found on PATH" >&2; exit 1; }

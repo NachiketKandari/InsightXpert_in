@@ -107,7 +107,8 @@ def upgrade() -> None:
     )
 
     # --- Seed bundled BIRD DBs as visibility='public' -------------------
-    # Databases directory lives at apps/api/Databases (symlinked in dev).
+    # Primary location: apps/api/Databases/_shared/ (Phase 1.3+).
+    # Fallback: flat apps/api/Databases/*.sqlite (pre-1.3 dev setups).
     api_dir = Path(__file__).resolve().parents[2]  # apps/api
     bundled = api_dir / "Databases"
     if bundled.exists() and bundled.is_dir():
@@ -121,12 +122,21 @@ def upgrade() -> None:
             sa.column("size_bytes", sa.Integer),
             sa.column("created_at", sa.Integer),
         )
+        # Collect candidates: _shared/ takes precedence; fall back to flat.
+        seen: dict[str, "Path"] = {}
+        shared_dir = bundled / "_shared"
+        if shared_dir.exists():
+            for entry in sorted(shared_dir.iterdir()):
+                if entry.is_file() and entry.suffix.lower() == ".sqlite":
+                    seen[entry.stem] = entry
         for entry in sorted(bundled.iterdir()):
             if not entry.is_file():
                 continue
             if entry.suffix.lower() != ".sqlite":
                 continue
-            db_id = entry.stem
+            if entry.stem not in seen:
+                seen[entry.stem] = entry
+        for db_id, entry in sorted(seen.items()):
             try:
                 size_bytes = entry.stat().st_size
             except OSError:

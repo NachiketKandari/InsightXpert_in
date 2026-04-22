@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Fetch bundled BIRD sample SQLite DBs into apps/api/Databases/.
+# Fetch bundled BIRD sample SQLite DBs into apps/api/Databases/_shared/.
 # Dev: rsync from the local Private/InsightXpert reference repo.
 # CI/Docker: override SOURCE_DIR with a GCS sync or artifact download.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DEST_DIR="${SCRIPT_DIR}/../Databases"
+DEST_DIR="${SCRIPT_DIR}/../Databases/_shared"
 SOURCE_DIR="${BUNDLED_DBS_SOURCE:-/Users/nachiket/workspace/github.com/Private/InsightXpert/Databases}"
 
 if [[ ! -d "${SOURCE_DIR}" ]]; then

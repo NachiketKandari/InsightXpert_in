@@ -1,7 +1,11 @@
 """Database registry + resolver.
 
 Combines two sources of SQLite DBs the user can query:
-    • **bundled** — read-only samples shipped with the Cloud Run image (``./Databases/``).
+    • **bundled** — read-only samples shipped with the Cloud Run image
+      (``./Databases/_shared/``).  The ``_shared/`` subdirectory is the
+      canonical location as of Phase 1.3.  A one-release fallback also
+      checks ``./Databases/{id}.sqlite`` so existing dev setups keep
+      working until the operator re-runs ``scripts/fetch-bundled-dbs.sh``.
     • **uploaded** — per-session files the user posted to ``/databases/upload``; lives in the
       object store under ``sessions/<session_id>/dbs/<db_id>.sqlite``.
 
@@ -15,7 +19,10 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..logging import get_logger
 from ..storage import ObjectStore
+
+_log = get_logger("database_service")
 
 
 @dataclass(frozen=True)
@@ -42,18 +49,44 @@ class DatabaseService:
         return [*self._list_bundled(), *self._list_uploaded(session_id)]
 
     def _list_bundled(self) -> list[DatabaseRef]:
+        """List bundled SQLite files.
+
+        Primary location: ``<bundled_dir>/_shared/*.sqlite`` (Phase 1.3+).
+        Fallback (one-release compat shim): ``<bundled_dir>/*.sqlite`` for any
+        file not found under ``_shared/``.  Operators still on the old flat
+        layout will see an INFO log telling them to re-run
+        ``scripts/fetch-bundled-dbs.sh``.
+        """
         if not self._bundled_dir.exists():
             return []
-        refs: list[DatabaseRef] = []
+
+        shared_dir = self._bundled_dir / "_shared"
+        seen: dict[str, Path] = {}
+
+        # Primary: _shared/ subdirectory.
+        if shared_dir.exists():
+            for path in sorted(shared_dir.glob("*.sqlite")):
+                seen[path.stem] = path
+
+        # Fallback: flat Databases/ layout (pre-1.3 dev setups).
         for path in sorted(self._bundled_dir.glob("*.sqlite")):
-            refs.append(
-                DatabaseRef(
+            if path.stem not in seen:
+                _log.info(
+                    "bundled_db_flat_fallback",
                     db_id=path.stem,
-                    source=self._BUNDLED,
-                    local_path=str(path.resolve()),
+                    path=str(path),
+                    hint="Move this file to Databases/_shared/ by re-running scripts/fetch-bundled-dbs.sh",
                 )
+                seen[path.stem] = path
+
+        return [
+            DatabaseRef(
+                db_id=stem,
+                source=self._BUNDLED,
+                local_path=str(path.resolve()),
             )
-        return refs
+            for stem, path in sorted(seen.items())
+        ]
 
     def _list_uploaded(self, session_id: str) -> list[DatabaseRef]:
         prefix = self._uploaded_prefix(session_id)
