@@ -33,6 +33,67 @@ from .routes import (
     sql,
 )
 
+# ---------------------------------------------------------------------------
+# SSE idle-reaper constants
+# ---------------------------------------------------------------------------
+
+_REAPER_INTERVAL_S = 60          # How often the reaper wakes up.
+_EMITTER_IDLE_TTL_S = 900        # 15 minutes of no activity → eligible for eviction.
+
+
+async def _sse_idle_reaper(app: FastAPI) -> None:
+    """Background task: evict SSE emitters that are idle and have no subscriber.
+
+    Runs every ``_REAPER_INTERVAL_S`` seconds. Uses the ``_emitters_lock`` on
+    ``app.state`` to safely mutate ``user_notification_emitters``.
+    """
+    import asyncio
+    import time
+
+    from .logging import get_logger as _get_log
+    from .observability import increment_sse_evicted
+
+    log = _get_log("sse.reaper")
+
+    while True:
+        await asyncio.sleep(_REAPER_INTERVAL_S)
+        try:
+            lock = getattr(app.state, "_emitters_lock", None)
+            if lock is None:
+                continue
+            emitters: dict = getattr(app.state, "user_notification_emitters", {})
+            now = time.monotonic()
+            to_evict = [
+                uid
+                for uid, em in list(emitters.items())
+                if (now - em.last_activity_at) > _EMITTER_IDLE_TTL_S
+                and not em.has_subscriber
+            ]
+            if not to_evict:
+                continue
+            async with lock:
+                evicted = 0
+                for uid in to_evict:
+                    em = emitters.pop(uid, None)
+                    if em is not None:
+                        # Close cleanly so any pending consumer drains the sentinel.
+                        try:
+                            await em.close()
+                        except Exception:  # noqa: BLE001
+                            pass
+                        evicted += 1
+            if evicted:
+                increment_sse_evicted(evicted)
+                log.info(
+                    "sse.reaper.evicted",
+                    evicted=evicted,
+                    remaining=len(emitters),
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            log.warning("sse.reaper.error", error=str(exc), error_type=type(exc).__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -59,6 +120,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # --- automations (C1) --------------------------------------------------
     app.state.user_notification_emitters = {}
+    # Lock protecting mutation of user_notification_emitters dict.
+    app.state._emitters_lock = asyncio.Lock()
+
     app.state.automation_scheduler = None
     if settings.automations_enabled:
         from .automations.scheduler import build_scheduler
@@ -75,9 +139,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             mode=settings.automations_scheduler_mode,
         )
 
+    # --- SSE idle reaper ---------------------------------------------------
+    reaper_task = asyncio.create_task(
+        _sse_idle_reaper(app), name="sse-idle-reaper"
+    )
+
     try:
         yield
     finally:
+        # Cancel the reaper first so it doesn't race with teardown.
+        reaper_task.cancel()
+        try:
+            await reaper_task
+        except (asyncio.CancelledError, Exception):  # noqa: BLE001
+            pass
+
         try:
             await _get_audit_queue().stop()
         except Exception:  # noqa: BLE001
@@ -138,6 +214,12 @@ def create_app() -> FastAPI:
         app.include_router(automations_routes.templates_router)
         app.include_router(automations_routes.router)
         app.include_router(notifications_routes.router)
+
+    # Prometheus-formatted metrics endpoint (no auth — TODO-SECURITY: firewall
+    # this path or require an internal-only header in prod before public exposure).
+    from .routes import metrics as metrics_route
+    app.include_router(metrics_route.router)
+
     return app
 
 

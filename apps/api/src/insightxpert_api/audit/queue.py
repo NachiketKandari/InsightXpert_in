@@ -20,6 +20,13 @@ from .table import audit_log
 
 log = get_logger("audit")
 
+# Hard back-pressure limit on the audit queue. Once full, new rows are dropped
+# rather than growing memory unboundedly.
+_QUEUE_MAXSIZE = 5000
+
+# Rate-limiter for overflow warnings: emit at most one warning per this many seconds.
+_OVERFLOW_WARN_INTERVAL_S = 30.0
+
 
 @dataclass
 class AuditRow:
@@ -44,15 +51,37 @@ class AuditQueue:
         batch_size: int = 50,
         batch_interval_ms: int = 200,
     ) -> None:
-        self._queue: asyncio.Queue[AuditRow] = asyncio.Queue()
+        self._queue: asyncio.Queue[AuditRow] = asyncio.Queue(maxsize=_QUEUE_MAXSIZE)
         self._batch_size = batch_size
         self._interval = batch_interval_ms / 1000.0
         self._task: asyncio.Task[None] | None = None
         self._started = False
         self.flushed_count = 0
+        # Overflow / observability counters.
+        self.overflow_total: int = 0
+        self._overflow_dropped_since_last_warn: int = 0
+        self._last_overflow_warn_at: float = 0.0
+
+    @property
+    def queue_depth(self) -> int:
+        return self._queue.qsize()
 
     async def put(self, row: AuditRow) -> None:
-        await self._queue.put(row)
+        try:
+            self._queue.put_nowait(row)
+        except asyncio.QueueFull:
+            self.overflow_total += 1
+            self._overflow_dropped_since_last_warn += 1
+            now = time.monotonic()
+            if now - self._last_overflow_warn_at >= _OVERFLOW_WARN_INTERVAL_S:
+                log.warning(
+                    "audit.queue.overflow",
+                    dropped_since_last_warn=self._overflow_dropped_since_last_warn,
+                    overflow_total=self.overflow_total,
+                    queue_depth=self._queue.qsize(),
+                )
+                self._last_overflow_warn_at = now
+                self._overflow_dropped_since_last_warn = 0
 
     async def start(self) -> None:
         if self._started:

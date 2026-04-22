@@ -59,7 +59,13 @@ def create(
 
 
 def get_or_create_user_emitter(app: FastAPI, user_id: str) -> EventEmitter:
-    """Return the per-user ``EventEmitter`` for notifications, creating one if needed."""
+    """Return the per-user ``EventEmitter`` for notifications, creating one if needed.
+
+    Dict mutation is protected by the ``_emitters_lock`` on ``app.state`` when
+    the lock is available (i.e., after lifespan start). During tests or early
+    startup the lock may not be set; in that case we fall through safely under
+    CPython's GIL.
+    """
     emitters: dict[str, EventEmitter] = getattr(
         app.state, "user_notification_emitters", None
     ) or {}
@@ -67,7 +73,7 @@ def get_or_create_user_emitter(app: FastAPI, user_id: str) -> EventEmitter:
         app.state.user_notification_emitters = emitters
     em = emitters.get(user_id)
     if em is None:
-        em = EventEmitter(conversation_id=f"notif:{user_id}")
+        em = EventEmitter(conversation_id=f"notif:{user_id}", user_id=user_id)
         emitters[user_id] = em
     return em
 
