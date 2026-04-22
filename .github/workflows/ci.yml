@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  test:
+    name: pytest (${{ matrix.db }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        db: [sqlite, postgres]
+
+    services:
+      postgres:
+        # Only spun up; harmless (but idle) when matrix.db == sqlite.
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: insightxpert
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      SESSION_SECRET: ci-test-secret-at-least-32-bytes-long
+      GEMINI_API_KEY: ci-placeholder-not-used-in-unit-tests
+      DATABASE_URL: >-
+        ${{
+          matrix.db == 'postgres'
+          && 'postgresql+psycopg://postgres:test@localhost:5432/insightxpert'
+          || 'sqlite:///./ci-test.db'
+        }}
+
+    defaults:
+      run:
+        working-directory: apps/api
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Run Alembic migrations
+        run: uv run alembic upgrade head
+
+      - name: Run tests
+        run: uv run pytest -q

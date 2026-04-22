@@ -24,6 +24,15 @@ class Settings(BaseSettings):
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000"])
     database_url: str = "sqlite:///./app.db"
 
+    # --- database connection pool ------------------------------------------
+    # SQLAlchemy silently ignores pool_size / max_overflow / pool_timeout for
+    # SQLite (which uses StaticPool / NullPool). These only take effect when
+    # DATABASE_URL points at a Postgres (or other RDBMS) backend.
+    db_pool_size: int = 5
+    db_max_overflow: int = 10
+    db_pool_timeout: int = 30
+    db_pool_pre_ping: bool = True
+
     # --- auth --------------------------------------------------------------
     session_secret: str
     session_ttl_seconds: int = 60 * 60 * 24 * 30  # 30 days sliding

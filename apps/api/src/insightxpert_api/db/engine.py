@@ -28,10 +28,21 @@ def _apply_sqlite_pragmas(dbapi_connection, _connection_record) -> None:  # noqa
 def get_engine() -> Engine:
     global _engine
     if _engine is None:
-        url = get_settings().database_url
-        _engine = create_engine(url, future=True)
-        if _engine.url.get_backend_name() == "sqlite":
+        settings = get_settings()
+        url = settings.database_url
+        backend = url.split("://")[0].split("+")[0] if "://" in url else "sqlite"
+        if backend == "sqlite":
+            _engine = create_engine(url, future=True)
             event.listen(_engine, "connect", _apply_sqlite_pragmas)
+        else:
+            _engine = create_engine(
+                url,
+                future=True,
+                pool_size=settings.db_pool_size,
+                max_overflow=settings.db_max_overflow,
+                pool_timeout=settings.db_pool_timeout,
+                pool_pre_ping=settings.db_pool_pre_ping,
+            )
     return _engine
 
 
