@@ -131,9 +131,12 @@ def create_app() -> FastAPI:
     app.include_router(internal_routes.router)
 
     # User-facing automations + notifications routes only exist when enabled.
+    # templates_router must be included BEFORE router so that
+    # /api/v1/automations/templates resolves to the templates handler, not the
+    # parametric /{automation_id} route.
     if settings.automations_enabled:
-        app.include_router(automations_routes.router)
         app.include_router(automations_routes.templates_router)
+        app.include_router(automations_routes.router)
         app.include_router(notifications_routes.router)
     return app
 

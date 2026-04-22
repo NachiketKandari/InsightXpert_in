@@ -75,11 +75,11 @@ def test_toggle_flips_active(user_client_automations):
     client, _ = user_client_automations
     auto_id = client.post("/api/v1/automations", json=_create_payload()).json()["id"]
 
-    r = client.patch(f"/api/v1/automations/{auto_id}/toggle")
+    r = client.post(f"/api/v1/automations/{auto_id}/toggle")
     assert r.status_code == 200
     assert r.json()["is_active"] is False
 
-    r = client.patch(f"/api/v1/automations/{auto_id}/toggle")
+    r = client.post(f"/api/v1/automations/{auto_id}/toggle")
     assert r.status_code == 200
     assert r.json()["is_active"] is True
 

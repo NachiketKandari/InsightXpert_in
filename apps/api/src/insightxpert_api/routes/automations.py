@@ -39,7 +39,7 @@ log = logging.getLogger("insightxpert_api.routes.automations")
 
 router = APIRouter(prefix="/api/v1/automations", tags=["automations"])
 templates_router = APIRouter(
-    prefix="/api/v1/trigger-templates", tags=["trigger-templates"]
+    prefix="/api/v1/automations/templates", tags=["automations-templates"]
 )
 
 
@@ -210,7 +210,7 @@ async def delete_automation(
     return {"status": "ok"}
 
 
-@router.patch("/{automation_id}/toggle")
+@router.post("/{automation_id}/toggle")
 async def toggle_automation(
     automation_id: str,
     user: CurrentUser = Depends(get_current_user),
@@ -223,7 +223,7 @@ async def toggle_automation(
         raise _not_found_or_forbidden(exc)
 
 
-@router.post("/{automation_id}/run")
+@router.post("/{automation_id}/runs")
 async def manual_run(
     automation_id: str,
     request: Request,
