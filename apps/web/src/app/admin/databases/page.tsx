@@ -13,12 +13,15 @@ import { Input } from "@/components/ui/input";
 import {
   useAdminDatabases,
   useSetDbVisibility,
+  useSetDbPipelineMode,
+  type PipelineModeDefault,
   type Visibility,
 } from "@/hooks/use-admin-databases";
 
 export default function DatabasesPage() {
   const { data, isLoading, error } = useAdminDatabases();
   const setVis = useSetDbVisibility();
+  const setMode = useSetDbPipelineMode();
   const [filter, setFilter] = useState("");
 
   const rows = useMemo(() => {
@@ -50,6 +53,22 @@ export default function DatabasesPage() {
     }
   }
 
+  async function handleModeChange(db_id: string, raw: string) {
+    // "" (empty option value) is our sentinel for "inherit default".
+    const next: PipelineModeDefault =
+      raw === "linked" || raw === "full_schema" ? raw : null;
+    try {
+      await setMode.mutateAsync({ db_id, pipeline_mode_default: next });
+      toast.success(
+        next === null
+          ? `${db_id}: pipeline mode cleared (uses default).`
+          : `${db_id}: pipeline mode set to ${next}.`,
+      );
+    } catch {
+      toast.error(`Failed to update pipeline mode for ${db_id}.`);
+    }
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-end justify-between gap-4">
@@ -70,11 +89,12 @@ export default function DatabasesPage() {
       </div>
 
       <div className="rounded-lg border border-border bg-card">
-        <div className="grid grid-cols-[1.5fr_1.2fr_0.8fr_0.8fr_auto] gap-3 border-b border-border px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        <div className="grid grid-cols-[1.5fr_1.2fr_0.8fr_0.8fr_0.9fr_auto] gap-3 border-b border-border px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
           <div>Database</div>
           <div>Owner</div>
           <div>Visibility</div>
           <div>Shared</div>
+          <div>Pipeline mode</div>
           <div className="text-right">Actions</div>
         </div>
 
@@ -103,7 +123,7 @@ export default function DatabasesPage() {
           return (
             <div
               key={d.db_id}
-              className="grid grid-cols-[1.5fr_1.2fr_0.8fr_0.8fr_auto] items-center gap-3 border-b border-border/50 px-4 py-2 text-sm last:border-b-0"
+              className="grid grid-cols-[1.5fr_1.2fr_0.8fr_0.8fr_0.9fr_auto] items-center gap-3 border-b border-border/50 px-4 py-2 text-sm last:border-b-0"
             >
               <div className="font-mono text-xs">{d.db_id}</div>
               <div className="text-xs text-muted-foreground truncate">
@@ -121,6 +141,18 @@ export default function DatabasesPage() {
                 }
               >
                 {sharedLabel}
+              </div>
+              <div>
+                <select
+                  className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs"
+                  value={d.pipeline_mode_default ?? ""}
+                  onChange={(e) => handleModeChange(d.db_id, e.target.value)}
+                  aria-label={`Pipeline mode for ${d.db_id}`}
+                >
+                  <option value="">Default (linked)</option>
+                  <option value="linked">Linked</option>
+                  <option value="full_schema">Full schema</option>
+                </select>
               </div>
               <div className="flex justify-end">
                 <VisibilityMenu

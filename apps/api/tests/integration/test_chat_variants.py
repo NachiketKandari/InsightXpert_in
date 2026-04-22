@@ -156,7 +156,7 @@ def test_chat_poll_fallback_answer_uses_inner_row_count(authed_client: TestClien
     fallback now inspects `rows['rows']` and reports the correct count.
     """
 
-    def fake_factory(_s, _db, _pf):
+    def fake_factory(_s, _db, _pf, *, pipeline_mode: str = "linked"):
         return Pipeline([_ExecutorDictStage()])
 
     with patch(
@@ -189,7 +189,7 @@ def test_chat_answer_surfaces_unknown_db_error(authed_client: TestClient):
     with answer="". Any ERROR chunk should now raise HTTPException(500).
     """
 
-    def fake_factory(_s, _db, _pf):
+    def fake_factory(_s, _db, _pf, *, pipeline_mode: str = "linked"):
         return Pipeline([_ErrorStage()])
 
     with patch(

@@ -38,6 +38,7 @@ import {
 import { useSettingsStore } from "@/stores/settings-store";
 import { useChatStore } from "@/stores/chat-store";
 import { useClientConfig } from "@/hooks/use-client-config";
+import { useCurrentUser } from "@/hooks/use-current-user";
 import { PROVIDER_LABELS, formatModelName } from "@/lib/model-utils";
 import { CsvUploadDialog } from "@/components/dataset/csv-upload-dialog";
 import { PdfUploadDialog } from "@/components/dataset/pdf-upload-dialog";
@@ -97,6 +98,9 @@ export function InputToolbar({
 
   const agentMode = useSettingsStore((s) => s.agentMode);
   const setAgentMode = useSettingsStore((s) => s.setAgentMode);
+  const pipelineMode = useSettingsStore((s) => s.pipelineMode);
+  const setPipelineMode = useSettingsStore((s) => s.setPipelineMode);
+  const { isAdmin } = useCurrentUser();
 
   const setSqlExecutorOpen = useChatStore((s) => s.setSqlExecutorOpen);
   const currentAgentPhase = useChatStore((s) => s.currentAgentPhase);
@@ -220,6 +224,27 @@ export function InputToolbar({
               Agentic (recommended)
               {agentMode === "agentic" && <Check className="size-3.5 ml-auto text-emerald-500" />}
             </DropdownMenuItem>
+
+            {isAdmin && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel className="text-xs text-muted-foreground">
+                  Pipeline Mode (admin)
+                </DropdownMenuLabel>
+                <DropdownMenuItem onSelect={() => setPipelineMode("auto")}>
+                  Auto (use DB default)
+                  {pipelineMode === "auto" && <Check className="size-3.5 ml-auto text-emerald-500" />}
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => setPipelineMode("linked")}>
+                  Linked (schema linker)
+                  {pipelineMode === "linked" && <Check className="size-3.5 ml-auto text-emerald-500" />}
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => setPipelineMode("full_schema")}>
+                  Full schema (skip linker)
+                  {pipelineMode === "full_schema" && <Check className="size-3.5 ml-auto text-emerald-500" />}
+                </DropdownMenuItem>
+              </>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
 

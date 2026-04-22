@@ -25,6 +25,7 @@ from ..orchestration.service import (
 from ..agents.analyst import analyst_loop as _our_analyst_loop
 from ..auth.current_user import CurrentUser, get_current_user
 from ..config import Settings, get_settings
+from ..databases import repository as databases_repo
 from ..logging import get_logger
 from ..pipeline import default_pipeline
 from ..pipeline.stage import PipelineContext
@@ -132,6 +133,10 @@ class ChatRequest(BaseModel):
     # pipeline-wrapping analyst injected. When None, route falls back to the
     # legacy Phase A pipeline path so existing tests/clients stay green.
     agent_mode: Literal["basic", "agentic"] | None = None
+    # Tier-1 full-schema mode (admin only). Precedence: this value (if admin)
+    # → per-DB ``pipeline_mode_default`` → system default ``"linked"``.
+    # Non-admin callers that send a non-null value get 403.
+    pipeline_mode: Literal["linked", "full_schema"] | None = None
 
 
 class ChatAnswerResponse(BaseModel):
@@ -145,6 +150,27 @@ class ChatPollResponse(BaseModel):
     chunks: list[dict[str, Any]]
 
 
+def _resolve_pipeline_mode(body: "ChatRequest", cu: CurrentUser) -> str:
+    """Resolve the effective pipeline mode for this turn.
+
+    Precedence:
+      1. ``body.pipeline_mode`` — admin-only override. Non-admin senders get
+         ``HTTPException(403, "pipeline_mode_requires_admin")``.
+      2. ``databases.pipeline_mode_default`` — per-DB default set via the
+         admin PATCH endpoint.
+      3. ``"linked"`` — system default.
+    """
+    if body.pipeline_mode is not None:
+        if cu.role != "admin":
+            raise HTTPException(status_code=403, detail="pipeline_mode_requires_admin")
+        return body.pipeline_mode
+    db_row = databases_repo.get(body.db_id) or {}
+    per_db = db_row.get("pipeline_mode_default")
+    if per_db in ("linked", "full_schema"):
+        return per_db
+    return "linked"
+
+
 def _build_pipeline_and_ctx(
     body: ChatRequest,
     cu: CurrentUser,
@@ -152,6 +178,7 @@ def _build_pipeline_and_ctx(
     convo_store: ConversationStore,
     emitter: EventEmitter | None,
     conversation_id: str,
+    pipeline_mode: str = "linked",
 ) -> tuple[PipelineContext, Any]:
     """Build a pipeline + context for an already-resolved conversation_id.
 
@@ -164,7 +191,9 @@ def _build_pipeline_and_ctx(
     store = build_store(settings)
     db_svc = DatabaseService(bundled_dir=settings.bundled_dbs_dir, store=store)
     prof_svc = ProfileService(store)
-    pipeline = default_pipeline(settings, db_svc, prof_svc)
+    pipeline = default_pipeline(
+        settings, db_svc, prof_svc, pipeline_mode=pipeline_mode  # type: ignore[arg-type]
+    )
 
     convo_store.append_message(
         cu.id, conversation_id, role="user", content=body.message
@@ -175,7 +204,9 @@ def _build_pipeline_and_ctx(
         conversation_id=conversation_id,
         emitter=emitter,
     )
-    ctx.state.update(db_id=body.db_id, question=body.message)
+    ctx.state.update(
+        db_id=body.db_id, question=body.message, pipeline_mode=pipeline_mode
+    )
     return ctx, pipeline
 
 
@@ -305,6 +336,7 @@ async def chat_sse(
     convo_store: ConversationStore = Depends(get_conversation_store),
 ) -> EventSourceResponse:
     """Run the pipeline and stream SSE chunks as they happen."""
+    pipeline_mode = _resolve_pipeline_mode(body, cu)
     convo = convo_store.get_or_create(cu.id, body.conversation_id)
     collected: list[Any] = []
 
@@ -337,6 +369,7 @@ async def chat_sse(
         ctx, pipeline = _build_pipeline_and_ctx(
             body=body, cu=cu, settings=settings, convo_store=convo_store,
             emitter=emitter, conversation_id=convo.conversation_id,
+            pipeline_mode=pipeline_mode,
         )
         # Fire pipeline on a background task so EventSourceResponse can start streaming
         # the emitter's queue before the pipeline finishes.
@@ -628,6 +661,7 @@ async def chat_poll(
     convo_store: ConversationStore = Depends(get_conversation_store),
 ) -> ChatPollResponse:
     """Run pipeline to completion and return the full list of chunks (non-streaming)."""
+    pipeline_mode = _resolve_pipeline_mode(body, cu)
     convo = convo_store.get_or_create(cu.id, body.conversation_id)
     emitter = EventEmitter(
         convo.conversation_id,
@@ -643,6 +677,7 @@ async def chat_poll(
         ctx, pipeline = _build_pipeline_and_ctx(
             body=body, cu=cu, settings=settings, convo_store=convo_store,
             emitter=emitter, conversation_id=convo.conversation_id,
+            pipeline_mode=pipeline_mode,
         )
         chunks = await _collect_chunks(pipeline, ctx, convo_store, model=settings.gemini_chat_model)
     _schedule_record_turn(
@@ -667,6 +702,7 @@ async def chat_answer(
     convo_store: ConversationStore = Depends(get_conversation_store),
 ) -> ChatAnswerResponse:
     """Run pipeline to completion; return final answer text + generated SQL list."""
+    pipeline_mode = _resolve_pipeline_mode(body, cu)
     convo = convo_store.get_or_create(cu.id, body.conversation_id)
     emitter = EventEmitter(
         convo.conversation_id,
@@ -682,6 +718,7 @@ async def chat_answer(
         ctx, pipeline = _build_pipeline_and_ctx(
             body=body, cu=cu, settings=settings, convo_store=convo_store,
             emitter=emitter, conversation_id=convo.conversation_id,
+            pipeline_mode=pipeline_mode,
         )
         chunks = await _collect_chunks(pipeline, ctx, convo_store, model=settings.gemini_chat_model)
 

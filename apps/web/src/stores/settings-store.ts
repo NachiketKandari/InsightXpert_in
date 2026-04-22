@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { apiFetch, apiCall } from "@/lib/api";
-import type { AgentMode } from "@/lib/sse-client";
+import type { AgentMode, PipelineMode } from "@/lib/sse-client";
 
 interface ProviderModels {
   provider: string;
@@ -13,10 +13,13 @@ interface SettingsState {
   providers: ProviderModels[];
   loading: boolean;
   agentMode: AgentMode;
+  /** Tier-1: admin-only pipeline mode override. "auto" = no override. */
+  pipelineMode: PipelineMode;
 
   fetchConfig: () => Promise<void>;
   switchModel: (provider: string, model: string) => Promise<void>;
   setAgentMode: (mode: AgentMode) => void;
+  setPipelineMode: (mode: PipelineMode) => void;
 }
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
@@ -26,6 +29,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   loading: false,
   // Default to agentic per spec F1 (B2 mode toggle).
   agentMode: "agentic" as AgentMode,
+  pipelineMode: "auto" as PipelineMode,
 
   fetchConfig: async () => {
     set({ loading: true });
@@ -60,4 +64,5 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
 
   setAgentMode: (mode) => set({ agentMode: mode }),
+  setPipelineMode: (mode) => set({ pipelineMode: mode }),
 }));

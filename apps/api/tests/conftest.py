@@ -89,7 +89,7 @@ def patched_pipeline(monkeypatch):
     without Gemini. Shared across chat SSE, /chat/poll, /chat/answer tests.
     """
 
-    def fake_factory(_s, _db, _pf):
+    def fake_factory(_s, _db, _pf, *, pipeline_mode: str = "linked"):
         return Pipeline([_FakeGen(), _FakeExec()])
 
     with patch("insightxpert_api.routes.chat.default_pipeline", side_effect=fake_factory):

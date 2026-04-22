@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Literal
 
 from .pipeline import Pipeline
 from .stage import PipelineContext, Stage
@@ -25,14 +25,28 @@ def _vendored_prompt(*parts: str) -> str:
     return str(base.joinpath(*parts))
 
 
+PipelineMode = Literal["linked", "full_schema"]
+
+
 def default_pipeline(
     settings: "Settings",
     db_svc: "DatabaseService",
     prof_svc: "ProfileService",
+    *,
+    pipeline_mode: PipelineMode = "linked",
 ) -> Pipeline:
-    """Compose the 6-stage v1 text-to-SQL pipeline."""
+    """Compose the 6-stage v1 text-to-SQL pipeline.
+
+    ``pipeline_mode`` controls the second stage (schema → SQL-gen handoff):
+      * ``"linked"`` — ``SchemaLinkerStage`` (default). Emits the trial-SQL
+        / literal-LSH / semantic / join-path / linked-schema chunks.
+      * ``"full_schema"`` — ``FullSchemaStage``. Bypasses the linker and
+        hands the SQL generator the full ``SchemaFormatter`` render with
+        FK tags and per-table ``Foreign Keys:`` blocks.
+    """
     from ..llm.gemini import GeminiLLM
     from .executor_stage import SqlExecutorStage
+    from .full_schema_stage import FullSchemaStage
     from .generator_stage import SqlGeneratorStage
     from .linker_stage import SchemaLinkerStage
     from .profiler_stage import ProfilerStage
@@ -44,12 +58,17 @@ def default_pipeline(
         model=settings.gemini_chat_model,
         embed_model=settings.gemini_embed_model,
     )
-    pipeline = Pipeline([
-        ProfilerStage(db_svc=db_svc, prof_svc=prof_svc, llm=llm),
-        SchemaLinkerStage(
+    schema_stage: Any
+    if pipeline_mode == "full_schema":
+        schema_stage = FullSchemaStage(db_svc=db_svc)
+    else:
+        schema_stage = SchemaLinkerStage(
             llm=llm,
             prompt_path=_vendored_prompt("prompts", "single_prompt_linking_clean.j2"),
-        ),
+        )
+    pipeline = Pipeline([
+        ProfilerStage(db_svc=db_svc, prof_svc=prof_svc, llm=llm),
+        schema_stage,
         SqlGeneratorStage(
             llm=llm,
             # SF15: switched from the greenfield-only 11-line prompts_clean

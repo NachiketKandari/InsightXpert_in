@@ -25,6 +25,9 @@ databases_table = Table(
     Column("visibility", String(16), nullable=False),
     Column("size_bytes", Integer, nullable=True),
     Column("created_at", Integer, nullable=False),
+    # Tier-1 full-schema mode: per-DB override. NULL = inherit system default
+    # (currently "linked"). Values: "linked" | "full_schema".
+    Column("pipeline_mode_default", String(32), nullable=True),
     CheckConstraint(
         "visibility IN ('private','shared','public')",
         name="databases_visibility_check",
