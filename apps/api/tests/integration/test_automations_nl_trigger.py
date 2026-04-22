@@ -100,6 +100,49 @@ async def test_compile_trigger_fallback_on_invalid_json_only(user_client_automat
     assert result["nl_text"] == "hello"
 
 
+async def test_compile_trigger_route_returns_502_on_llm_outage(user_client_automations):
+    """SF9: route-level complement to the helper-level propagation test.
+    When the LLM itself fails (TimeoutError / httpx / auth), the route must
+    surface 502 "AI service unavailable" — not 422 "invalid trigger
+    description", which misleads the FE into thinking the user's input
+    was malformed."""
+    client, _ = user_client_automations
+
+    class _BoomLLM:
+        async def chat(self, messages):
+            raise TimeoutError("upstream LLM timed out")
+
+    client.app.state.llm = _BoomLLM()
+    r = client.post(
+        "/api/v1/automations/compile-trigger",
+        json={"nl_text": "alert when fraud > 100"},
+    )
+    assert r.status_code == 502, r.text
+    assert "unavailable" in r.json()["detail"].lower()
+
+
+async def test_compile_trigger_route_returns_422_on_value_error(user_client_automations):
+    """SF9: ValueError from the helper (bad parse that somehow escaped the
+    fallback, or any future input-validation path) must still map to 422."""
+    from unittest.mock import patch
+
+    client, _ = user_client_automations
+
+    async def _raise_value_error(*args, **kwargs):
+        raise ValueError("bad input shape")
+
+    with patch(
+        "insightxpert_api.automations.nl_trigger.compile_or_fallback",
+        new=_raise_value_error,
+    ):
+        # LLM on state is irrelevant since we're patching the helper.
+        r = client.post(
+            "/api/v1/automations/compile-trigger",
+            json={"nl_text": "anything"},
+        )
+    assert r.status_code == 422, r.text
+
+
 async def test_generate_sql_422_on_bad_output(user_client_automations):
     client, _ = user_client_automations
     fake_llm = AsyncMock()

@@ -121,9 +121,18 @@ async def compile_trigger(
         return await nl_trigger_mod.compile_or_fallback(
             llm, body.nl_text, body.available_columns
         )
-    except Exception as exc:  # noqa: BLE001
-        log.warning("compile-trigger failed: %s", exc)
+    except ValueError as exc:
+        # Bad-input path: helper couldn't produce a condition and didn't
+        # fall back to the threshold template. Surface as a client error.
+        log.warning("compile-trigger bad input: %s", exc)
         raise HTTPException(status_code=422, detail="invalid trigger description")
+    except Exception as exc:  # noqa: BLE001
+        # Everything else (TimeoutError, httpx errors, auth failures,
+        # provider outages) is infrastructure, not user input. Surface as
+        # 502 so the FE can show "AI service unavailable" instead of
+        # misleading the user that their NL description was malformed.
+        log.error("compile-trigger LLM infrastructure failure: %s", exc)
+        raise HTTPException(status_code=502, detail="AI service unavailable")
 
 
 @router.post("/generate-sql")
