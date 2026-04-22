@@ -172,6 +172,10 @@ class ProfilerStage:
         if ref is None:
             raise ValueError(f"database not found: {db_id}")
 
+        # Propagate dialect so downstream stages (validator, generator) can read
+        # it from state without needing their own DatabaseService injection.
+        ctx.state["db_dialect"] = getattr(ref, "dialect", "sqlite")
+
         cached = self._prof.load(ctx.session_id, db_id)
         if cached is not None:
             ctx.state["profile"] = cached
