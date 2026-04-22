@@ -7,6 +7,7 @@ import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { PageContainer } from "@/components/layout/page-container";
 import { AutoDisableWarning } from "@/components/databases/auto-disable-warning";
 import { CostConfirmModal } from "@/components/databases/cost-confirm-modal";
 import { ProfileStepper } from "@/components/databases/profile-stepper";
@@ -101,7 +102,7 @@ export default function DatabaseDetailPage({ params }: PageProps) {
         </div>
       </header>
 
-      <main className="mx-auto grid max-w-6xl grid-cols-1 gap-4 px-4 py-6 md:grid-cols-[minmax(0,1fr)_minmax(320px,420px)] sm:px-6">
+      <PageContainer as="main" className="grid grid-cols-1 gap-6 md:grid-cols-[minmax(0,1fr)_minmax(320px,420px)]">
         {/* Left: schema summary */}
         <section>
           <div className="mb-3 flex items-center gap-3 text-xs text-muted-foreground">
@@ -186,7 +187,7 @@ export default function DatabaseDetailPage({ params }: PageProps) {
             </div>
           )}
         </aside>
-      </main>
+      </PageContainer>
 
       <CostConfirmModal
         open={state.kind === "awaiting_confirmation"}
