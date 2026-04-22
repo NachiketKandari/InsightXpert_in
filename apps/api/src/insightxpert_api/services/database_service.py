@@ -15,6 +15,7 @@ For uploaded DBs the service ``hydrates`` the blob to a local temp path on deman
 
 from __future__ import annotations
 
+import os
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -82,14 +83,92 @@ class DatabaseService:
                 )
                 seen[path.stem] = path
 
-        return [
+        sqlite_refs = [
             DatabaseRef(
                 db_id=stem,
                 source=self._BUNDLED,
                 local_path=str(path.resolve()),
+                dialect="sqlite",
             )
             for stem, path in sorted(seen.items())
         ]
+        # Union in non-sqlite rows from the `databases` table. If both sources
+        # list the same db_id, the SQLite file wins (shouldn't happen in practice).
+        seen_ids = {r.db_id for r in sqlite_refs}
+        pg_refs = [r for r in self._build_non_sqlite_refs() if r.db_id not in seen_ids]
+        return sqlite_refs + pg_refs
+
+    def _fetch_non_sqlite_rows(self) -> list[dict]:
+        """Query the `databases` table for non-sqlite rows. Overrideable in tests.
+
+        Returns an empty list if the app DB isn't reachable or the `databases`
+        table doesn't exist (e.g. in unit tests that build a DatabaseService
+        without running migrations). That keeps unrelated tests insulated from
+        the cross-table dependency introduced by the postgres dialect seed row.
+        """
+        from sqlalchemy import text
+        from sqlalchemy.exc import OperationalError, ProgrammingError
+
+        from ..db.engine import get_engine
+
+        try:
+            engine = get_engine()
+            with engine.connect() as conn:
+                rows = (
+                    conn.execute(
+                        text(
+                            "SELECT db_id, visibility, connection_url_env_var, dialect "
+                            "FROM databases WHERE dialect != 'sqlite'"
+                        )
+                    )
+                    .mappings()
+                    .all()
+                )
+            return [dict(r) for r in rows]
+        except (OperationalError, ProgrammingError) as e:
+            _log.debug("non_sqlite_rows_query_skipped", reason=str(e))
+            return []
+
+    def _build_non_sqlite_refs(self) -> list[DatabaseRef]:
+        """Resolve each non-sqlite `databases` row into a DatabaseRef.
+
+        Rows whose ``connection_url_env_var`` is unset or names a missing env
+        var are logged and skipped — the DB just doesn't appear in the list.
+        Listing must never fail hard on a misconfigured row because the
+        ``databases`` table is shared infrastructure; one broken row must not
+        hide all the others. ``resolve(db_id)`` still raises when the operator
+        actually tries to use the broken DB (see below).
+        """
+        refs: list[DatabaseRef] = []
+        for row in self._fetch_non_sqlite_rows():
+            env_var = row.get("connection_url_env_var")
+            if not env_var:
+                _log.warning(
+                    "non_sqlite_db_missing_env_var_ref",
+                    db_id=row["db_id"],
+                    hint="Set connection_url_env_var in the databases row.",
+                )
+                continue
+            url = os.environ.get(env_var)
+            if not url:
+                _log.warning(
+                    "non_sqlite_db_env_var_unset",
+                    db_id=row["db_id"],
+                    env_var=env_var,
+                    hint=f"Set {env_var} in apps/api/.env.local to enable this DB.",
+                )
+                continue
+            refs.append(
+                DatabaseRef(
+                    db_id=row["db_id"],
+                    source=self._BUNDLED,
+                    local_path=None,
+                    dialect=row["dialect"],
+                    connection_url=url,
+                    connection_url_env_var=env_var,
+                )
+            )
+        return refs
 
     def _list_uploaded(self, session_id: str) -> list[DatabaseRef]:
         prefix = self._uploaded_prefix(session_id)
