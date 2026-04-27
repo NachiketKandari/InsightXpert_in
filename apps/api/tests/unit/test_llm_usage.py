@@ -224,7 +224,11 @@ async def test_automation_runner_emits_usage_when_tokens_burned(fresh_db) -> Non
             "is_active": True,
             "sql_queries_json": "[]",
         },
-    ), patch.object(r.repository, "insert_run"), patch.object(
+    ), patch.object(
+        r.repository,
+        "insert_run",
+        return_value={"id": "run-stub-1"},
+    ), patch.object(
         r.AutomationService, "mark_run_completed"
     ), patch.object(r.repository, "list_triggers", return_value=[]):
         # Simulate the LLM being hit during the run: bump counters mid-flight
@@ -244,7 +248,9 @@ async def test_automation_runner_emits_usage_when_tokens_burned(fresh_db) -> Non
     assert len(autom_rows) == 1
     row = autom_rows[0]
     assert row["user_id"] == "owner-automation"
-    assert row["source_ref_id"] == "a1"
+    # Track 1.3: source_ref_id is now the persisted automation_runs.id
+    # (stub patched in this test), not the automation_id.
+    assert row["source_ref_id"] == "run-stub-1"
     assert row["tokens_in"] == 2_500
     assert row["tokens_out"] == 700
 
