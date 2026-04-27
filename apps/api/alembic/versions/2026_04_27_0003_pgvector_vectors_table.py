@@ -70,20 +70,11 @@ def upgrade() -> None:
     op.create_index("ix_vectors_collection_db_id", "vectors", ["collection", "db_id"])
     op.create_index("ix_vectors_collection", "vectors", ["collection"])
 
-    # IVFFlat ANN index — Postgres only, best-effort. Skipped if pgvector
-    # version is too old or table is empty (IVFFlat needs data to train).
-    # We create it now so it exists; pgvector accepts an empty index and
-    # will populate as rows arrive (queries fall back to seq scan until
-    # the index is meaningful).
-    if dialect == "postgresql":
-        try:
-            op.execute(
-                "CREATE INDEX IF NOT EXISTS ix_vectors_embedding_cosine "
-                "ON vectors USING ivfflat (embedding vector_cosine_ops) "
-                "WITH (lists = 100)"
-            )
-        except Exception:  # pragma: no cover — older pgvector or empty table
-            pass
+    # ANN index intentionally NOT created here. pgvector IVFFlat/HNSW cap out
+    # at 2000 dims and the Gemini default embedding is 3072 — building either
+    # would fail mid-transaction and poison the migration. Exact search via
+    # `<=>` works fine until the table has meaningful volume; add an ANN index
+    # in a follow-up migration once embedding-dim and row count justify it.
 
 
 def downgrade() -> None:
