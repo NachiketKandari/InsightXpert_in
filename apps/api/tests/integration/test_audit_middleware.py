@@ -44,3 +44,40 @@ def test_login_post_produces_audit_row(fresh_db):
     assert row.path == "/api/v1/auth/login"
     assert row.status_code == 200
     assert row.resource_type == "auth.session"
+
+
+def test_classify_automations_paths():
+    from insightxpert_api.audit.middleware import _classify
+
+    assert _classify("/api/v1/automations") == ("automation", None)
+    assert _classify("/api/v1/automations/") == ("automation", None)
+    assert _classify("/api/v1/automations/abc-123") == ("automation", "abc-123")
+    assert _classify("/api/v1/automations/abc-123/runs") == (
+        "automation.run",
+        "abc-123",
+    )
+    assert _classify("/api/v1/automations/abc-123/toggle") == (
+        "automation",
+        "abc-123",
+    )
+    assert _classify("/api/v1/automations/templates") == (
+        "automation.template",
+        None,
+    )
+    assert _classify("/api/v1/automations/templates/t-1") == (
+        "automation.template",
+        "t-1",
+    )
+    assert _classify("/api/v1/automations/compile-trigger") == (
+        "automation.compile_trigger",
+        None,
+    )
+    assert _classify("/api/v1/automations/generate-sql") == (
+        "automation.generate_sql",
+        None,
+    )
+    assert _classify("/api/v1/notifications") == ("notification", None)
+    assert _classify("/api/v1/notifications/n-1/read") == (
+        "notification",
+        "n-1",
+    )

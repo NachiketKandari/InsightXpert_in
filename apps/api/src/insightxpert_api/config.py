@@ -114,6 +114,9 @@ class Settings(BaseSettings):
     # Embedded tick granularity in seconds — how often each job's cron trigger
     # is re-evaluated. Keep ≥5s to avoid pegging SQLite.
     automations_scheduler_tick_seconds: int = 30
+    # Per-user cap on the number of automations a single user may own. When
+    # exceeded, POST /api/v1/automations returns HTTP 429.
+    automations_max_per_user: int = 50
 
     # --- observability: Sentry --------------------------------------------
     # Empty DSN → Sentry is a no-op (safe default for tests / fresh clones).

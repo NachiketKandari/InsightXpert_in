@@ -27,6 +27,7 @@ from ..automations.models import (
 )
 from ..automations.service import (
     AutomationError,
+    AutomationLimitError,
     AutomationService,
     ForbiddenError,
     NotFoundError,
@@ -69,6 +70,38 @@ def _resolve_llm(request: Request):
         api_key=settings.gemini_api_key,
         model=settings.gemini_chat_model,
         embed_model=settings.gemini_embed_model,
+    )
+
+
+def _validate_db_id(db_id: str) -> None:
+    """Reject creates/updates that target a non-existent ``db_id``.
+
+    A ``db_id`` is valid if any of:
+      * it has a row in the ``databases`` registry (covers postgres BYO-DB
+        and uploaded sqlite tracked via the registry), OR
+      * it resolves to a file via :class:`DatabaseService` (bundled samples).
+
+    Raises HTTP 400 otherwise.
+    """
+    from ..config import get_settings
+    from ..databases import repository as databases_repo
+    from ..services.database_service import DatabaseService
+    from ..storage import build_store
+
+    if databases_repo.get(db_id) is not None:
+        return
+
+    settings = get_settings()
+    db_svc = DatabaseService(
+        bundled_dir=settings.bundled_dbs_dir, store=build_store(settings)
+    )
+    # Bundled resolution is session-independent; pass db_id as session_id like
+    # the runner does.
+    if db_svc.resolve(session_id=db_id, db_id=db_id) is not None:
+        return
+
+    raise HTTPException(
+        status_code=400, detail=f"Unknown db_id: {db_id}"
     )
 
 
@@ -196,8 +229,11 @@ async def create_automation(
     user: CurrentUser = Depends(get_current_user),
 ):
     _validate_sql_queries(body.sql_queries)
+    await asyncio.to_thread(_validate_db_id, body.db_id)
     try:
         return await asyncio.to_thread(_svc().create, body, user.id)
+    except AutomationLimitError as exc:
+        raise HTTPException(status_code=429, detail=str(exc))
     except AutomationError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except ValueError as exc:
@@ -205,10 +241,33 @@ async def create_automation(
 
 
 @router.get("")
-async def list_automations(user: CurrentUser = Depends(get_current_user)):
-    return await asyncio.to_thread(
-        _svc().list_for_user, user.id, _is_admin(user)
+async def list_automations(
+    user: CurrentUser = Depends(get_current_user),
+    limit: int | None = Query(default=None, ge=1, le=200),
+    offset: int | None = Query(default=None, ge=0),
+):
+    # Back-compat: when neither limit nor offset is supplied, return the bare
+    # list (existing FE shape). When either is supplied, return the paginated
+    # envelope.
+    if limit is None and offset is None:
+        return await asyncio.to_thread(
+            _svc().list_for_user, user.id, _is_admin(user)
+        )
+    eff_limit = limit if limit is not None else 50
+    eff_offset = offset if offset is not None else 0
+    items, total = await asyncio.to_thread(
+        _svc().list_for_user_paged,
+        user.id,
+        _is_admin(user),
+        limit=eff_limit,
+        offset=eff_offset,
     )
+    return {
+        "items": items,
+        "total": total,
+        "limit": eff_limit,
+        "offset": eff_offset,
+    }
 
 
 @router.get("/{automation_id}")
@@ -326,10 +385,30 @@ async def get_run(
 
 
 @templates_router.get("")
-async def list_templates(user: CurrentUser = Depends(get_current_user)):
-    return await asyncio.to_thread(
-        _tpl_svc().list_for_user, user.id, _is_admin(user)
+async def list_templates(
+    user: CurrentUser = Depends(get_current_user),
+    limit: int | None = Query(default=None, ge=1, le=200),
+    offset: int | None = Query(default=None, ge=0),
+):
+    if limit is None and offset is None:
+        return await asyncio.to_thread(
+            _tpl_svc().list_for_user, user.id, _is_admin(user)
+        )
+    eff_limit = limit if limit is not None else 50
+    eff_offset = offset if offset is not None else 0
+    items, total = await asyncio.to_thread(
+        _tpl_svc().list_for_user_paged,
+        user.id,
+        _is_admin(user),
+        limit=eff_limit,
+        offset=eff_offset,
     )
+    return {
+        "items": items,
+        "total": total,
+        "limit": eff_limit,
+        "offset": eff_offset,
+    }
 
 
 @templates_router.post("")

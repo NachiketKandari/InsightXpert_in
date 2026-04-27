@@ -38,6 +38,12 @@ class ForbiddenError(AutomationError):
     pass
 
 
+class AutomationLimitError(AutomationError):
+    """Raised when the caller has reached ``automations_max_per_user``."""
+
+    pass
+
+
 def _now() -> int:
     return int(time.time())
 
@@ -133,6 +139,18 @@ class AutomationService:
     ) -> dict[str, Any]:
         if not req.sql_queries:
             raise AutomationError("at least one SQL query is required")
+
+        # Per-user cap (admins are NOT exempt — the cap is per-owner).
+        from ..config import get_settings
+
+        cap = get_settings().automations_max_per_user
+        existing = repository.count_for_user(owner_user_id)
+        if existing >= cap:
+            raise AutomationLimitError(
+                f"Automation limit reached ({cap}). "
+                "Delete an existing one to create a new one."
+            )
+
         cron = req.resolved_cron()
 
         auto_id = _uuid()
@@ -186,6 +204,19 @@ class AutomationService:
             else repository.list_automations(owner_user_id=user_id)
         )
         return [self._hydrate(r) for r in rows]
+
+    def list_for_user_paged(
+        self,
+        user_id: str,
+        is_admin: bool,
+        *,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[dict[str, Any]], int]:
+        rows, total = repository.list_for_user_paged(
+            user_id, is_admin=is_admin, limit=limit, offset=offset
+        )
+        return [self._hydrate(r) for r in rows], total
 
     def update(
         self,
@@ -398,6 +429,21 @@ class TriggerTemplateService:
         )
         return [self._hydrate(r) for r in rows]
 
+    def list_for_user_paged(
+        self,
+        user_id: str,
+        is_admin: bool,
+        *,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[dict[str, Any]], int]:
+        rows, total = repository.list_templates_paged(
+            owner_user_id=None if is_admin else user_id,
+            limit=limit,
+            offset=offset,
+        )
+        return [self._hydrate(r) for r in rows], total
+
     def get(
         self, template_id: str, user_id: str, is_admin: bool
     ) -> dict[str, Any]:
@@ -509,6 +555,7 @@ __all__ = [
     "TriggerTemplateService",
     "NotificationService",
     "AutomationError",
+    "AutomationLimitError",
     "NotFoundError",
     "ForbiddenError",
     "SCHEDULE_PRESETS",
