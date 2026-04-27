@@ -37,6 +37,58 @@ _RESOURCE_TABLE: list[tuple[re.Pattern[str], str, Callable[[re.Match[str]], str 
     (re.compile(r"^/api/v1/chat(?:/.*)?$"), "chat", lambda _m: None),
     (re.compile(r"^/api/v1/feedback/?$"), "feedback", lambda _m: None),
     (re.compile(r"^/api/v1/sql(?:/.*)?$"), "sql", lambda _m: None),
+    # Automations — order matters: most specific first, generic last.
+    (
+        re.compile(r"^/api/v1/automations/templates/([^/]+)/?$"),
+        "automation.template",
+        lambda m: m.group(1),
+    ),
+    (
+        re.compile(r"^/api/v1/automations/templates/?$"),
+        "automation.template",
+        lambda _m: None,
+    ),
+    (
+        re.compile(r"^/api/v1/automations/compile-trigger/?$"),
+        "automation.compile_trigger",
+        lambda _m: None,
+    ),
+    (
+        re.compile(r"^/api/v1/automations/generate-sql/?$"),
+        "automation.generate_sql",
+        lambda _m: None,
+    ),
+    (
+        re.compile(r"^/api/v1/automations/([^/]+)/runs(?:/[^/]+)?/?$"),
+        "automation.run",
+        lambda m: m.group(1),
+    ),
+    (
+        re.compile(r"^/api/v1/automations/([^/]+)/toggle/?$"),
+        "automation",
+        lambda m: m.group(1),
+    ),
+    (
+        re.compile(r"^/api/v1/automations/([^/]+)/?$"),
+        "automation",
+        lambda m: m.group(1),
+    ),
+    (
+        re.compile(r"^/api/v1/automations/?$"),
+        "automation",
+        lambda _m: None,
+    ),
+    # Notifications.
+    (
+        re.compile(r"^/api/v1/notifications/([^/]+)/read/?$"),
+        "notification",
+        lambda m: m.group(1),
+    ),
+    (
+        re.compile(r"^/api/v1/notifications(?:/.*)?$"),
+        "notification",
+        lambda _m: None,
+    ),
 ]
 
 
