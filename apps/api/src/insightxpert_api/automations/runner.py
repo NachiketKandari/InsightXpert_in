@@ -30,7 +30,9 @@ from .service import AutomationService
 
 log = get_logger("automations.runner")
 
-# Per-automation-id lock to prevent overlapping runs of the same automation.
+# In-process re-entrancy guard to prevent overlapping runs of the same
+# automation within one worker. Cross-replica safety is handled by
+# repository.claim_due_automations advancing next_run_at atomically.
 _locks: dict[str, asyncio.Lock] = {}
 
 # Max concurrent automations in one batch. Bounded to keep DB / thread-pool
@@ -364,7 +366,15 @@ async def run_due_automations(
         item = await _execute_one(app, automation_id)
         return RunBatchResult(ran=[item])
 
-    due = repository.list_due_automations(now_ts)
+    # Atomically claim rows so concurrent calls (e.g. another replica) do
+    # not double-fire the same automation. The claim advances next_run_at
+    # past the due predicate; mark_run_completed below resets it to the
+    # real cron tick after each run.
+    due = await asyncio.to_thread(
+        repository.claim_due_automations,
+        now_ts=now_ts,
+        batch_size=_BATCH_CONCURRENCY * 4,
+    )
     if not due:
         return RunBatchResult(ran=[])
 

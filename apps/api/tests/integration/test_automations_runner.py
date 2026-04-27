@@ -201,3 +201,65 @@ async def test_run_emits_structured_logs(user_client_automations, monkeypatch):
     assert "automation.run_started" in event_names
     assert "automation.run_completed" in event_names
     assert "automation.trigger_fired" in event_names
+
+
+async def test_two_concurrent_run_due_calls_each_run_once(
+    user_client_automations, monkeypatch
+):
+    """Multi-replica regression: when two run_due_automations calls race
+    on the same tick, the atomic claim must ensure each due automation is
+    handed to exactly one caller. Simulates two replicas on the same DB.
+    """
+    import asyncio
+    import time
+
+    from sqlalchemy import text
+
+    from insightxpert_api.automations import runner as runner_mod
+    from insightxpert_api.automations.models import RunBatchItem
+    from insightxpert_api.db.engine import get_engine
+
+    client, _user = user_client_automations
+    auto_ids: list[str] = []
+    for i in range(4):
+        r = client.post(
+            "/api/v1/automations",
+            json={
+                "name": f"r{i}",
+                "nl_query": "x",
+                "sql_queries": ["SELECT COUNT(*) AS n FROM molecule"],
+                "db_id": "toxicology",
+                "schedule_preset": "daily",
+                "trigger_conditions": [],
+            },
+        )
+        assert r.status_code == 200, r.text
+        auto_ids.append(r.json()["id"])
+
+    now = int(time.time())
+    with get_engine().begin() as conn:
+        conn.execute(
+            text("UPDATE automations SET next_run_at = :n, is_active = 1"),
+            {"n": now},
+        )
+
+    invocations: dict[str, int] = {}
+    inv_lock = asyncio.Lock()
+
+    async def counting_execute_one(_app, automation_id):
+        async with inv_lock:
+            invocations[automation_id] = invocations.get(automation_id, 0) + 1
+        return RunBatchItem(automation_id=automation_id, status="success")
+
+    monkeypatch.setattr(runner_mod, "_execute_one", counting_execute_one)
+
+    a, b = await asyncio.gather(
+        runner_mod.run_due_automations(None, now=now),
+        runner_mod.run_due_automations(None, now=now),
+    )
+    ran_ids = [item.automation_id for item in a.ran] + [
+        item.automation_id for item in b.ran
+    ]
+    assert sorted(ran_ids) == sorted(invocations.keys())
+    assert all(v == 1 for v in invocations.values()), invocations
+    assert set(invocations.keys()) == set(auto_ids)
