@@ -6,7 +6,7 @@
 // Contract mirrors backend plan §1 exactly. Any drift here should be
 // accompanied by a matching backend change.
 
-import { apiCall, apiFetch } from "@/lib/api";
+import { apiCall, apiFetch, type ApiFetchOptions } from "@/lib/api";
 import type {
   Automation,
   AutomationRun,
@@ -15,6 +15,45 @@ import type {
   TriggerCondition,
   TriggerTemplate,
 } from "@/types/automation";
+
+// ----------------------------------------------------------------------------
+// Typed result helper. Unlike `apiCall`, which collapses every failure to
+// `null`, `apiResult` preserves the HTTP status and a best-effort error
+// message so callers can render specific UX (e.g. distinguishing 429
+// "Automation limit reached" from generic 5xx network failures).
+// ----------------------------------------------------------------------------
+
+export type ApiResult<T> =
+  | { ok: true; data: T }
+  | { ok: false; status: number; message: string };
+
+async function apiResult<T>(
+  path: string,
+  options?: ApiFetchOptions,
+): Promise<ApiResult<T>> {
+  try {
+    const res = await apiFetch(path, options);
+    if (!res.ok) {
+      let message = `Request failed (${res.status})`;
+      try {
+        const body = await res.json();
+        if (typeof body?.detail === "string") message = body.detail;
+        else if (typeof body?.message === "string") message = body.message;
+      } catch {
+        // Body wasn't JSON — fall back to the default message above.
+      }
+      return { ok: false, status: res.status, message };
+    }
+    const data = (await res.json()) as T;
+    return { ok: true, data };
+  } catch (err) {
+    return {
+      ok: false,
+      status: 0,
+      message: (err as Error).message || "Network error",
+    };
+  }
+}
 
 // ----------------------------------------------------------------------------
 // Automations CRUD
@@ -32,6 +71,18 @@ export function createAutomation(
   payload: CreateAutomationPayload,
 ): Promise<Automation | null> {
   return apiCall<Automation>("/api/v1/automations", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+// Result-typed variant of createAutomation. Preserves status code + server
+// message so callers can show specific toasts (e.g. 429 "Automation limit
+// reached" or a 400 server-supplied detail) instead of a generic failure.
+export function createAutomationResult(
+  payload: CreateAutomationPayload,
+): Promise<ApiResult<Automation>> {
+  return apiResult<Automation>("/api/v1/automations", {
     method: "POST",
     body: JSON.stringify(payload),
   });
