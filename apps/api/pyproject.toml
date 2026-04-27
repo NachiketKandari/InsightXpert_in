@@ -21,7 +21,6 @@ dependencies = [
   "argon2-cffi>=25.1.0",
   "alembic>=1.18.4",
   "sqlalchemy>=2.0.49",
-  "chromadb>=1.5.8",
   "pandas>=3.0.2",
   "scipy>=1.17.1",
   "apscheduler>=3.10,<4.0",
@@ -29,6 +28,7 @@ dependencies = [
   "psycopg[binary]>=3.1",
   "sentry-sdk[fastapi]>=2.18",
   "cryptography>=42.0",
+  "pgvector>=0.3.0",
 ]
 
 [dependency-groups]
