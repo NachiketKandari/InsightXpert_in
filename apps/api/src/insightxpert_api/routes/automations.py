@@ -27,6 +27,7 @@ from ..automations.models import (
 )
 from ..automations.service import (
     AutomationError,
+    AutomationLimitError,
     AutomationService,
     ForbiddenError,
     NotFoundError,
@@ -231,6 +232,8 @@ async def create_automation(
     await asyncio.to_thread(_validate_db_id, body.db_id)
     try:
         return await asyncio.to_thread(_svc().create, body, user.id)
+    except AutomationLimitError as exc:
+        raise HTTPException(status_code=429, detail=str(exc))
     except AutomationError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except ValueError as exc:

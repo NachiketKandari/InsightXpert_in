@@ -189,6 +189,29 @@ def test_create_rejects_multi_statement_sql(user_client_automations):
     assert r.status_code == 400
 
 
+def test_create_blocked_when_user_at_cap(user_client_automations, monkeypatch):
+    from insightxpert_api.config import get_settings
+
+    # Monkeypatch the cached settings instance directly. This is more robust
+    # than relying on env var ordering since get_settings() is @lru_cache'd.
+    settings = get_settings()
+    monkeypatch.setattr(settings, "automations_max_per_user", 2)
+
+    client, _ = user_client_automations
+    for i in range(2):
+        r = client.post(
+            "/api/v1/automations", json=_create_payload(name=f"a{i}")
+        )
+        assert r.status_code == 200, r.text
+
+    over = client.post(
+        "/api/v1/automations", json=_create_payload(name="over")
+    )
+    assert over.status_code == 429, over.text
+    detail = over.json().get("detail", "").lower()
+    assert "limit" in detail
+
+
 def test_create_with_unknown_db_id_returns_400(user_client_automations):
     client, _ = user_client_automations
     r = client.post(

@@ -38,6 +38,12 @@ class ForbiddenError(AutomationError):
     pass
 
 
+class AutomationLimitError(AutomationError):
+    """Raised when the caller has reached ``automations_max_per_user``."""
+
+    pass
+
+
 def _now() -> int:
     return int(time.time())
 
@@ -133,6 +139,18 @@ class AutomationService:
     ) -> dict[str, Any]:
         if not req.sql_queries:
             raise AutomationError("at least one SQL query is required")
+
+        # Per-user cap (admins are NOT exempt — the cap is per-owner).
+        from ..config import get_settings
+
+        cap = get_settings().automations_max_per_user
+        existing = repository.count_for_user(owner_user_id)
+        if existing >= cap:
+            raise AutomationLimitError(
+                f"Automation limit reached ({cap}). "
+                "Delete an existing one to create a new one."
+            )
+
         cron = req.resolved_cron()
 
         auto_id = _uuid()
@@ -537,6 +555,7 @@ __all__ = [
     "TriggerTemplateService",
     "NotificationService",
     "AutomationError",
+    "AutomationLimitError",
     "NotFoundError",
     "ForbiddenError",
     "SCHEDULE_PRESETS",
