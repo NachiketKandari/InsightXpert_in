@@ -17,11 +17,16 @@ from insightxpert_api.sse.chunks import ChunkType, SQLGeneratedPayload, StatusPa
 
 
 @pytest.fixture(autouse=True)
-def _env(monkeypatch: pytest.MonkeyPatch) -> None:
+def _env(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     """Populate required env for every test."""
     monkeypatch.setenv("SESSION_SECRET", "s" * 32)
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
     monkeypatch.setenv("APP_ENV", "local")
+    # Force a per-test SQLite file. Without this, .env.local (loaded from the
+    # api package root) leaks the dev DATABASE_URL into tests — including
+    # Supabase Postgres, which tests must never touch. `fresh_db` and friends
+    # may override this further; this is just the safe floor.
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path}/test.db")
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
