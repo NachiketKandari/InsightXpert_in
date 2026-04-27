@@ -10,7 +10,15 @@ from __future__ import annotations
 import hashlib
 import logging
 
-import chromadb
+# 2026-04-27: chromadb is removed from the runtime deps (RAG migrated to
+# pgvector). This vendored class is still referenced by other vendored
+# modules at *import* time but is no longer instantiated in production
+# (chat.py passes ``rag=None``). Lazy-import keeps imports working without
+# a real chromadb install; instantiating ``VectorStore`` will raise.
+try:  # pragma: no cover — optional dep
+    import chromadb  # type: ignore
+except ModuleNotFoundError:  # pragma: no cover
+    chromadb = None  # type: ignore[assignment]
 
 logger = logging.getLogger("insightxpert.rag")
 

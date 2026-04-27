@@ -1,1 +1,1 @@
-"""Admin-side RAG management (wraps the vendored VectorStore)."""
+"""Admin-side RAG management — pgvector-backed (post-2026-04-27)."""
