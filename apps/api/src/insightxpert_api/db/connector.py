@@ -15,7 +15,7 @@ import re
 import sqlite3
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Union
 
 FORBIDDEN_SQL_RE = re.compile(
     # Two patterns ORed together. The PRAGMA-write case is split out so the trailing \b
@@ -77,3 +77,55 @@ class DatabaseConnector:
 
         elapsed_ms = int((time.perf_counter() - start) * 1000)
         return QueryResult(columns=columns, rows=rows, execution_time_ms=elapsed_ms)
+
+
+# ---------------------------------------------------------------------------
+# Unified connector dispatch (BYO-DB)
+# ---------------------------------------------------------------------------
+#
+# Every code path that runs SQL against a user DB now goes through
+# ``resolve_connector`` so callers don't bake in 'sqlite_file is the only
+# backend' assumptions. ``DatabaseConnector`` (above) still owns the
+# sqlite_file path; postgres dispatches to ``PostgresConnector``; libsql /
+# sqlite_external are accepted as enum values but not yet wired (NotImplemented
+# at dispatch time — Turso cutover plan handles those).
+
+
+def resolve_connector(
+    *,
+    kind: str,
+    config: Any | None = None,
+    db_path: str | None = None,
+) -> Union["DatabaseConnector", Any]:
+    """Pick the right connector for a registry row.
+
+    Args:
+        kind: One of ``'sqlite_file'``, ``'postgres'``, ``'libsql'``,
+            ``'sqlite_external'``.
+        config: A typed connection config (e.g. ``PostgresConnection``) for
+            non-sqlite_file kinds. Required for postgres / libsql.
+        db_path: Local filesystem path for ``sqlite_file``.
+
+    Raises:
+        ValueError: unknown ``kind`` or missing required argument.
+        NotImplementedError: ``libsql`` / ``sqlite_external`` are reserved
+            but not yet wired (separate Turso plan).
+    """
+    if kind == "sqlite_file":
+        if not db_path:
+            raise ValueError("sqlite_file dispatch requires db_path")
+        return DatabaseConnector(db_path)
+    if kind == "postgres":
+        # Local import — connections.postgres_connector pulls SQLAlchemy
+        # engine code that we don't want to load on every sqlite-only path.
+        from ..connections.postgres_connector import PostgresConnector
+        from ..connections.types import PostgresConnection
+
+        if not isinstance(config, PostgresConnection):
+            raise ValueError("postgres dispatch requires a PostgresConnection config")
+        return PostgresConnector(config)
+    if kind in ("libsql", "sqlite_external"):
+        raise NotImplementedError(
+            f"connector kind '{kind}' is reserved but not yet wired (Turso cutover plan)"
+        )
+    raise ValueError(f"unsupported db kind: {kind}")
