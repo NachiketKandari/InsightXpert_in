@@ -187,6 +187,19 @@ class AutomationService:
         )
         return [self._hydrate(r) for r in rows]
 
+    def list_for_user_paged(
+        self,
+        user_id: str,
+        is_admin: bool,
+        *,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[dict[str, Any]], int]:
+        rows, total = repository.list_for_user_paged(
+            user_id, is_admin=is_admin, limit=limit, offset=offset
+        )
+        return [self._hydrate(r) for r in rows], total
+
     def update(
         self,
         automation_id: str,
@@ -397,6 +410,21 @@ class TriggerTemplateService:
             else repository.list_templates(owner_user_id=user_id)
         )
         return [self._hydrate(r) for r in rows]
+
+    def list_for_user_paged(
+        self,
+        user_id: str,
+        is_admin: bool,
+        *,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[dict[str, Any]], int]:
+        rows, total = repository.list_templates_paged(
+            owner_user_id=None if is_admin else user_id,
+            limit=limit,
+            offset=offset,
+        )
+        return [self._hydrate(r) for r in rows], total
 
     def get(
         self, template_id: str, user_id: str, is_admin: bool

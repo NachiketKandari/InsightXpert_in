@@ -205,10 +205,33 @@ async def create_automation(
 
 
 @router.get("")
-async def list_automations(user: CurrentUser = Depends(get_current_user)):
-    return await asyncio.to_thread(
-        _svc().list_for_user, user.id, _is_admin(user)
+async def list_automations(
+    user: CurrentUser = Depends(get_current_user),
+    limit: int | None = Query(default=None, ge=1, le=200),
+    offset: int | None = Query(default=None, ge=0),
+):
+    # Back-compat: when neither limit nor offset is supplied, return the bare
+    # list (existing FE shape). When either is supplied, return the paginated
+    # envelope.
+    if limit is None and offset is None:
+        return await asyncio.to_thread(
+            _svc().list_for_user, user.id, _is_admin(user)
+        )
+    eff_limit = limit if limit is not None else 50
+    eff_offset = offset if offset is not None else 0
+    items, total = await asyncio.to_thread(
+        _svc().list_for_user_paged,
+        user.id,
+        _is_admin(user),
+        limit=eff_limit,
+        offset=eff_offset,
     )
+    return {
+        "items": items,
+        "total": total,
+        "limit": eff_limit,
+        "offset": eff_offset,
+    }
 
 
 @router.get("/{automation_id}")
@@ -326,10 +349,30 @@ async def get_run(
 
 
 @templates_router.get("")
-async def list_templates(user: CurrentUser = Depends(get_current_user)):
-    return await asyncio.to_thread(
-        _tpl_svc().list_for_user, user.id, _is_admin(user)
+async def list_templates(
+    user: CurrentUser = Depends(get_current_user),
+    limit: int | None = Query(default=None, ge=1, le=200),
+    offset: int | None = Query(default=None, ge=0),
+):
+    if limit is None and offset is None:
+        return await asyncio.to_thread(
+            _tpl_svc().list_for_user, user.id, _is_admin(user)
+        )
+    eff_limit = limit if limit is not None else 50
+    eff_offset = offset if offset is not None else 0
+    items, total = await asyncio.to_thread(
+        _tpl_svc().list_for_user_paged,
+        user.id,
+        _is_admin(user),
+        limit=eff_limit,
+        offset=eff_offset,
     )
+    return {
+        "items": items,
+        "total": total,
+        "limit": eff_limit,
+        "offset": eff_offset,
+    }
 
 
 @templates_router.post("")

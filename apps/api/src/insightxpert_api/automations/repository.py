@@ -64,6 +64,44 @@ def list_automations(
     return [dict(r._mapping) for r in rows]
 
 
+def list_for_user_paged(
+    user_id: str | None,
+    *,
+    is_admin: bool,
+    limit: int,
+    offset: int,
+) -> tuple[list[dict[str, Any]], int]:
+    """Paginated variant of list_automations. Returns (rows, total).
+
+    Admins see all rows; non-admins are scoped to their own ``owner_user_id``.
+    """
+    stmt = select(automations)
+    count_stmt = select(func.count()).select_from(automations)
+    if not is_admin:
+        stmt = stmt.where(automations.c.owner_user_id == user_id)
+        count_stmt = count_stmt.where(
+            automations.c.owner_user_id == user_id
+        )
+    stmt = stmt.order_by(desc(automations.c.created_at)).limit(limit).offset(
+        offset
+    )
+    with get_engine().connect() as conn:
+        rows = conn.execute(stmt).all()
+        total = conn.execute(count_stmt).scalar() or 0
+    return [dict(r._mapping) for r in rows], int(total)
+
+
+def count_for_user(user_id: str) -> int:
+    """Count automations owned by ``user_id`` (no admin shortcut)."""
+    with get_engine().connect() as conn:
+        result = conn.execute(
+            select(func.count())
+            .select_from(automations)
+            .where(automations.c.owner_user_id == user_id)
+        ).scalar()
+    return int(result or 0)
+
+
 def update_automation(automation_id: str, values: dict[str, Any]) -> None:
     if not values:
         return
@@ -213,6 +251,31 @@ def list_templates(
     with get_engine().connect() as conn:
         rows = conn.execute(stmt).all()
     return [dict(r._mapping) for r in rows]
+
+
+def list_templates_paged(
+    *,
+    owner_user_id: str | None,
+    limit: int,
+    offset: int,
+) -> tuple[list[dict[str, Any]], int]:
+    """Paginated variant of list_templates. Returns (rows, total)."""
+    stmt = select(trigger_templates)
+    count_stmt = select(func.count()).select_from(trigger_templates)
+    if owner_user_id is not None:
+        stmt = stmt.where(trigger_templates.c.owner_user_id == owner_user_id)
+        count_stmt = count_stmt.where(
+            trigger_templates.c.owner_user_id == owner_user_id
+        )
+    stmt = (
+        stmt.order_by(desc(trigger_templates.c.created_at))
+        .limit(limit)
+        .offset(offset)
+    )
+    with get_engine().connect() as conn:
+        rows = conn.execute(stmt).all()
+        total = conn.execute(count_stmt).scalar() or 0
+    return [dict(r._mapping) for r in rows], int(total)
 
 
 def update_template(template_id: str, values: dict[str, Any]) -> None:
@@ -373,6 +436,8 @@ __all__ = [
     "list_automations",
     "update_automation",
     "delete_automation",
+    "list_for_user_paged",
+    "count_for_user",
     "list_due_automations",
     "list_active_automations",
     "replace_triggers",
@@ -383,6 +448,7 @@ __all__ = [
     "insert_template",
     "get_template",
     "list_templates",
+    "list_templates_paged",
     "update_template",
     "delete_template",
     "insert_notification",

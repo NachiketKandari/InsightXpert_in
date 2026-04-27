@@ -186,6 +186,69 @@ def test_create_rejects_multi_statement_sql(user_client_automations):
     assert r.status_code == 400
 
 
+def test_list_automations_legacy_shape(user_client_automations):
+    """Without limit/offset query params, list returns a bare array (FE compat)."""
+    client, _ = user_client_automations
+    client.post("/api/v1/automations", json=_create_payload(name="a"))
+    r = client.get("/api/v1/automations")
+    assert r.status_code == 200
+    assert isinstance(r.json(), list)
+
+
+def test_list_automations_paginated_envelope(user_client_automations):
+    client, _ = user_client_automations
+    for i in range(5):
+        r = client.post(
+            "/api/v1/automations", json=_create_payload(name=f"a{i}")
+        )
+        assert r.status_code == 200, r.text
+
+    r = client.get("/api/v1/automations?limit=2&offset=0")
+    assert r.status_code == 200
+    body = r.json()
+    assert isinstance(body, dict)
+    assert body["total"] == 5
+    assert body["limit"] == 2
+    assert body["offset"] == 0
+    assert len(body["items"]) == 2
+
+    r = client.get("/api/v1/automations?limit=2&offset=4")
+    body = r.json()
+    assert body["total"] == 5
+    assert len(body["items"]) == 1
+
+
+def test_list_templates_paginated_envelope(user_client_automations):
+    client, _ = user_client_automations
+    for i in range(3):
+        r = client.post(
+            "/api/v1/automations/templates",
+            json={
+                "name": f"t{i}",
+                "description": None,
+                "conditions": [
+                    {
+                        "type": "threshold",
+                        "operator": "gt",
+                        "value": 0,
+                        "column": "n",
+                    }
+                ],
+            },
+        )
+        assert r.status_code == 200, r.text
+
+    r = client.get("/api/v1/automations/templates")
+    assert r.status_code == 200
+    assert isinstance(r.json(), list)
+
+    r = client.get("/api/v1/automations/templates?limit=1&offset=0")
+    body = r.json()
+    assert isinstance(body, dict)
+    assert body["total"] == 3
+    assert len(body["items"]) == 1
+
+
 def test_create_rejects_bad_cron(user_client_automations):
     client, _ = user_client_automations
     r = client.post(
