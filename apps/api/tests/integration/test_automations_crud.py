@@ -8,7 +8,10 @@ def _create_payload(**overrides):
         "name": "tx check",
         "nl_query": "count rows",
         "sql_queries": ["SELECT COUNT(*) AS n FROM molecule"],
-        "db_id": "toxicology",
+        # ``transactions`` is seeded in the databases registry by alembic
+        # migration 20260422_0001, so it survives db_id validation in
+        # POST /api/v1/automations.
+        "db_id": "transactions",
         "schedule_preset": "daily",
         "trigger_conditions": [
             {"type": "threshold", "operator": "gt", "value": 0, "column": "n"}
@@ -184,6 +187,16 @@ def test_create_rejects_multi_statement_sql(user_client_automations):
         json=_create_payload(sql_queries=["SELECT 1; SELECT 2"]),
     )
     assert r.status_code == 400
+
+
+def test_create_with_unknown_db_id_returns_400(user_client_automations):
+    client, _ = user_client_automations
+    r = client.post(
+        "/api/v1/automations",
+        json=_create_payload(db_id="does-not-exist-xyz"),
+    )
+    assert r.status_code == 400
+    assert "db_id" in r.json().get("detail", "").lower()
 
 
 def test_list_automations_legacy_shape(user_client_automations):
