@@ -111,7 +111,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     api_dir = Path(__file__).resolve().parents[2]  # apps/api
     cfg = Config(str(api_dir / "alembic.ini"))
     cfg.set_main_option("script_location", str(api_dir / "alembic"))
-    cfg.set_main_option("sqlalchemy.url", settings.database_url)
+    # Escape `%` for configparser so URL-encoded passwords (e.g. `%40` for `@`) survive.
+    cfg.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))
     await asyncio.to_thread(command.upgrade, cfg, "head")
     await asyncio.to_thread(users_bootstrap.run)
 

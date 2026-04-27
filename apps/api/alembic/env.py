@@ -20,7 +20,11 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-config.set_main_option("sqlalchemy.url", get_settings().database_url)
+# configparser interprets `%` as interpolation; escape so URL-encoded chars
+# (e.g. `%40` for `@` in passwords) survive into the SQLAlchemy URL.
+config.set_main_option(
+    "sqlalchemy.url", get_settings().database_url.replace("%", "%%")
+)
 
 target_metadata = metadata
 

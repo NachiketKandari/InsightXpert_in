@@ -3,16 +3,22 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Anchor `.env.local` to the api package root so launches from any cwd
+# (repo root via turbo, apps/api via uv, etc.) all resolve the same file.
+_API_ROOT = Path(__file__).resolve().parents[2]
+_ENV_FILE = _API_ROOT / ".env.local"
 
 
 class Settings(BaseSettings):
     """Env-driven settings. Fields here are load-bearing; don't add unused config."""
 
     model_config = SettingsConfigDict(
-        env_file=".env.local",
+        env_file=str(_ENV_FILE),
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,

@@ -27,7 +27,7 @@ def upgrade() -> None:
         sa.Column("sql_queries_json", sa.Text(), nullable=False),
         sa.Column("db_id", sa.String(length=255), nullable=False),
         sa.Column("cron_expression", sa.String(length=100), nullable=False),
-        sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.text("1")),
+        sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.text("true")),
         sa.Column("owner_user_id", sa.String(length=36), nullable=False),
         sa.Column("source_conversation_id", sa.String(length=36), nullable=True),
         sa.Column("source_message_id", sa.String(length=36), nullable=True),
@@ -116,7 +116,7 @@ def upgrade() -> None:
         sa.Column("title", sa.String(length=200), nullable=False),
         sa.Column("message", sa.Text(), nullable=False),
         sa.Column("severity", sa.String(length=20), nullable=False),
-        sa.Column("is_read", sa.Boolean(), nullable=False, server_default=sa.text("0")),
+        sa.Column("is_read", sa.Boolean(), nullable=False, server_default=sa.text("false")),
         sa.Column("created_at", sa.Integer(), nullable=False),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(
