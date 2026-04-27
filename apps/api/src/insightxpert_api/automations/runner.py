@@ -385,8 +385,11 @@ async def _execute_one(
                         source_ref_id=persisted_run_id or automation_id,
                         db_id=auto_for_usage.get("db_id"),
                     )
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as exc:  # noqa: BLE001
+                log.warning(
+                    "automation.usage_emit_failed",
+                    extra={"automation_id": automation_id, "error": str(exc)},
+                )
 
 
 async def run_due_automations(

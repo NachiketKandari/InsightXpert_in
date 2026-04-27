@@ -23,12 +23,14 @@ test.describe("automations", () => {
     }) => {
       await page.goto("/automations");
       await page
-        .getByRole("button", { name: /new automation|create automation|create/i })
+        .getByRole("button", { name: /new automation/i })
         .first()
         .click();
-      const submit = page
-        .getByRole("button", { name: /^create$|^save$|create automation/i })
-        .last();
+      const dialog = page.getByRole("dialog");
+      await expect(dialog).toBeVisible();
+      const submit = dialog.getByRole("button", {
+        name: /create automation/i,
+      });
       await expect(submit).toBeDisabled();
     });
   });

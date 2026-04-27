@@ -141,15 +141,11 @@ class AutomationService:
             raise AutomationError("at least one SQL query is required")
 
         # Per-user cap (admins are NOT exempt — the cap is per-owner).
+        # Atomic count+insert in repository.insert_automation_with_cap to
+        # close the TOCTOU window between the count check and the insert.
         from ..config import get_settings
 
         cap = get_settings().automations_max_per_user
-        existing = repository.count_for_user(owner_user_id)
-        if existing >= cap:
-            raise AutomationLimitError(
-                f"Automation limit reached ({cap}). "
-                "Delete an existing one to create a new one."
-            )
 
         cron = req.resolved_cron()
 
@@ -159,7 +155,7 @@ class AutomationService:
             json.dumps(req.workflow_graph) if req.workflow_graph else None
         )
 
-        repository.insert_automation(
+        inserted = repository.insert_automation_with_cap(
             {
                 "id": auto_id,
                 "name": req.name,
@@ -177,8 +173,14 @@ class AutomationService:
                 "next_run_at": _next_run_at(cron, now),
                 "created_at": now,
                 "updated_at": now,
-            }
+            },
+            cap=cap,
         )
+        if not inserted:
+            raise AutomationLimitError(
+                f"Automation limit reached ({cap}). "
+                "Delete an existing one to create a new one."
+            )
         repository.replace_triggers(
             auto_id,
             [tc.model_dump() for tc in req.trigger_conditions],

@@ -13,7 +13,7 @@ import time
 import uuid
 from typing import Any
 
-from sqlalchemy import and_, delete, desc, func, insert, select, update
+from sqlalchemy import and_, delete, desc, func, insert, select, text, update
 
 from ..db.engine import get_engine
 from .table import (
@@ -41,6 +41,40 @@ def _now() -> int:
 def insert_automation(values: dict[str, Any]) -> None:
     with get_engine().begin() as conn:
         conn.execute(insert(automations).values(**values))
+
+
+def insert_automation_with_cap(values: dict[str, Any], *, cap: int) -> bool:
+    """Atomically insert an automation iff the owner has fewer than `cap`
+    automations. Returns True if inserted, False if the cap would be exceeded.
+
+    Postgres: serialized per-user via `pg_advisory_xact_lock` keyed by a hash
+    of the owner_user_id. Concurrent creates from the same user wait on the
+    lock, then re-read the count, so the cap is enforced exactly.
+
+    SQLite: `engine.begin()` opens a write transaction; concurrent writers
+    serialize on the database file. Test/dev only; no race in practice.
+    """
+    owner = values["owner_user_id"]
+    engine = get_engine()
+    with engine.begin() as conn:
+        if engine.dialect.name == "postgresql":
+            from hashlib import blake2b
+
+            digest = blake2b(owner.encode("utf-8"), digest_size=8).digest()
+            key = int.from_bytes(digest, "big", signed=True)
+            conn.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": key})
+        existing = (
+            conn.execute(
+                select(func.count())
+                .select_from(automations)
+                .where(automations.c.owner_user_id == owner)
+            ).scalar()
+            or 0
+        )
+        if int(existing) >= cap:
+            return False
+        conn.execute(insert(automations).values(**values))
+        return True
 
 
 def get_automation(automation_id: str) -> dict[str, Any] | None:
