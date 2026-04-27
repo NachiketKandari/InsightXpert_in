@@ -41,6 +41,10 @@ import type {
   SchedulePreset,
   TriggerCondition,
 } from "@/types/automation";
+import {
+  createAutomationSchema,
+  type CreateAutomationFieldErrors,
+} from "@/lib/automations/schemas";
 import { SchedulePicker } from "./schedule-picker";
 import { TriggerConditionBuilder } from "./trigger-condition-builder";
 import { TriggerTemplatePicker } from "./trigger-template-picker";
@@ -162,15 +166,25 @@ export function NewAutomationDialog({ open, onOpenChange }: NewAutomationDialogP
     return SCHEDULE_PRESETS[schedulePreset as keyof typeof SCHEDULE_PRESETS] ?? "";
   }, [schedulePreset, customCron]);
 
-  const canSubmit =
-    name.trim().length > 0 &&
-    sql.trim().length > 0 &&
-    dbId.length > 0 &&
-    cronExpression.length > 0 &&
-    !submitting;
+  // Zod-driven validation. The parsed result feeds both the disabled state on
+  // the submit button and the per-field error rendering below each input.
+  const validation = useMemo(() => {
+    return createAutomationSchema.safeParse({
+      name,
+      db_id: dbId,
+      cron_expression: cronExpression,
+      sql_queries: [sql],
+      trigger_conditions: conditions,
+    });
+  }, [name, dbId, cronExpression, sql, conditions]);
+
+  const fieldErrors: CreateAutomationFieldErrors = validation.success
+    ? {}
+    : validation.error.flatten().fieldErrors;
+  const canSubmit = validation.success && !submitting;
 
   const handleSubmit = async () => {
-    if (!canSubmit) return;
+    if (!validation.success || submitting) return;
     setSubmitting(true);
 
     const payload: CreateAutomationPayload = {
@@ -214,7 +228,11 @@ export function NewAutomationDialog({ open, onOpenChange }: NewAutomationDialogP
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Daily transaction fraud check"
+                aria-invalid={fieldErrors.name ? true : undefined}
               />
+              {fieldErrors.name?.[0] && name.length > 0 && (
+                <p className="text-[11px] text-destructive">{fieldErrors.name[0]}</p>
+              )}
             </div>
             <div className="space-y-2">
               <Label htmlFor="automation-description">Description (optional)</Label>
@@ -246,6 +264,9 @@ export function NewAutomationDialog({ open, onOpenChange }: NewAutomationDialogP
                   ))}
                 </SelectContent>
               </Select>
+              {fieldErrors.db_id?.[0] && (
+                <p className="text-[11px] text-destructive">{fieldErrors.db_id[0]}</p>
+              )}
             </div>
 
             {/* SQL */}
@@ -271,7 +292,13 @@ export function NewAutomationDialog({ open, onOpenChange }: NewAutomationDialogP
                 placeholder="SELECT COUNT(*) FROM transactions WHERE fraud_flag = 1"
                 rows={5}
                 className="font-mono text-xs resize-none"
+                aria-invalid={fieldErrors.sql_queries ? true : undefined}
               />
+              {fieldErrors.sql_queries?.[0] && sql.length > 0 && (
+                <p className="text-[11px] text-destructive">
+                  {fieldErrors.sql_queries[0]}
+                </p>
+              )}
               <div className="rounded-md border border-border/60 bg-muted/20 p-3">
                 <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">
                   Generate SQL with AI
@@ -293,6 +320,11 @@ export function NewAutomationDialog({ open, onOpenChange }: NewAutomationDialogP
                   setCustomCron(c);
                 }}
               />
+              {fieldErrors.cron_expression?.[0] && (
+                <p className="text-[11px] text-destructive">
+                  {fieldErrors.cron_expression[0]}
+                </p>
+              )}
             </div>
 
             {/* Trigger conditions */}
