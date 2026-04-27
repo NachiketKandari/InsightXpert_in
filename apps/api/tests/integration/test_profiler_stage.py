@@ -36,7 +36,7 @@ def _make_tiny_db(path: Path) -> None:
     con.close()
 
 
-def test_profiler_stage_runs_and_caches(tmp_path):
+def test_profiler_stage_runs_and_caches(tmp_path, fresh_db):
     bundled = tmp_path / "Databases"
     bundled.mkdir()
     _make_tiny_db(bundled / "demo.sqlite")
@@ -60,7 +60,7 @@ def test_profiler_stage_runs_and_caches(tmp_path):
     assert profile2.db_id == profile.db_id
 
 
-def test_profiler_stage_emits_profile_loaded(tmp_path):
+def test_profiler_stage_emits_profile_loaded(tmp_path, fresh_db):
     bundled = tmp_path / "Databases"
     bundled.mkdir()
     _make_tiny_db(bundled / "demo.sqlite")
@@ -94,7 +94,7 @@ def test_profiler_stage_emits_profile_loaded(tmp_path):
     not os.environ.get("GEMINI_API_KEY_REAL"),
     reason="needs a real Gemini key (set GEMINI_API_KEY_REAL to run)",
 )
-def test_profiler_stage_on_bundled_db(tmp_path):
+def test_profiler_stage_on_bundled_db(tmp_path, fresh_db):
     """Opt-in: profile the real bundled ``california_schools.sqlite``.
 
     Run locally with:
