@@ -8,10 +8,7 @@ def _create_payload(**overrides):
         "name": "tx check",
         "nl_query": "count rows",
         "sql_queries": ["SELECT COUNT(*) AS n FROM molecule"],
-        # ``transactions`` is seeded in the databases registry by alembic
-        # migration 20260422_0001, so it survives db_id validation in
-        # POST /api/v1/automations.
-        "db_id": "transactions",
+        "db_id": "toxicology",
         "schedule_preset": "daily",
         "trigger_conditions": [
             {"type": "threshold", "operator": "gt", "value": 0, "column": "n"}

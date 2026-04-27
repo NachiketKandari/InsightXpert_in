@@ -17,7 +17,7 @@ def _create(client, **overrides):
         "name": "tx",
         "nl_query": "q",
         "sql_queries": ["SELECT COUNT(*) AS n FROM molecule"],
-        "db_id": "transactions",
+        "db_id": "toxicology",
         "schedule_preset": "daily",
         "trigger_conditions": [
             {"type": "threshold", "operator": "gt", "value": 0, "column": "n"}
@@ -85,7 +85,7 @@ async def test_runner_records_error_on_bad_sql(fresh_db, automations_env):
         "description": None,
         "nl_query": "q",
         "sql_queries_json": json.dumps(["SELECT * FROM no_such_table"]),
-        "db_id": "transactions",
+        "db_id": "toxicology",
         "cron_expression": "* * * * *",
         "is_active": True,
         "owner_user_id": user.id,
@@ -135,7 +135,7 @@ async def test_batch_runs_parallel(user_client_automations, monkeypatch):
                 "name": f"p{i}",
                 "nl_query": "x",
                 "sql_queries": ["SELECT COUNT(*) AS n FROM molecule"],
-                "db_id": "transactions",
+                "db_id": "toxicology",
                 "schedule_preset": "daily",
                 "trigger_conditions": [],
             },
