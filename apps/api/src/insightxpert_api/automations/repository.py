@@ -99,6 +99,66 @@ def list_due_automations(now_ts: int) -> list[dict[str, Any]]:
     return [dict(r._mapping) for r in rows]
 
 
+def claim_due_automations(
+    *, now_ts: int, batch_size: int
+) -> list[dict[str, Any]]:
+    """Atomically claim up to ``batch_size`` due automations.
+
+    Advances ``next_run_at`` so concurrent callers (other replicas) cannot
+    pick up the same rows. Postgres path uses ``SELECT ... FOR UPDATE SKIP
+    LOCKED`` inside a single transaction, then bulk-updates ``next_run_at``
+    to ``now_ts + 1`` as a "checkout token" — the runner re-computes the
+    real next tick from the cron string after the run completes. SQLite
+    (single-process tests, local dev) falls back to read-then-update with
+    the same public contract.
+    """
+    engine = get_engine()
+    dialect = engine.dialect.name
+
+    with engine.begin() as conn:
+        if dialect == "postgresql":
+            stmt = (
+                select(automations)
+                .where(
+                    and_(
+                        automations.c.is_active.is_(True),
+                        (automations.c.next_run_at.is_(None))
+                        | (automations.c.next_run_at <= now_ts),
+                    )
+                )
+                .order_by(automations.c.next_run_at.asc().nulls_first())
+                .limit(batch_size)
+                .with_for_update(skip_locked=True)
+            )
+        else:
+            stmt = (
+                select(automations)
+                .where(
+                    and_(
+                        automations.c.is_active.is_(True),
+                        (automations.c.next_run_at.is_(None))
+                        | (automations.c.next_run_at <= now_ts),
+                    )
+                )
+                .order_by(automations.c.next_run_at.asc())
+                .limit(batch_size)
+            )
+        rows = conn.execute(stmt).all()
+        if not rows:
+            return []
+        claimed_ids = [r._mapping["id"] for r in rows]
+        # Park next_run_at past the due predicate so a concurrent SELECT on
+        # another replica won't see these rows. The runner's
+        # mark_run_completed will re-set next_run_at to the true cron tick
+        # post-execution.
+        conn.execute(
+            update(automations)
+            .where(automations.c.id.in_(claimed_ids))
+            .values(next_run_at=now_ts + 1)
+        )
+        return [dict(r._mapping) for r in rows]
+
+
 def list_active_automations() -> list[dict[str, Any]]:
     with get_engine().connect() as conn:
         rows = conn.execute(
@@ -374,6 +434,7 @@ __all__ = [
     "update_automation",
     "delete_automation",
     "list_due_automations",
+    "claim_due_automations",
     "list_active_automations",
     "replace_triggers",
     "list_triggers",
