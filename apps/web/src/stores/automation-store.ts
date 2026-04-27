@@ -5,8 +5,9 @@
 // dialog on that page.
 
 import { create } from "zustand";
+import { toast } from "sonner";
 import {
-  createAutomation as apiCreateAutomation,
+  createAutomationResult as apiCreateAutomationResult,
   deleteAutomation as apiDeleteAutomation,
   fetchAutomations as apiFetchAutomations,
   fetchRunHistory as apiFetchRunHistory,
@@ -88,11 +89,27 @@ export const useAutomationStore = create<AutomationState>((set, get) => ({
   },
 
   createAutomation: async (payload) => {
-    const data = await apiCreateAutomation(payload);
-    if (data) {
-      set((s) => ({ automations: [data, ...s.automations] }));
+    const result = await apiCreateAutomationResult(payload);
+    if (result.ok) {
+      set((s) => ({ automations: [result.data, ...s.automations] }));
+      return result.data;
     }
-    return data;
+    // Surface specific server messages here so every caller (dialog, deep-link
+    // flows, future programmatic creators) gets the right toast without
+    // duplicating the status-code mapping.
+    if (result.status === 429) {
+      toast.error("Automation limit reached", {
+        description: result.message,
+      });
+    } else if (result.status === 400) {
+      // 400 carries a server-authored detail — surface verbatim.
+      toast.error(result.message);
+    } else if (result.status === 0) {
+      toast.error("Network error", { description: result.message });
+    } else {
+      toast.error("Failed to create automation", { description: result.message });
+    }
+    return null;
   },
 
   updateAutomation: async (id, payload) => {

@@ -203,9 +203,9 @@ export function NewAutomationDialog({ open, onOpenChange }: NewAutomationDialogP
     if (created) {
       toast.success("Automation created");
       onOpenChange(false);
-    } else {
-      toast.error("Failed to create automation");
     }
+    // Failure toasts are surfaced by the store (status-code aware) so we
+    // don't double-toast or shadow the server-supplied message here.
   };
 
   return (
