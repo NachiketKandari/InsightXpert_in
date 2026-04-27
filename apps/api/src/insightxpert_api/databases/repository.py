@@ -9,7 +9,8 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from sqlalchemy import and_, delete, insert, or_, select, update
+from sqlalchemy import and_, insert, or_, select, update
+from sqlalchemy import delete as sa_delete
 
 from ..db.engine import get_engine
 from .table import database_shares, databases_table
@@ -28,6 +29,9 @@ def insert_db(
     owner_user_id: str | None,
     visibility: str,
     size_bytes: int,
+    *,
+    kind: str = "sqlite_file",
+    connection_config_encrypted: str | None = None,
 ) -> None:
     with get_engine().begin() as conn:
         conn.execute(
@@ -37,27 +41,74 @@ def insert_db(
                 visibility=visibility,
                 size_bytes=size_bytes,
                 created_at=int(time.time()),
+                kind=kind,
+                connection_config_encrypted=connection_config_encrypted,
             )
         )
 
 
-def upsert_private(db_id: str, owner_user_id: str, size_bytes: int) -> None:
-    """Insert a row if missing, otherwise update owner + size.
+def upsert_private(
+    db_id: str,
+    owner_user_id: str,
+    size_bytes: int,
+    *,
+    kind: str = "sqlite_file",
+    connection_config_encrypted: str | None = None,
+) -> None:
+    """Insert a row if missing, otherwise update owner + size (+kind/config).
 
-    Used by the upload route so re-uploading an existing db_id re-anchors
-    ownership without duplicating rows. Visibility defaults to 'private'
-    on first insert and is preserved on subsequent upserts.
+    Used by the upload route (sqlite_file) and by the BYO-DB connections route
+    (postgres/libsql) so re-saving an existing db_id re-anchors ownership
+    without duplicating rows. Visibility defaults to 'private' on first
+    insert and is preserved on subsequent upserts.
     """
     existing = get(db_id)
     if existing is None:
-        insert_db(db_id, owner_user_id, "private", size_bytes)
+        insert_db(
+            db_id,
+            owner_user_id,
+            "private",
+            size_bytes,
+            kind=kind,
+            connection_config_encrypted=connection_config_encrypted,
+        )
         return
+    values: dict[str, Any] = {
+        "owner_user_id": owner_user_id,
+        "size_bytes": size_bytes,
+        "kind": kind,
+    }
+    if connection_config_encrypted is not None:
+        values["connection_config_encrypted"] = connection_config_encrypted
     with get_engine().begin() as conn:
         conn.execute(
             update(databases_table)
             .where(databases_table.c.db_id == db_id)
-            .values(owner_user_id=owner_user_id, size_bytes=size_bytes)
+            .values(**values)
         )
+
+
+def list_owned(owner_user_id: str) -> list[dict[str, Any]]:
+    """All databases registered to this owner (any visibility)."""
+    with get_engine().connect() as conn:
+        rows = conn.execute(
+            select(databases_table).where(
+                databases_table.c.owner_user_id == owner_user_id
+            )
+        ).all()
+    return [dict(r._mapping) for r in rows]
+
+
+def delete(db_id: str) -> bool:
+    """Delete a row and any rows in database_shares. Returns True if deleted."""
+    with get_engine().begin() as conn:
+        conn.execute(
+            sa_delete(database_shares).where(database_shares.c.db_id == db_id)
+        )
+        result = conn.execute(
+            sa_delete(databases_table).where(databases_table.c.db_id == db_id)
+        )
+        return bool(result.rowcount)
 
 
 def list_visible(user_id: str, is_admin: bool) -> list[dict[str, Any]]:
@@ -177,7 +228,7 @@ def set_visibility(
             .values(visibility=visibility)
         )
         conn.execute(
-            delete(database_shares).where(database_shares.c.db_id == db_id)
+            sa_delete(database_shares).where(database_shares.c.db_id == db_id)
         )
         if visibility == "shared" and shared_with:
             conn.execute(

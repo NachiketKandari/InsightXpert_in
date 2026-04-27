@@ -24,6 +24,7 @@ from .routes import (
     automations as automations_routes,
     chat,
     client_config,
+    connections,
     conversations,
     databases,
     feedback,
@@ -196,6 +197,7 @@ def create_app() -> FastAPI:
     app.include_router(auth.router)
     app.include_router(chat.router)
     app.include_router(databases.router)
+    app.include_router(connections.router)
     app.include_router(sql.router)
     app.include_router(conversations.router)
     app.include_router(feedback.router)

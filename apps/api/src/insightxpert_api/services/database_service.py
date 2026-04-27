@@ -18,6 +18,7 @@ from __future__ import annotations
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from ..logging import get_logger
 from ..storage import ObjectStore
@@ -111,6 +112,49 @@ class DatabaseService:
             if ref.db_id == db_id:
                 return ref
         return None
+
+    def resolve_connector(self, session_id: str, db_id: str) -> Any:
+        """Return a ready-to-use connector for ``db_id``.
+
+        Consults the ``databases`` registry for ``kind`` first:
+
+            * ``sqlite_file`` (default for bundled / uploaded) → falls back to
+              filesystem resolution via :meth:`resolve` and returns a
+              :class:`DatabaseConnector`.
+            * ``postgres`` → decrypts ``connection_config_encrypted``, builds a
+              :class:`PostgresConnection`, returns a
+              :class:`PostgresConnector`.
+            * ``libsql`` / ``sqlite_external`` → reserved for the Turso plan;
+              raises ``NotImplementedError`` at dispatch time.
+
+        Returns ``None`` if ``db_id`` cannot be resolved at all.
+        """
+        from ..databases import repository as databases_repo
+        from ..db.connector import resolve_connector as _resolve
+
+        row = databases_repo.get(db_id)
+        kind = (row or {}).get("kind") or "sqlite_file"
+
+        if kind == "sqlite_file":
+            ref = self.resolve(session_id, db_id)
+            if ref is None:
+                return None
+            return _resolve(kind="sqlite_file", db_path=ref.local_path)
+
+        if kind == "postgres":
+            from ..connections.encryption import decrypt
+            from ..connections.types import PostgresConnection
+            import json as _json
+
+            encrypted = (row or {}).get("connection_config_encrypted")
+            if not encrypted:
+                return None
+            cfg = PostgresConnection(**_json.loads(decrypt(encrypted)))
+            return _resolve(kind="postgres", config=cfg)
+
+        # libsql / sqlite_external — surface the NotImplemented from the
+        # central dispatch so the error message is consistent.
+        return _resolve(kind=kind)
 
     # ---- Upload -----------------------------------------------------------
 

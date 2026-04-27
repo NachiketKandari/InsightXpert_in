@@ -131,6 +131,12 @@ class Settings(BaseSettings):
     # prod if your privacy posture allows.
     sentry_send_default_pii: bool = False
 
+    # --- connection credential encryption (BYO external DB) --------------
+    # Fernet symmetric key (32-byte url-safe base64). Only required when the
+    # /api/v1/connections routes are exercised (saving an external DB conn).
+    # Generate: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'
+    credential_encryption_key: str | None = None
+
     @model_validator(mode="after")
     def _check_automations(self) -> Settings:
         if (
