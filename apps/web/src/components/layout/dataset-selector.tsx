@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { ChevronDown, Database, Check, Loader2, Plus, FileUp } from "lucide-react";
+import { ChevronDown, Database, Check, Loader2, Plus, FileUp, Plug } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { CsvUploadDialog } from "@/components/dataset/csv-upload-dialog";
 import { SqliteUploadDialog } from "@/components/dataset/sqlite-upload-dialog";
+import { ConnectDbDialog } from "@/components/dataset/connect-db-dialog";
 import { apiCall } from "@/lib/api";
 import { useChatStore } from "@/stores/chat-store";
 import type { DatabaseListItem } from "@/types/database";
@@ -33,6 +34,7 @@ export function DatasetSelector() {
   const [loading, setLoading] = useState(true);
   const [csvUploadOpen, setCsvUploadOpen] = useState(false);
   const [sqliteUploadOpen, setSqliteUploadOpen] = useState(false);
+  const [connectDbOpen, setConnectDbOpen] = useState(false);
 
   const selectedDbId = useChatStore((s) => s.selectedDbId);
   const setSelectedDbId = useChatStore((s) => s.setSelectedDbId);
@@ -133,6 +135,13 @@ export function DatasetSelector() {
             <FileUp className="size-3.5" />
             <span className="text-sm font-medium">Upload SQLite</span>
           </DropdownMenuItem>
+          <DropdownMenuItem
+            onClick={() => setConnectDbOpen(true)}
+            className="gap-2 cursor-pointer text-primary dark:text-cyan-accent"
+          >
+            <Plug className="size-3.5" />
+            <span className="text-sm font-medium">Connect a database</span>
+          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
 
@@ -144,6 +153,10 @@ export function DatasetSelector() {
       <SqliteUploadDialog
         open={sqliteUploadOpen}
         onOpenChange={setSqliteUploadOpen}
+      />
+      <ConnectDbDialog
+        open={connectDbOpen}
+        onOpenChange={setConnectDbOpen}
       />
     </>
   );
