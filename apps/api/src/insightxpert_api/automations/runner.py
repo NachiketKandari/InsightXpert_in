@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+from dataclasses import dataclass
 from typing import Any
 
 from fastapi import FastAPI
@@ -39,6 +40,22 @@ _locks: dict[str, asyncio.Lock] = {}
 # pressure sane — a single tick fanning out to 100 automations must not
 # swamp the process. Tunable via follow-up config.
 _BATCH_CONCURRENCY = 8
+
+
+@dataclass(frozen=True)
+class LlmUsage:
+    """Captured LLM token snapshot for deferred recording.
+
+    The runner captures this at LLM-call time but writes the metrics row
+    only after the automation_runs row is persisted, so ``source_ref_id``
+    can point at the persisted run id (a stable foreign-key-ish handle)
+    instead of guessing via a (user_id, created_at) window join.
+    """
+
+    input_tokens: int
+    output_tokens: int
+    model: str
+    feature: str  # "automation.run" today; future: per-LLM-call sources
 
 
 def _lock_for(automation_id: str) -> asyncio.Lock:
@@ -84,6 +101,11 @@ async def _execute_one(
             getattr(llm_for_run, "output_tokens_used", 0) or 0
         )
         auto_for_usage: dict[str, Any] | None = None
+        # Persisted automation_runs.id, set the moment a run row is inserted.
+        # The deferred LLM-usage write below uses this as ``source_ref_id`` so
+        # the metric is joinable to a real persisted row, not a brittle
+        # (user_id, created_at) window.
+        persisted_run_id: str | None = None
 
         try:
             auto = repository.get_automation(automation_id)
@@ -111,11 +133,12 @@ async def _execute_one(
             except json.JSONDecodeError:
                 sql_queries = []
             if not sql_queries:
-                repository.insert_run({
+                _err_run = repository.insert_run({
                     "automation_id": automation_id,
                     "status": "error",
                     "error_message": "no sql queries configured",
                 })
+                persisted_run_id = _err_run["id"]
                 AutomationService().mark_run_completed(automation_id, int(time.time()))
                 log.error(
                     "automation.run_error",
@@ -145,11 +168,12 @@ async def _execute_one(
                 db_path = _resolve_db_path(db_svc, auto["db_id"])
 
             if db_path is None:
-                repository.insert_run({
+                _err_run = repository.insert_run({
                     "automation_id": automation_id,
                     "status": "error",
                     "error_message": f"db not found: {auto['db_id']}",
                 })
+                persisted_run_id = _err_run["id"]
                 AutomationService().mark_run_completed(automation_id, int(time.time()))
                 log.error(
                     "automation.run_error",
@@ -171,12 +195,13 @@ async def _execute_one(
                     )
             except Exception as exc:  # noqa: BLE001
                 execution_ms = int((time.perf_counter() - start) * 1000)
-                repository.insert_run({
+                _err_run = repository.insert_run({
                     "automation_id": automation_id,
                     "status": "error",
                     "error_message": str(exc),
                     "execution_time_ms": execution_ms,
                 })
+                persisted_run_id = _err_run["id"]
                 AutomationService().mark_run_completed(automation_id, int(time.time()))
                 log.error(
                     "automation.run_error",
@@ -236,6 +261,7 @@ async def _execute_one(
                     "row_count": row_count,
                     "execution_time_ms": execution_ms,
                 })
+                persisted_run_id = run["id"]
                 AutomationService().mark_run_completed(automation_id, int(time.time()))
                 log.info(
                     "automation.run_completed",
@@ -275,6 +301,7 @@ async def _execute_one(
                 "execution_time_ms": execution_ms,
                 "triggers_fired_json": json.dumps(trigger_results),
             })
+            persisted_run_id = run["id"]
             AutomationService().mark_run_completed(automation_id, int(time.time()))
 
             triggers_fired_count = sum(1 for t in trigger_results if t.get("fired"))
@@ -310,11 +337,17 @@ async def _execute_one(
                 execution_time_ms=execution_ms,
             )
         finally:
-            # Phase 1.2 — emit a usage row when LLM tokens were consumed
-            # during this run. Today the inline run path is pre-generated SQL
-            # (no LLM call), but /generate-sql invocations and any future
-            # in-run regeneration flow through here so the seam is in place.
+            # Phase 1.2 / Track 1.3 — emit a usage row when LLM tokens were
+            # consumed during this run. We capture the delta into a local
+            # ``LlmUsage`` snapshot, then write the metrics row exactly once
+            # using the persisted automation_runs.id as ``source_ref_id``.
+            # That replaces the previous (user_id, created_at) window-join
+            # trick and gives us a stable join key for cost analytics.
             try:
+                from ..config import get_settings
+                from ..metrics.llm_usage import record_llm_usage
+
+                _settings = get_settings()
                 tokens_in_delta = (
                     int(getattr(llm_for_run, "input_tokens_used", 0) or 0)
                     - tokens_before_in
@@ -323,24 +356,33 @@ async def _execute_one(
                     int(getattr(llm_for_run, "output_tokens_used", 0) or 0)
                     - tokens_before_out
                 )
+                usage: LlmUsage | None = None
                 if (
                     (tokens_in_delta > 0 or tokens_out_delta > 0)
                     and auto_for_usage is not None
                 ):
-                    from ..config import get_settings
-                    from ..metrics.llm_usage import record_llm_usage
-
-                    _settings = get_settings()
-                    record_llm_usage(
-                        source="automation",
-                        provider="gemini",
+                    usage = LlmUsage(
+                        input_tokens=tokens_in_delta,
+                        output_tokens=tokens_out_delta,
                         model=getattr(
                             llm_for_run, "model", _settings.gemini_chat_model
                         ),
-                        input_tokens=tokens_in_delta,
-                        output_tokens=tokens_out_delta,
+                        feature="automation.run",
+                    )
+
+                if usage is not None and auto_for_usage is not None:
+                    # source_ref_id prefers the persisted run id; falls back
+                    # to automation_id only when no run row was written
+                    # (extremely rare — only if persistence raised before
+                    # any insert_run call).
+                    record_llm_usage(
+                        source="automation",
+                        provider="gemini",
+                        model=usage.model,
+                        input_tokens=usage.input_tokens,
+                        output_tokens=usage.output_tokens,
                         user_id=str(auto_for_usage.get("owner_user_id") or ""),
-                        source_ref_id=automation_id,
+                        source_ref_id=persisted_run_id or automation_id,
                         db_id=auto_for_usage.get("db_id"),
                     )
             except Exception:  # noqa: BLE001
