@@ -10,7 +10,6 @@ import {
   createAutomationResult as apiCreateAutomationResult,
   deleteAutomation as apiDeleteAutomation,
   fetchAutomations as apiFetchAutomations,
-  fetchRunHistory as apiFetchRunHistory,
   runAutomationNow as apiRunNow,
   toggleAutomation as apiToggleAutomation,
   updateAutomation as apiUpdateAutomation,
@@ -57,7 +56,6 @@ interface AutomationState {
   deleteAutomation: (id: string) => Promise<boolean>;
   toggleAutomation: (id: string) => Promise<Automation | null>;
   runNow: (id: string) => Promise<{ status: string; message: string; run: AutomationRun | null } | null>;
-  fetchRunHistory: (id: string, limit?: number) => Promise<AutomationRun[]>;
 
   // Templates
   fetchTriggerTemplates: () => Promise<void>;
@@ -144,10 +142,6 @@ export const useAutomationStore = create<AutomationState>((set, get) => ({
 
   runNow: async (id) => {
     return await apiRunNow(id);
-  },
-
-  fetchRunHistory: async (id, limit = 20) => {
-    return (await apiFetchRunHistory(id, limit)) ?? [];
   },
 
   fetchTriggerTemplates: async () => {
