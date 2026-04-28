@@ -55,6 +55,7 @@ from ..services.conversation_store import ConversationStore, get_conversation_st
 from ..services.database_service import DatabaseService
 from ..services.profile_service import ProfileService
 from ..jobs.sample_questions_job import enqueue_sample_questions_job
+from ..sample_questions import repository as sq_repo
 from ..sse.chunks import ChunkType, ProfileCostEstimatePayload
 from ..sse.emitter import EventEmitter
 from ..storage import build_store
@@ -426,7 +427,10 @@ async def get_profile(
     profile = prof.load(cu.id, db_id)
     if profile is None:
         raise HTTPException(status_code=404, detail="not_found")
-    return profile.model_dump(mode="json")
+    out = profile.model_dump(mode="json")
+    sq = sq_repo.get_sample_questions(db_id)
+    out["sample_questions"] = sq.model_dump(mode="json") if sq else None
+    return out
 
 
 class ProfileRunRequest(BaseModel):
@@ -654,6 +658,27 @@ async def set_db_visibility(
     except visibility_service.InvalidVisibilityError:
         raise HTTPException(status_code=400, detail="invalid_visibility") from None
     return {"status": "ok"}
+
+
+@router.post("/{db_id}/sample-questions/regenerate", status_code=202)
+async def regenerate_sample_questions(
+    db_id: str,
+    cu: CurrentUser = Depends(get_current_user),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    _validate_db_id(db_id)
+    # fire-and-forget; idempotent inside the job
+    from ..llm.gemini import GeminiLLM
+    llm = GeminiLLM(api_key=settings.gemini_api_key, model=settings.gemini_chat_model) \
+        if settings.gemini_api_key else None
+    asyncio.create_task(
+        enqueue_sample_questions_job(
+            db_id=db_id, llm=llm, model_name=settings.gemini_chat_model,
+            emitter=None, session_id=cu.id,
+        )
+    )
+    existing = sq_repo.get_sample_questions(db_id)
+    return {"status": existing.status.value if existing else "pending"}
 
 
 # Fallback when trailing slash variant is hit (FastAPI defaults redirect; this keeps
