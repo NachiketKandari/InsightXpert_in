@@ -23,5 +23,6 @@ users = Table(
     Column("created_at", Integer, nullable=False),
     Column("updated_at", Integer, nullable=False),
     Column("last_seen_at", Integer, nullable=True),
+    Column("sharing_disabled", Integer, nullable=False, server_default="0"),
     CheckConstraint("role IN ('admin','user')", name="users_role_check"),
 )
