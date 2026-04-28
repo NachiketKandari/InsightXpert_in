@@ -66,6 +66,9 @@ class ChunkType(str, Enum):
     profile_done = "profile_done"
     profile_error = "profile_error"
 
+    # --- Sample-questions ------------------------------------------------
+    sample_questions_ready = "sample_questions.ready"
+
     # --- Tier-4: orchestration transparency ------------------------------
     stats_context = "stats_context"
     orchestrator_plan = "orchestrator_plan"
@@ -349,6 +352,11 @@ class ClarificationPayload(BaseModel):
     skip_allowed: bool = True
 
 
+class SampleQuestionsReadyPayload(BaseModel):
+    db_id: str
+    sample_questions: "SampleQuestions"  # forward-ref to sample_questions.types
+
+
 # ---------------------------------------------------------------------------
 # Envelope
 # ---------------------------------------------------------------------------
@@ -412,3 +420,7 @@ class ChatChunk(BaseModel):
         """
         payload = self.model_dump(mode="json", by_alias=True)
         return json.dumps(payload)
+
+
+from ..sample_questions.types import SampleQuestions  # noqa: E402
+SampleQuestionsReadyPayload.model_rebuild()
