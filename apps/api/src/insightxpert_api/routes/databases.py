@@ -54,6 +54,7 @@ from ..profiling.runner import (
 from ..services.conversation_store import ConversationStore, get_conversation_store
 from ..services.database_service import DatabaseService
 from ..services.profile_service import ProfileService
+from ..jobs.sample_questions_job import enqueue_sample_questions_job
 from ..sse.chunks import ChunkType, ProfileCostEstimatePayload
 from ..sse.emitter import EventEmitter
 from ..storage import build_store
@@ -476,6 +477,13 @@ async def _run_profile_v2(
         )
         if profile is not None:
             prof_svc.save(session_id, db_id, profile)
+            # NEW: kick off sample-questions generation asynchronously
+            asyncio.create_task(
+                enqueue_sample_questions_job(
+                    db_id=db_id, llm=llm, model_name=settings.gemini_chat_model,
+                    emitter=emitter, session_id=session_id,
+                )
+            )
     finally:
         await emitter.close()
 
