@@ -1,0 +1,8 @@
+[
+  {"db_id":"california_schools","category":"Descriptive","features":{"has_temporal":false,"has_categorical":true,"has_numeric_metric":true,"has_geo":true,"has_relations":true},"question":"How many schools are charter schools?"},
+  {"db_id":"california_schools","category":"Comparative","features":{"has_temporal":false,"has_categorical":true,"has_numeric_metric":true,"has_geo":true,"has_relations":true},"question":"Which county has the highest average SAT math score among schools with more than 500 test-takers?"},
+  {"db_id":"financial","category":"Temporal","features":{"has_temporal":true,"has_categorical":true,"has_numeric_metric":true,"has_geo":false,"has_relations":true},"question":"How has the average loan amount changed year over year?"},
+  {"db_id":"formula_1","category":"Comparative","features":{"has_temporal":true,"has_categorical":true,"has_numeric_metric":true,"has_geo":false,"has_relations":true},"question":"Which constructor has the highest average finishing position across all races?"},
+  {"db_id":"student_club","category":"Segmentation","features":{"has_temporal":false,"has_categorical":true,"has_numeric_metric":false,"has_geo":false,"has_relations":true},"question":"What is the breakdown of members by major?"},
+  {"db_id":"superhero","category":"Correlation","features":{"has_temporal":false,"has_categorical":true,"has_numeric_metric":true,"has_geo":false,"has_relations":true},"question":"Is there a relationship between superhero alignment and average power score?"}
+]
