@@ -13,7 +13,7 @@ from ..sample_questions.types import SampleQuestionsStatus
 log = get_logger("jobs.sample_questions")
 
 
-async def enqueue_sample_questions_job(
+async def run_sample_questions_job(
     *, db_id: str, llm, model_name: str | None, emitter, profile_kind: str = "base",
     session_id: str = "system",
 ) -> None:

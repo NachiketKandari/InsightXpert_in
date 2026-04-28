@@ -21,15 +21,19 @@ def _parse_sse_stream(text: str) -> list[dict]:
 
 
 @pytest.mark.asyncio
+# This test monkeypatches run_sample_questions_job before the route runs,
+# so it verifies that the route schedules the call. It does not exercise the
+# asyncio.create_task GC pitfall — see _spawn_background_task in databases.py for
+# the production-side mitigation.
 async def test_profile_completion_triggers_sample_questions(authed_client: TestClient, monkeypatch):
-    """After a profile run completes, enqueue_sample_questions_job is scheduled."""
+    """After a profile run completes, run_sample_questions_job is scheduled."""
     called = {"n": 0}
 
     async def fake_enqueue(**kwargs):
         called["n"] += 1
 
     monkeypatch.setattr(
-        "insightxpert_api.routes.databases.enqueue_sample_questions_job",
+        "insightxpert_api.routes.databases.run_sample_questions_job",
         fake_enqueue,
     )
 

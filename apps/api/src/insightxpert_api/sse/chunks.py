@@ -395,6 +395,8 @@ ChunkPayload = Union[
     EnrichmentTracePayload,
     InsightPayload,
     ClarificationPayload,
+    # Sample-questions
+    SampleQuestionsReadyPayload,
 ]
 
 

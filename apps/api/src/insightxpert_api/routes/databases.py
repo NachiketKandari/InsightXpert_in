@@ -23,7 +23,7 @@ import sqlite3
 import tempfile
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Coroutine
 
 from fastapi import (
     APIRouter,
@@ -54,7 +54,7 @@ from ..profiling.runner import (
 from ..services.conversation_store import ConversationStore, get_conversation_store
 from ..services.database_service import DatabaseService
 from ..services.profile_service import ProfileService
-from ..jobs.sample_questions_job import enqueue_sample_questions_job
+from ..jobs.sample_questions_job import run_sample_questions_job
 from ..sample_questions import repository as sq_repo
 from ..sse.chunks import ChunkType, ProfileCostEstimatePayload
 from ..sse.emitter import EventEmitter
@@ -62,6 +62,17 @@ from ..storage import build_store
 
 router = APIRouter(prefix="/api/v1/databases", tags=["databases"])
 log = get_logger("databases")
+
+# Strong refs for fire-and-forget tasks — prevents CPython GC from
+# collecting them mid-flight (asyncio docs warn about this).
+_background_tasks: set[asyncio.Task[Any]] = set()
+
+
+def _spawn_background_task(coro: Coroutine[Any, Any, Any]) -> asyncio.Task[Any]:
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    return task
 
 _SQLITE_MAGIC = b"SQLite format 3\x00"
 _DB_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_\-]{0,62}$")
@@ -482,8 +493,8 @@ async def _run_profile_v2(
         if profile is not None:
             prof_svc.save(session_id, db_id, profile)
             # NEW: kick off sample-questions generation asynchronously
-            asyncio.create_task(
-                enqueue_sample_questions_job(
+            _spawn_background_task(
+                run_sample_questions_job(
                     db_id=db_id, llm=llm, model_name=settings.gemini_chat_model,
                     emitter=emitter, session_id=session_id,
                 )
@@ -667,12 +678,15 @@ async def regenerate_sample_questions(
     settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
     _validate_db_id(db_id)
+    prof = _prof_svc(settings)
+    if prof.load(cu.id, db_id) is None:
+        raise HTTPException(status_code=404, detail="profile_not_found")
     # fire-and-forget; idempotent inside the job
     from ..llm.gemini import GeminiLLM
     llm = GeminiLLM(api_key=settings.gemini_api_key, model=settings.gemini_chat_model) \
         if settings.gemini_api_key else None
-    asyncio.create_task(
-        enqueue_sample_questions_job(
+    _spawn_background_task(
+        run_sample_questions_job(
             db_id=db_id, llm=llm, model_name=settings.gemini_chat_model,
             emitter=None, session_id=cu.id,
         )

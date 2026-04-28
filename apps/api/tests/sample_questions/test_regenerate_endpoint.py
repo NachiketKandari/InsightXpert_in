@@ -29,13 +29,19 @@ async def test_regenerate_returns_202_and_enqueues(seeded_profile_authed, monkey
         called["n"] += 1
 
     monkeypatch.setattr(
-        "insightxpert_api.routes.databases.enqueue_sample_questions_job", fake,
+        "insightxpert_api.routes.databases.run_sample_questions_job", fake,
     )
     resp = seeded_profile_authed.post("/api/v1/databases/test-db/sample-questions/regenerate")
     assert resp.status_code == 202
     body = resp.json()
     assert body["status"] in {"pending", "ok", "fallback", "failed"}
     assert called["n"] == 1
+
+
+@pytest.mark.asyncio
+async def test_regenerate_returns_404_when_profile_missing(authed_client):
+    resp = authed_client.post("/api/v1/databases/nonexistent-xyz/sample-questions/regenerate")
+    assert resp.status_code == 404
 
 
 def test_get_profile_includes_sample_questions_field(seeded_profile_authed):

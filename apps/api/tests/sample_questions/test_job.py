@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import AsyncMock, patch
 
-from insightxpert_api.jobs.sample_questions_job import enqueue_sample_questions_job
+from insightxpert_api.jobs.sample_questions_job import run_sample_questions_job
 from insightxpert_api.sample_questions import repository as sq_repo
 from insightxpert_api.profiling import repository as profiles_repo
 
@@ -21,7 +21,7 @@ async def test_enqueue_skips_when_already_pending(seeded):
         "insightxpert_api.jobs.sample_questions_job.run_sample_questions_for_db",
         AsyncMock(),
     ) as run:
-        await enqueue_sample_questions_job(db_id="t", llm=None, model_name=None, emitter=None)
+        await run_sample_questions_job(db_id="t", llm=None, model_name=None, emitter=None)
         run.assert_not_called()
 
 
@@ -31,5 +31,5 @@ async def test_enqueue_runs_when_not_pending(seeded):
         "insightxpert_api.jobs.sample_questions_job.run_sample_questions_for_db",
         AsyncMock(),
     ) as run:
-        await enqueue_sample_questions_job(db_id="t", llm=None, model_name=None, emitter=None)
+        await run_sample_questions_job(db_id="t", llm=None, model_name=None, emitter=None)
         run.assert_called_once()

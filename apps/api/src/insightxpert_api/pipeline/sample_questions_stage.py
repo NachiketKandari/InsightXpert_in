@@ -5,6 +5,8 @@ SSE event so live UIs update without a poll.
 """
 from __future__ import annotations
 
+from typing import Protocol
+
 from ..logging import get_logger
 from ..sample_questions import repository as sq_repo
 from ..sample_questions.generator import generate_sample_questions
@@ -16,7 +18,11 @@ from ..sse.emitter import EventEmitter
 log = get_logger("pipeline.sample_questions_stage")
 
 
-def _adapt_llm(llm):
+class _SinglePromptLLM(Protocol):
+    async def async_generate(self, prompt: str) -> str: ...
+
+
+def _adapt_llm(llm: _SinglePromptLLM | None):
     """Adapt GeminiLLM (single-prompt) to the (system, user) interface generator expects."""
     if llm is None:
         return None
