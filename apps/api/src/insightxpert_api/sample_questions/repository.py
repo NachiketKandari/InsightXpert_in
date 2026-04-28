@@ -36,7 +36,7 @@ def set_sample_questions(
 ) -> None:
     payload = sq.model_dump(mode="json")
     with get_engine().begin() as conn:
-        conn.execute(
+        result = conn.execute(
             update(database_profiles)
             .where(
                 database_profiles.c.db_id == db_id,
@@ -44,6 +44,11 @@ def set_sample_questions(
             )
             .values(sample_questions=payload)
         )
+        if result.rowcount == 0:
+            raise ValueError(
+                f"sample_questions update affected 0 rows; "
+                f"profile (db_id={db_id!r}, profile_kind={profile_kind!r}) does not exist"
+            )
 
 
 def set_pending(db_id: str, profile_kind: str = "base") -> None:

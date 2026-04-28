@@ -7,6 +7,7 @@ Create Date: 2026-04-28
 from __future__ import annotations
 
 import sqlalchemy as sa
+import sqlalchemy.dialects.postgresql
 from alembic import op
 
 revision = "20260428_0002"
@@ -16,17 +17,14 @@ depends_on = None
 
 
 def upgrade() -> None:
-    bind = op.get_bind()
-    if bind.dialect.name == "postgresql":
-        op.add_column(
-            "database_profiles",
-            sa.Column("sample_questions", sa.dialects.postgresql.JSONB(), nullable=True),
-        )
-    else:
-        op.add_column(
-            "database_profiles",
-            sa.Column("sample_questions", sa.JSON(), nullable=True),
-        )
+    op.add_column(
+        "database_profiles",
+        sa.Column(
+            "sample_questions",
+            sa.dialects.postgresql.JSONB().with_variant(sa.JSON(), "sqlite"),
+            nullable=True,
+        ),
+    )
 
 
 def downgrade() -> None:

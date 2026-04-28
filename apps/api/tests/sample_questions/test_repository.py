@@ -45,3 +45,9 @@ def test_set_pending_idempotent(seeded_profile):
     set_pending(seeded_profile)
     out = get_sample_questions(seeded_profile)
     assert out.status == SampleQuestionsStatus.pending
+
+
+def test_set_pending_raises_when_profile_missing(fresh_db):
+    import pytest
+    with pytest.raises(ValueError, match="does not exist"):
+        set_pending("nonexistent_db_9999")
