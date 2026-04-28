@@ -40,7 +40,7 @@ def _is_temporal(c: ColumnProfile) -> bool:
 
 
 def _is_categorical(c: ColumnProfile, row_count: int) -> bool:
-    if not c.type or "TEXT" not in c.type.upper() and "CHAR" not in c.type.upper():
+    if not c.type or ("TEXT" not in c.type.upper() and "CHAR" not in c.type.upper()):
         return False
     distinct = c.stats.distinct_count
     if distinct == 0 or distinct > 50:

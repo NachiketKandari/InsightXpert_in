@@ -33,7 +33,7 @@ def test_no_categorical_no_temporal_with_numeric_falls_back_to_segmentation_then
     )
 
 
-def test_numeric_plus_categorical_no_temporal_picks_correlation_third():
+def test_numeric_plus_categorical_no_temporal_picks_segmentation_third():
     assert select_categories(_f(has_categorical=True, has_numeric_metric=True)) == (
         "Descriptive", "Comparative", "Segmentation",
     )

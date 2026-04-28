@@ -20,6 +20,20 @@ from .validator import ValidationFailure, validate_llm_output
 log = get_logger("sample_questions.generator")
 
 
+def _make_fallback(
+    categories: tuple,
+    features,
+    examples: list,
+) -> "SampleQuestions":
+    return SampleQuestions(
+        status=SampleQuestionsStatus.fallback,
+        generated_at=datetime.now(timezone.utc),
+        model=None,
+        categories=generate_fallback(categories, features),
+        few_shot_db_ids=[e.db_id for e in examples],
+    )
+
+
 class LLMLike(Protocol):
     async def async_generate(self, system: str, user: str) -> str: ...
 
@@ -41,13 +55,7 @@ async def generate_sample_questions(
 
     if llm is None:
         log.info("sample_questions.fallback_used", extra={"db_id": profile.db_id, "reason": "no_llm"})
-        return SampleQuestions(
-            status=SampleQuestionsStatus.fallback,
-            generated_at=datetime.now(timezone.utc),
-            model=None,
-            categories=generate_fallback(categories, features),
-            few_shot_db_ids=[e.db_id for e in examples],
-        )
+        return _make_fallback(categories, features, examples)
 
     system, user = build_prompt(profile, categories, examples)
 
@@ -58,13 +66,7 @@ async def generate_sample_questions(
             "sample_questions.llm_failed",
             extra={"db_id": profile.db_id, "error": str(e)},
         )
-        return SampleQuestions(
-            status=SampleQuestionsStatus.fallback,
-            generated_at=datetime.now(timezone.utc),
-            model=None,
-            categories=generate_fallback(categories, features),
-            few_shot_db_ids=[e.db_id for e in examples],
-        )
+        return _make_fallback(categories, features, examples)
 
     try:
         result = validate_llm_output(raw, categories=categories, profile=profile)
@@ -73,13 +75,7 @@ async def generate_sample_questions(
             "sample_questions.validation_failed",
             extra={"db_id": profile.db_id, "reason": str(e)},
         )
-        return SampleQuestions(
-            status=SampleQuestionsStatus.fallback,
-            generated_at=datetime.now(timezone.utc),
-            model=None,
-            categories=generate_fallback(categories, features),
-            few_shot_db_ids=[e.db_id for e in examples],
-        )
+        return _make_fallback(categories, features, examples)
 
     out = SampleQuestions(
         status=SampleQuestionsStatus.ok,

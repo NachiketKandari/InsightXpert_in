@@ -4,16 +4,11 @@ Always returns exactly 3 distinct categories. Pure-Python.
 """
 from __future__ import annotations
 
-from typing import Literal, Tuple
-
 from .schema_features import SchemaFeatures
-
-CategoryName = Literal[
-    "Descriptive", "Comparative", "Temporal", "Segmentation", "Correlation"
-]
+from .types import CategoryName
 
 
-def select_categories(f: SchemaFeatures) -> Tuple[CategoryName, CategoryName, CategoryName]:
+def select_categories(f: SchemaFeatures) -> tuple[CategoryName, CategoryName, CategoryName]:
     slot1: CategoryName = "Descriptive"
     slot2: CategoryName = "Comparative" if f.has_categorical else "Segmentation"
 
@@ -29,8 +24,9 @@ def select_categories(f: SchemaFeatures) -> Tuple[CategoryName, CategoryName, Ca
 
     if slot3 == slot2:
         # avoid duplicate; substitute with first not-yet-used
-        for c in ("Comparative", "Segmentation", "Correlation"):
+        _fallback: tuple[CategoryName, ...] = ("Comparative", "Segmentation", "Correlation")
+        for c in _fallback:
             if c != slot1 and c != slot2:
-                slot3 = c  # type: ignore[assignment]
+                slot3 = c
                 break
     return slot1, slot2, slot3

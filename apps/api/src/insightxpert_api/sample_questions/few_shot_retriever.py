@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from functools import lru_cache
 from importlib import resources
 from typing import Iterable, Sequence
 
@@ -23,6 +24,7 @@ class FewShotExample:
     question: str
 
 
+@lru_cache(maxsize=None)
 def load_bank() -> list[FewShotExample]:
     text = resources.files(__package__).joinpath("fixtures/bird_examples.json").read_text()
     raw = json.loads(text)
