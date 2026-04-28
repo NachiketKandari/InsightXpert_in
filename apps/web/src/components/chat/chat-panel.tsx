@@ -1,19 +1,46 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { Share2 } from "lucide-react";
 import { useSSEChat } from "@/hooks/use-sse-chat";
 import { useChatStore } from "@/stores/chat-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { WelcomeScreen } from "@/components/chat/welcome-screen";
 import { MessageList } from "@/components/chat/message-list";
 import { MessageInput } from "@/components/chat/message-input";
+import { Button } from "@/components/ui/button";
+import { ShareDialog } from "@/components/chat/share-dialog";
+import { apiCall } from "@/lib/api";
+import type { DatabaseListItem } from "@/types/database";
 
 export function ChatPanel() {
   const { sendMessage, stopStreaming, isStreaming } = useSSEChat();
   const agentMode = useSettingsStore((s) => s.agentMode);
   const conversation = useChatStore((s) => s.activeConversation());
   const isLoadingConversation = useChatStore((s) => s.isLoadingConversation);
+  const selectedDbId = useChatStore((s) => s.selectedDbId);
   const hasMessages = conversation && conversation.messages.length > 0;
+
+  const [shareOpen, setShareOpen] = useState(false);
+  const [databases, setDatabases] = useState<DatabaseListItem[]>([]);
+
+  useEffect(() => {
+    apiCall<DatabaseListItem[]>("/api/v1/databases").then((data) => {
+      if (data) setDatabases(data);
+    });
+  }, []);
+
+  const conversationId = conversation?.id ?? null;
+
+  const currentDb = databases.find((d) => d.db_id === selectedDbId);
+  const dbKindHint: "bundled" | "uploaded" | "postgres" | "none" | "unknown" =
+    !selectedDbId
+      ? "none"
+      : !currentDb
+      ? "unknown"
+      : currentDb.source === "uploaded"
+      ? "uploaded"
+      : "bundled";
 
   const handleSend = useCallback(
     (message: string) => {
@@ -30,6 +57,27 @@ export function ChatPanel() {
         </div>
       ) : hasMessages ? (
         <>
+          <div className="flex items-center justify-end px-2 pt-1">
+            {conversationId ? (
+              <>
+                <Button
+                  data-testid="share-open-btn"
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setShareOpen(true)}
+                  aria-label="Share this chat"
+                >
+                  <Share2 className="h-4 w-4" />
+                </Button>
+                <ShareDialog
+                  conversationId={conversationId}
+                  dbKindHint={dbKindHint}
+                  open={shareOpen}
+                  onOpenChange={setShareOpen}
+                />
+              </>
+            ) : null}
+          </div>
           <MessageList onRetry={handleSend} />
           <MessageInput
             onSend={handleSend}
