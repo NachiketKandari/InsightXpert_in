@@ -7,6 +7,7 @@ per ``(db_id, profile_kind)`` — re-running a kind overwrites.
 from __future__ import annotations
 
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import JSONB
 
 from ..db.base import metadata
 
@@ -28,6 +29,7 @@ database_profiles = sa.Table(
     sa.Column("input_tokens", sa.Integer(), nullable=True),
     sa.Column("output_tokens", sa.Integer(), nullable=True),
     sa.Column("cost_usd", sa.Float(), nullable=True),
+    sa.Column("sample_questions", JSONB().with_variant(sa.JSON(), "sqlite"), nullable=True),
     sa.PrimaryKeyConstraint("db_id", "profile_kind"),
     sa.Index("ix_database_profiles_owner_user_id", "owner_user_id"),
 )
