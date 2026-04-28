@@ -1,8 +1,782 @@
 [
-  {"db_id":"california_schools","category":"Descriptive","features":{"has_temporal":false,"has_categorical":true,"has_numeric_metric":true,"has_geo":true,"has_relations":true},"question":"How many schools are charter schools?"},
-  {"db_id":"california_schools","category":"Comparative","features":{"has_temporal":false,"has_categorical":true,"has_numeric_metric":true,"has_geo":true,"has_relations":true},"question":"Which county has the highest average SAT math score among schools with more than 500 test-takers?"},
-  {"db_id":"financial","category":"Temporal","features":{"has_temporal":true,"has_categorical":true,"has_numeric_metric":true,"has_geo":false,"has_relations":true},"question":"How has the average loan amount changed year over year?"},
-  {"db_id":"formula_1","category":"Comparative","features":{"has_temporal":true,"has_categorical":true,"has_numeric_metric":true,"has_geo":false,"has_relations":true},"question":"Which constructor has the highest average finishing position across all races?"},
-  {"db_id":"student_club","category":"Segmentation","features":{"has_temporal":false,"has_categorical":true,"has_numeric_metric":false,"has_geo":false,"has_relations":true},"question":"What is the breakdown of members by major?"},
-  {"db_id":"superhero","category":"Correlation","features":{"has_temporal":false,"has_categorical":true,"has_numeric_metric":true,"has_geo":false,"has_relations":true},"question":"Is there a relationship between superhero alignment and average power score?"}
+  {
+    "db_id": "california_schools",
+    "category": "Comparative",
+    "features": {
+      "has_temporal": false,
+      "has_categorical": true,
+      "has_numeric_metric": true,
+      "has_geo": true,
+      "has_relations": true
+    },
+    "question": "What is the highest eligible free rate for K-12 students in the schools in Alameda County?"
+  },
+  {
+    "db_id": "california_schools",
+    "category": "Comparative",
+    "features": {
+      "has_temporal": false,
+      "has_categorical": true,
+      "has_numeric_metric": true,
+      "has_geo": true,
+      "has_relations": true
+    },
+    "question": "For the school with the highest average score in Reading in the SAT test, what is its FRPM count for students aged 5-17?"
+  },
+  {
+    "db_id": "california_schools",
+    "category": "Descriptive",
+    "features": {
+      "has_temporal": false,
+      "has_categorical": true,
+      "has_numeric_metric": true,
+      "has_geo": true,
+      "has_relations": true
+    },
+    "question": "How many schools in Amador which the Low Grade is 9 and the High Grade is 12?"
+  },
+  {
+    "db_id": "california_schools",
+    "category": "Comparative",
+    "features": {
+      "has_temporal": false,
+      "has_categorical": true,
+      "has_numeric_metric": true,
+      "has_geo": true,
+      "has_relations": true
+    },
+    "question": "Which cities have the top 5 lowest enrollment number for students in grades 1 through 12?"
+  },
+  {
+    "db_id": "california_schools",
+    "category": "Descriptive",
+    "features": {
+      "has_temporal": false,
+      "has_categorical": true,
+      "has_numeric_metric": true,
+      "has_geo": true,
+      "has_relations": true
+    },
+    "question": "What is the total number of schools whose total SAT scores are greater or equal to 1500 whose mailing city is Lakeport?"
+  },
+  {
+    "db_id": "california_schools",
+    "category": "Descriptive",
+    "features": {
+      "has_temporal": false,
+      "has_categorical": false,
+      "has_numeric_metric": true,
+      "has_geo": true,
+      "has_relations": true
+    },
+    "question": "How many chartered schools located in the city of Hickman are owned by the Elementary School District?"
+  },
+  {
+    "db_id": "california_schools",
+    "category": "Descriptive",
+    "features": {
+      "has_temporal": false,
+      "has_categorical": false,
+      "has_numeric_metric": true,
+      "has_geo": true,
+      "has_relations": true
+    },
+    "question": "How many active and closed District Community Day Schools are there in the county of Alpine?"
+  },
+  {
+    "db_id": "card_games",
+    "category": "Segmentation",
+    "features": {
+      "has_temporal": false,
+      "has_categorical": true,
+      "has_numeric_metric": false,
+      "has_geo": false,
+      "has_relations": true
+    },
+    "question": "What are the borderless cards available without powerful foils?"
+  },
+  {
+    "db_id": "card_games",
+    "category": "Descriptive",
+    "features": {
+      "has_temporal": false,
+      "has_categorical": false,
+      "has_numeric_metric": true,
+      "has_geo": false,
+      "has_relations": true
+    },
+    "question": "How many cards that illusrtated in German have been reprinted?"
+  },
+  {
+    "db_id": "card_games",
+    "category": "Descriptive",
+    "features": {
+      "has_temporal": false,
+      "has_categorical": false,
+      "has_numeric_metric": true,
+      "has_geo": false,
+      "has_relations": true
+    },
+    "question": "How many white bordered cards are powerful?"
+  },
+  {
+    "db_id": "card_games",
+    "category": "Descriptive",
+    "features": {
+      "has_temporal": false,
+      "has_categorical": false,
+      "has_numeric_metric": true,
+      "has_geo": false,
+      "has_relations": true
+    },
+    "question": "How many color cards with no borders have been ranked higher than 12000 on EDHRec?"
+  },
+  {
+    "db_id": "card_games",
+    "category": "Temporal",
+    "features": {
+      "has_temporal": true,
+      "has_categorical": false,
+      "has_numeric_metric": false,
+      "has_geo": false,
+      "has_relations": true
+    },
+    "question": "State the set code of the set with release date of 07/13/2007?"
+  },
+  {
+    "db_id": "card_games",
+    "category": "Correlation",
+    "features": {
+      "has_temporal": false,
+      "has_categorical": false,
+      "has_numeric_metric": false,
+      "has_geo": false,
+      "has_relations": true
+    },
+    "question": "For the set of cards with \"Ancestor's Chosen\" in it, is there a Korean version of it?"
+  },
+  {
+    "db_id": "card_games",
+    "category": "Segmentation",
+    "features": {
+      "has_temporal": false,
+      "has_categorical": true,
+      "has_numeric_metric": false,
+      "has_geo": false,
+      "has_relations": true
+    },
+    "question": "What was the expansion type for the set which card \"Samite Pilgrim\" in it?"
+  },
+  {
+    "db_id": "financial",
+    "category": "Descriptive",
+    "features": {
+      "has_temporal": false,
+      "has_categorical": false,
+      "has_numeric_metric": true,
+      "has_geo": true,
+      "has_relations": true
+    },
+    "question": "How many accounts who choose issuance after transaction are staying in East Bohemia region?"
+  },
+  {
+    "db_id": "financial",
+    "category": "Temporal",
+    "features": {
+      "has_temporal": true,
+      "has_categorical": false,
+      "has_numeric_metric": true,
+      "has_geo": true,
+      "has_relations": true
+    },
+    "question": "List out the accounts who have the earliest trading date in 1995?"
+  },
+  {
+    "db_id": "financial",
+    "category": "Descriptive",
+    "features": {
+      "has_temporal": false,
+      "has_categorical": false,
+      "has_numeric_metric": true,
+      "has_geo": true,
+      "has_relations": true
+    },
+    "question": "After making a credit card withdrawal, how many account/s with monthly issuance has a negative balance?"
+  },
+  {
+    "db_id": "financial",
+    "category": "Descriptive",
+    "features": {
+      "has_temporal": true,
+      "has_categorical": false,
+      "has_numeric_metric": true,
+      "has_geo": true,
+      "has_relations": true
+    },
+    "question": "How much is the average amount in credit card made by account holders in a month, in year 2021?"
+  },
+  {
+    "db_id": "financial",
+    "category": "Temporal",
+    "features": {
+      "has_temporal": true,
+      "has_categorical": false,
+      "has_numeric_metric": true,
+      "has_geo": true,
+      "has_relations": true
+    },
+    "question": "What is the number of committed crimes in 1995 in the district of the account with the id 532?"
+  },
+  {
+    "db_id": "financial",
+    "category": "Temporal",
+    "features": {
+      "has_temporal": true,
+      "has_categorical": true,
+      "has_numeric_metric": true,
+      "has_geo": true,
+      "has_relations": true
+    },
+    "question": "What was the growth rate of the total amount of loans across all accounts for a male client between 1996 and 1997?"
+  },
+  {
+    "db_id": "financial",
+    "category": "Segmentation",
+    "features": {
+      "has_temporal": false,
+      "has_categorical": true,
+      "has_numeric_metric": false,
+      "has_geo": true,
+      "has_relations": true
+    },
+    "question": "Which kind of credit card does client number 9 possess?"
+  },
+  {
+    "db_id": "formula_1",
+    "category": "Comparative",
+    "features": {
+      "has_temporal": true,
+      "has_categorical": true,
+      "has_numeric_metric": true,
+      "has_geo": false,
+      "has_relations": true
+    },
+    "question": "What is the surname of the driver with the best lap time in race number 19 in the second qualifying period?"
+  },
+  {
+    "db_id": "formula_1",
+    "category": "Correlation",
+    "features": {
+      "has_temporal": false,
+      "has_categorical": false,
+      "has_numeric_metric": false,
+      "has_geo": false,
+      "has_relations": true
+    },
+    "question": "For the driver who set the fastest lap speed in race No.933, where does he come from?"
+  },
+  {
+    "db_id": "formula_1",
+    "category": "Comparative",
+    "features": {
+      "has_temporal": true,
+      "has_categorical": true,
+      "has_numeric_metric": true,
+      "has_geo": false,
+      "has_relations": true
+    },
+    "question": "Which year has the most number of races?"
+  },
+  {
+    "db_id": "formula_1",
+    "category": "Temporal",
+    "features": {
+      "has_temporal": true,
+      "has_categorical": true,
+      "has_numeric_metric": false,
+      "has_geo": false,
+      "has_relations": true
+    },
+    "question": "In which years did Lewis Hamilton participate in a Formula_1 race?"
+  },
+  {
+    "db_id": "formula_1",
+    "category": "Descriptive",
+    "features": {
+      "has_temporal": false,
+      "has_categorical": false,
+      "has_numeric_metric": true,
+      "has_geo": true,
+      "has_relations": true
+    },
+    "question": "How many circuits are there in Adelaide, Australia?"
+  },
+  {
+    "db_id": "formula_1",
+    "category": "Descriptive",
+    "features": {
+      "has_temporal": true,
+      "has_categorical": false,
+      "has_numeric_metric": true,
+      "has_geo": false,
+      "has_relations": true
+    },
+    "question": "How many French drivers who obtain the laptime less than 02:00.00?"
+  },
+  {
+    "db_id": "student_club",
+    "category": "Segmentation",
+    "features": {
+      "has_temporal": false,
+      "has_categorical": true,
+      "has_numeric_metric": false,
+      "has_geo": false,
+      "has_relations": true
+    },
+    "question": "What's Angela Sanders's major?"
+  },
+  {
+    "db_id": "student_club",
+    "category": "Descriptive",
+    "features": {
+      "has_temporal": false,
+      "has_categorical": false,
+      "has_numeric_metric": true,
+      "has_geo": false,
+      "has_relations": true
+    },
+    "question": "How many majors are there in \"College of Humanities and Social Sciences\"?"
+  },
+  {
+    "db_id": "student_club",
+    "category": "Descriptive",
+    "features": {
+      "has_temporal": false,
+      "has_categorical": false,
+      "has_numeric_metric": true,
+      "has_geo": false,
+      "has_relations": true
+    },
+    "question": "How many student have the position of president?"
+  },
+  {
+    "db_id": "student_club",
+    "category": "Comparative",
+    "features": {
+      "has_temporal": false,
+      "has_categorical": true,
+      "has_numeric_metric": true,
+      "has_geo": false,
+      "has_relations": true
+    },
+    "question": "What is the ratio between students majored in finance and physics?"
+  },
+  {
+    "db_id": "student_club",
+    "category": "Segmentation",
+    "features": {
+      "has_temporal": false,
+      "has_categorical": true,
+      "has_numeric_metric": false,
+      "has_geo": false,
+      "has_relations": true
+    },
+    "question": "What kind of expenses incurred by members who have X-Large in size of tee shirt?"
+  },
+  {
+    "db_id": "superhero",
+    "category": "Descriptive",
+    "features": {
+      "has_temporal": false,
+      "has_categorical": false,
+      "has_numeric_metric": true,
+      "has_geo": false,
+      "has_relations": true
+    },
+    "question": "How many superheroes have the super power of \"Super Strength\"?"
+  },
+  {
+    "db_id": "superhero",
+    "category": "Descriptive",
+    "features": {
+      "has_temporal": false,
+      "has_categorical": true,
+      "has_numeric_metric": true,
+      "has_geo": false,
+      "has_relations": true
+    },
+    "question": "What is the average height of the superheroes from Marvel Comics?"
+  },
+  {
+    "db_id": "superhero",
+    "category": "Segmentation",
+    "features": {
+      "has_temporal": false,
+      "has_categorical": true,
+      "has_numeric_metric": false,
+      "has_geo": false,
+      "has_relations": true
+    },
+    "question": "What is Copycat's race?"
+  },
+  {
+    "db_id": "superhero",
+    "category": "Segmentation",
+    "features": {
+      "has_temporal": false,
+      "has_categorical": true,
+      "has_numeric_metric": false,
+      "has_geo": false,
+      "has_relations": true
+    },
+    "question": "What are the superpowers of heroes with ID 1?"
+  },
+  {
+    "db_id": "superhero",
+    "category": "Correlation",
+    "features": {
+      "has_temporal": false,
+      "has_categorical": true,
+      "has_numeric_metric": false,
+      "has_geo": false,
+      "has_relations": true
+    },
+    "question": "Which group does superhero A-Bomb belong to?"
+  },
+  {
+    "db_id": "european_football_2",
+    "category": "Segmentation",
+    "features": {
+      "has_temporal": false,
+      "has_categorical": true,
+      "has_numeric_metric": true,
+      "has_geo": false,
+      "has_relations": true
+    },
+    "question": "What is the preferred foot when attacking of the player with the lowest potential?"
+  },
+  {
+    "db_id": "european_football_2",
+    "category": "Comparative",
+    "features": {
+      "has_temporal": false,
+      "has_categorical": false,
+      "has_numeric_metric": true,
+      "has_geo": false,
+      "has_relations": true
+    },
+    "question": "Who has the highest average finishing rate between the highest and shortest football player?"
+  },
+  {
+    "db_id": "european_football_2",
+    "category": "Descriptive",
+    "features": {
+      "has_temporal": false,
+      "has_categorical": false,
+      "has_numeric_metric": true,
+      "has_geo": false,
+      "has_relations": true
+    },
+    "question": "How many matches were held in the league Germany 1. Bundesliga from August to October 2008?"
+  },
+  {
+    "db_id": "european_football_2",
+    "category": "Temporal",
+    "features": {
+      "has_temporal": true,
+      "has_categorical": false,
+      "has_numeric_metric": true,
+      "has_geo": false,
+      "has_relations": true
+    },
+    "question": "Among the players born before the year 1986, how many of them would remain in his position and defense while the team attacked?"
+  },
+  {
+    "db_id": "european_football_2",
+    "category": "Comparative",
+    "features": {
+      "has_temporal": false,
+      "has_categorical": false,
+      "has_numeric_metric": true,
+      "has_geo": false,
+      "has_relations": true
+    },
+    "question": "How much higher in percentage is Ariel Borysiuk's overall rating than that of Paulin Puel?"
+  },
+  {
+    "db_id": "european_football_2",
+    "category": "Temporal",
+    "features": {
+      "has_temporal": true,
+      "has_categorical": false,
+      "has_numeric_metric": true,
+      "has_geo": false,
+      "has_relations": true
+    },
+    "question": "How was Francesco Migliore's attacking work rate on 2015/5/1?"
+  },
+  {
+    "db_id": "european_football_2",
+    "category": "Comparative",
+    "features": {
+      "has_temporal": false,
+      "has_categorical": true,
+      "has_numeric_metric": true,
+      "has_geo": false,
+      "has_relations": true
+    },
+    "question": "What is the name of players with the highest potential?"
+  },
+  {
+    "db_id": "thrombosis_prediction",
+    "category": "Comparative",
+    "features": {
+      "has_temporal": false,
+      "has_categorical": true,
+      "has_numeric_metric": true,
+      "has_geo": false,
+      "has_relations": true
+    },
+    "question": "Are there more in-patient or outpatient who were male? What is the deviation in percentage?"
+  },
+  {
+    "db_id": "thrombosis_prediction",
+    "category": "Comparative",
+    "features": {
+      "has_temporal": false,
+      "has_categorical": true,
+      "has_numeric_metric": true,
+      "has_geo": false,
+      "has_relations": true
+    },
+    "question": "What is the ratio of male to female patients among all those with abnormal uric acid counts?"
+  },
+  {
+    "db_id": "thrombosis_prediction",
+    "category": "Temporal",
+    "features": {
+      "has_temporal": true,
+      "has_categorical": false,
+      "has_numeric_metric": false,
+      "has_geo": false,
+      "has_relations": true
+    },
+    "question": "For the patient who got the laboratory test of uric acid level as 8.4 on 1991-10-21, how old was he/she at that time?"
+  },
+  {
+    "db_id": "thrombosis_prediction",
+    "category": "Segmentation",
+    "features": {
+      "has_temporal": false,
+      "has_categorical": true,
+      "has_numeric_metric": true,
+      "has_geo": false,
+      "has_relations": true
+    },
+    "question": "What proportion of patients who had signs of thrombocytopenia had SLE diagnosed?"
+  },
+  {
+    "db_id": "thrombosis_prediction",
+    "category": "Correlation",
+    "features": {
+      "has_temporal": false,
+      "has_categorical": true,
+      "has_numeric_metric": true,
+      "has_geo": false,
+      "has_relations": true
+    },
+    "question": "What is the average age of the male patient with high cholesterol?"
+  },
+  {
+    "db_id": "thrombosis_prediction",
+    "category": "Descriptive",
+    "features": {
+      "has_temporal": false,
+      "has_categorical": false,
+      "has_numeric_metric": true,
+      "has_geo": false,
+      "has_relations": true
+    },
+    "question": "How many patients with a normal Ig A level came to the hospital after 1990/1/1?"
+  },
+  {
+    "db_id": "thrombosis_prediction",
+    "category": "Descriptive",
+    "features": {
+      "has_temporal": false,
+      "has_categorical": false,
+      "has_numeric_metric": true,
+      "has_geo": false,
+      "has_relations": true
+    },
+    "question": "How many patients have a normal anti-SSB and are diagnosed with SLE in the examination?"
+  },
+  {
+    "db_id": "toxicology",
+    "category": "Comparative",
+    "features": {
+      "has_temporal": false,
+      "has_categorical": true,
+      "has_numeric_metric": true,
+      "has_geo": false,
+      "has_relations": true
+    },
+    "question": "What is the most common bond type?"
+  },
+  {
+    "db_id": "toxicology",
+    "category": "Segmentation",
+    "features": {
+      "has_temporal": false,
+      "has_categorical": true,
+      "has_numeric_metric": false,
+      "has_geo": false,
+      "has_relations": true
+    },
+    "question": "Chlorine is in what type of bond?"
+  },
+  {
+    "db_id": "toxicology",
+    "category": "Segmentation",
+    "features": {
+      "has_temporal": false,
+      "has_categorical": false,
+      "has_numeric_metric": false,
+      "has_geo": false,
+      "has_relations": true
+    },
+    "question": "What are the bond IDs that have the same atom ID 2 of TR000_2?"
+  },
+  {
+    "db_id": "toxicology",
+    "category": "Correlation",
+    "features": {
+      "has_temporal": false,
+      "has_categorical": false,
+      "has_numeric_metric": true,
+      "has_geo": false,
+      "has_relations": true
+    },
+    "question": "Is the molecule with the most double bonds carcinogenic?"
+  },
+  {
+    "db_id": "toxicology",
+    "category": "Segmentation",
+    "features": {
+      "has_temporal": false,
+      "has_categorical": true,
+      "has_numeric_metric": true,
+      "has_geo": false,
+      "has_relations": true
+    },
+    "question": "What is the composition of element chlorine in percentage among the single bond molecules?"
+  },
+  {
+    "db_id": "toxicology",
+    "category": "Descriptive",
+    "features": {
+      "has_temporal": false,
+      "has_categorical": true,
+      "has_numeric_metric": true,
+      "has_geo": false,
+      "has_relations": true
+    },
+    "question": "How many molecules have a double bond type and among these molecule, how many are labeled as carcinogenic compound?"
+  },
+  {
+    "db_id": "codebase_community",
+    "category": "Comparative",
+    "features": {
+      "has_temporal": false,
+      "has_categorical": true,
+      "has_numeric_metric": false,
+      "has_geo": false,
+      "has_relations": true
+    },
+    "question": "Which user has a higher reputation, Harlan or Jarrod Dixon?"
+  },
+  {
+    "db_id": "codebase_community",
+    "category": "Correlation",
+    "features": {
+      "has_temporal": false,
+      "has_categorical": false,
+      "has_numeric_metric": true,
+      "has_geo": false,
+      "has_relations": true
+    },
+    "question": "Among the posts owned by an elder user, how many of them have a score of over 19?"
+  },
+  {
+    "db_id": "codebase_community",
+    "category": "Descriptive",
+    "features": {
+      "has_temporal": false,
+      "has_categorical": false,
+      "has_numeric_metric": true,
+      "has_geo": false,
+      "has_relations": true
+    },
+    "question": "For the user with the display name of \"Tiago Pasqualini\", how many posts did he/she own?"
+  },
+  {
+    "db_id": "codebase_community",
+    "category": "Comparative",
+    "features": {
+      "has_temporal": false,
+      "has_categorical": true,
+      "has_numeric_metric": true,
+      "has_geo": false,
+      "has_relations": true
+    },
+    "question": "Which users have posted the most comments. List out the user's badge?"
+  },
+  {
+    "db_id": "codebase_community",
+    "category": "Temporal",
+    "features": {
+      "has_temporal": true,
+      "has_categorical": true,
+      "has_numeric_metric": false,
+      "has_geo": false,
+      "has_relations": true
+    },
+    "question": "What is the detailed content of the comment of the post which was created on 7/19/2010 7:37:33 PM?"
+  },
+  {
+    "db_id": "codebase_community",
+    "category": "Descriptive",
+    "features": {
+      "has_temporal": false,
+      "has_categorical": false,
+      "has_numeric_metric": true,
+      "has_geo": false,
+      "has_relations": true
+    },
+    "question": "How many posts by Matt Parker have more than 4 votes?"
+  },
+  {
+    "db_id": "codebase_community",
+    "category": "Temporal",
+    "features": {
+      "has_temporal": true,
+      "has_categorical": true,
+      "has_numeric_metric": true,
+      "has_geo": false,
+      "has_relations": true
+    },
+    "question": "What is the average monthly number of links created in 2010 for posts that have no more than 2 answers?"
+  },
+  {
+    "db_id": "codebase_community",
+    "category": "Descriptive",
+    "features": {
+      "has_temporal": false,
+      "has_categorical": false,
+      "has_numeric_metric": true,
+      "has_geo": false,
+      "has_relations": true
+    },
+    "question": "How many users were awarded with 'Citizen Patrol' badge?"
+  }
 ]
