@@ -15,6 +15,7 @@ const SESSION_COOKIE = process.env.NEXT_PUBLIC_SESSION_COOKIE_NAME || "ix_sessio
 
 function isPublic(pathname: string): boolean {
   if (PUBLIC_PATHS.includes(pathname)) return true;
+  if (pathname.startsWith("/share/")) return true;
   if (pathname.startsWith("/_next/")) return true;
   if (pathname.startsWith("/api/")) return true;
   if (pathname === "/favicon.ico") return true;

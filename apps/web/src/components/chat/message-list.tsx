@@ -9,9 +9,10 @@ import { apiFetch } from "@/lib/api";
 
 interface MessageListProps {
   onRetry?: (lastUserMessage: string) => void;
+  readOnly?: boolean;
 }
 
-export function MessageList({ onRetry }: MessageListProps) {
+export function MessageList({ onRetry, readOnly }: MessageListProps) {
   const conversation = useChatStore((s) => s.activeConversation());
   const messages = conversation?.messages ?? [];
 
@@ -78,10 +79,11 @@ export function MessageList({ onRetry }: MessageListProps) {
               key={msg.id}
               message={msg}
               isLastAssistant={idx === lastAssistantIdx}
-              onRetry={handleRetry}
-              onResend={msg.role === "user" ? onRetry : undefined}
-              onFeedback={handleFeedback}
-              onMarkInsight={handleMarkInsight}
+              onRetry={readOnly ? undefined : handleRetry}
+              onResend={readOnly || msg.role !== "user" ? undefined : onRetry}
+              onFeedback={readOnly ? undefined : handleFeedback}
+              onMarkInsight={readOnly ? undefined : handleMarkInsight}
+              readOnly={readOnly ?? false}
             />
         ))}
 
