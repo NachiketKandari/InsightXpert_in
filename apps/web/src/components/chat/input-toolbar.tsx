@@ -292,9 +292,9 @@ export function InputToolbar({
       {/* Right: Model selector + Mic / Send / Stop */}
       <div className="flex items-center gap-1">
         {showModelSwitching && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <DropdownMenu>
+          <DropdownMenu>
+            <Tooltip>
+              <TooltipTrigger asChild>
                 <DropdownMenuTrigger asChild>
                   <button
                     className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors outline-none disabled:opacity-50 max-w-[160px] md:max-w-none"
@@ -306,39 +306,39 @@ export function InputToolbar({
                     <ChevronDown className="size-3 opacity-50 shrink-0" />
                   </button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent
-                  side="top"
-                  align="end"
-                  className="min-w-[200px]"
-                >
-                  {providers.map((p) => (
-                    <DropdownMenuSub key={p.provider}>
-                      <DropdownMenuSubTrigger>
-                        {PROVIDER_LABELS[p.provider] ?? p.provider}
-                      </DropdownMenuSubTrigger>
-                      <DropdownMenuSubContent>
-                        <DropdownMenuRadioGroup
-                          value={
-                            p.provider === currentProvider ? currentModel : ""
-                          }
-                          onValueChange={(model) =>
-                            handleModelSelect(p.provider, model)
-                          }
-                        >
-                          {p.models.map((model) => (
-                            <DropdownMenuRadioItem key={model} value={model}>
-                              {formatModelName(model, p.provider)}
-                            </DropdownMenuRadioItem>
-                          ))}
-                        </DropdownMenuRadioGroup>
-                      </DropdownMenuSubContent>
-                    </DropdownMenuSub>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </TooltipTrigger>
-            <TooltipContent side="top">Switch model</TooltipContent>
-          </Tooltip>
+              </TooltipTrigger>
+              <TooltipContent side="top">Switch model</TooltipContent>
+            </Tooltip>
+            <DropdownMenuContent
+              side="top"
+              align="end"
+              className="min-w-[200px]"
+            >
+              {providers.map((p) => (
+                <DropdownMenuSub key={p.provider}>
+                  <DropdownMenuSubTrigger>
+                    {PROVIDER_LABELS[p.provider] ?? p.provider}
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent>
+                    <DropdownMenuRadioGroup
+                      value={
+                        p.provider === currentProvider ? currentModel : ""
+                      }
+                      onValueChange={(model) =>
+                        handleModelSelect(p.provider, model)
+                      }
+                    >
+                      {p.models.map((model) => (
+                        <DropdownMenuRadioItem key={model} value={model}>
+                          {formatModelName(model, p.provider)}
+                        </DropdownMenuRadioItem>
+                      ))}
+                    </DropdownMenuRadioGroup>
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
         )}
 
         {/* Mic / waveform button — wavy bars while recording, mic icon when idle */}
