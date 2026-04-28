@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
-import { useAutomationStore } from "@/stores/automation-store";
+import { useAutomationRuns } from "@/hooks/use-automation-runs";
 import { STATUS_VARIANT } from "@/lib/automation-utils";
 import { RunDetailModal } from "./run-detail-modal";
 import type { AutomationRun } from "@/types/automation";
@@ -12,22 +12,8 @@ interface RunHistoryProps {
 }
 
 export function RunHistory({ automationId }: RunHistoryProps) {
-  const fetchRunHistory = useAutomationStore((s) => s.fetchRunHistory);
-  const [runs, setRuns] = useState<AutomationRun[]>([]);
-  const [loadedForId, setLoadedForId] = useState<string | null>(null);
+  const { data: runs, isLoading, isError } = useAutomationRuns(automationId);
   const [selectedRun, setSelectedRun] = useState<AutomationRun | null>(null);
-  const isLoading = loadedForId !== automationId;
-
-  useEffect(() => {
-    let cancelled = false;
-    fetchRunHistory(automationId).then((data) => {
-      if (!cancelled) {
-        setRuns(data);
-        setLoadedForId(automationId);
-      }
-    });
-    return () => { cancelled = true; };
-  }, [automationId, fetchRunHistory]);
 
   if (isLoading) {
     return (
@@ -37,7 +23,15 @@ export function RunHistory({ automationId }: RunHistoryProps) {
     );
   }
 
-  if (runs.length === 0) {
+  if (isError) {
+    return (
+      <p className="text-sm text-red-600 dark:text-red-400 py-3 text-center">
+        Failed to load run history.
+      </p>
+    );
+  }
+
+  if (!runs || runs.length === 0) {
     return (
       <p className="text-sm text-muted-foreground py-3 text-center">
         No runs yet
