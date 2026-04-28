@@ -31,6 +31,7 @@ from .routes import (
     health,
     internal as internal_routes,
     notifications as notifications_routes,
+    shared_snapshots as shared_snapshots_routes,
     sql,
 )
 
@@ -210,6 +211,7 @@ def create_app() -> FastAPI:
     app.include_router(admin_prompts.router)
     app.include_router(admin_rag.router)
     app.include_router(admin_databases.router)
+    app.include_router(shared_snapshots_routes.router)
 
     from .routes import sentry_debug as sentry_debug_route
     app.include_router(sentry_debug_route.router)
