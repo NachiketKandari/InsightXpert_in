@@ -30,4 +30,5 @@ def test_upgrade_creates_users_table(tmp_path, monkeypatch):
         "id", "email", "password_hash", "role", "is_active",
         "must_change_password", "sessions_valid_after",
         "created_at", "updated_at", "last_seen_at",
+        "sharing_disabled",
     }
