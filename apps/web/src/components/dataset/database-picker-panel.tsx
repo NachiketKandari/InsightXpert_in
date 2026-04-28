@@ -1,11 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { Database, Check, Loader2 } from "lucide-react";
 import { motion } from "framer-motion";
-import { apiCall } from "@/lib/api";
+import { useDatabases } from "@/hooks/use-databases";
 import { useChatStore } from "@/stores/chat-store";
-import type { DatabaseListItem } from "@/types/database";
 
 /**
  * DatabasePickerPanel — first-class DB picker shown on the landing screen
@@ -14,38 +13,24 @@ import type { DatabaseListItem } from "@/types/database";
  *
  * Selecting a card writes to `useChatStore().selectedDbId`, which is what
  * chat + sql-execute requests now thread through.
+ *
+ * Uses the shared `useDatabases()` query so the list is cached across
+ * navigations and shared with `DatasetSelector` — no separate fetch.
  */
 export function DatabasePickerPanel() {
-  const [databases, setDatabases] = useState<DatabaseListItem[]>([]);
-  const [loading, setLoading] = useState(true);
   const selectedDbId = useChatStore((s) => s.selectedDbId);
   const setSelectedDbId = useChatStore((s) => s.setSelectedDbId);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const data = await apiCall<DatabaseListItem[]>("/api/v1/databases");
-      if (cancelled) return;
-      setDatabases(data ?? []);
-      setLoading(false);
-      if (data && data.length > 0 && !selectedDbId) {
-        setSelectedDbId(data[0].db_id);
-      }
-    })();
-    const handler = () => {
-      apiCall<DatabaseListItem[]>("/api/v1/databases").then((d) => {
-        if (!cancelled && d) setDatabases(d);
-      });
-    };
-    window.addEventListener("databases-changed", handler);
-    return () => {
-      cancelled = true;
-      window.removeEventListener("databases-changed", handler);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const { data, isLoading } = useDatabases();
+  const databases = data ?? [];
 
-  if (loading) {
+  useEffect(() => {
+    if (databases.length > 0 && !selectedDbId) {
+      setSelectedDbId(databases[0].db_id);
+    }
+  }, [databases, selectedDbId, setSelectedDbId]);
+
+  if (isLoading && databases.length === 0) {
     return (
       <div className="mt-6 flex items-center justify-center text-muted-foreground/70 text-xs gap-2">
         <Loader2 className="size-3.5 animate-spin" />

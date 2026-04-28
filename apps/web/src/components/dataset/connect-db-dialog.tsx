@@ -31,6 +31,7 @@ import {
   type PostgresConfig,
 } from "@/lib/connections/api";
 import { useChatStore } from "@/stores/chat-store";
+import { useQueryClient } from "@tanstack/react-query";
 
 /**
  * ConnectDbDialog — Phase 4b "bring your own database" entry point.
@@ -80,6 +81,7 @@ export function ConnectDbDialog({
   const [error, setError] = useState<string | null>(null);
 
   const setSelectedDbId = useChatStore((s) => s.setSelectedDbId);
+  const queryClient = useQueryClient();
 
   const reset = useCallback(() => {
     setKind("postgres");
@@ -158,10 +160,7 @@ export function ConnectDbDialog({
       if (result.ok) {
         toast.success(`Connected as "${result.db_id}"`);
         setSelectedDbId(result.db_id);
-        // Notify the dataset selector to refresh.
-        if (typeof window !== "undefined") {
-          window.dispatchEvent(new Event("databases-changed"));
-        }
+        void queryClient.invalidateQueries({ queryKey: ["databases", "list"] });
         onConnectSuccess?.(result.db_id);
         handleOpenChange(false);
       } else {

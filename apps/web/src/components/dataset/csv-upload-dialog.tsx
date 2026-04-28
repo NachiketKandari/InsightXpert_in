@@ -14,6 +14,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
+import { useQueryClient } from "@tanstack/react-query";
 import { SSE_BASE_URL } from "@/lib/constants";
 import { useChatStore } from "@/stores/chat-store";
 import type { DatabaseUploadResponse } from "@/types/database";
@@ -62,6 +63,7 @@ export function CsvUploadDialog({ open, onOpenChange, onUploadSuccess }: CsvUplo
   const xhrRef = useRef<XMLHttpRequest | null>(null);
 
   const setSelectedDbId = useChatStore((s) => s.setSelectedDbId);
+  const queryClient = useQueryClient();
 
   const reset = useCallback(() => {
     setFile(null);
@@ -142,7 +144,7 @@ export function CsvUploadDialog({ open, onOpenChange, onUploadSuccess }: CsvUplo
           const data = JSON.parse(xhr.responseText) as DatabaseUploadResponse;
           setSelectedDbId(data.db_id);
           toast.success(`Uploaded "${data.db_id}" as SQLite database and set as active.`);
-          window.dispatchEvent(new CustomEvent("databases-changed", { detail: data }));
+          void queryClient.invalidateQueries({ queryKey: ["databases", "list"] });
           onUploadSuccess?.(data.db_id);
           handleOpenChange(false);
         } catch {

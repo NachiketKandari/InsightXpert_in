@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useEffect, useState } from "react";
 import { ChevronDown, Database, Check, Loader2, Plus, FileUp, Plug } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -14,24 +14,20 @@ import {
 import { CsvUploadDialog } from "@/components/dataset/csv-upload-dialog";
 import { SqliteUploadDialog } from "@/components/dataset/sqlite-upload-dialog";
 import { ConnectDbDialog } from "@/components/dataset/connect-db-dialog";
-import { apiCall } from "@/lib/api";
+import { useDatabases } from "@/hooks/use-databases";
 import { useChatStore } from "@/stores/chat-store";
-import type { DatabaseListItem } from "@/types/database";
 
 /**
  * DatasetSelector — header affordance for picking the active database.
  *
- * Backend contract: `GET /api/v1/databases` returns
- * `[{db_id, source}, ...]`. The selected `db_id` is persisted in the chat
- * store (`selectedDbId`) and threaded into chat + sql/execute requests.
- *
- * This selector replaced a fork-era "datasets" implementation that was
- * hitting the non-existent `/api/v1/datasets/public` endpoint, which
- * silently returned null and left the UI showing "No dataset" forever.
+ * The trigger label renders synchronously from `selectedDbId` (chat-store) so
+ * it never blinks "Loading…" on remount. The dropdown's list is fetched via
+ * `useDatabases()` (TanStack Query, 30s staleTime); the spinner only appears
+ * inside the open menu while the first cold fetch is in flight. Cross-component
+ * invalidations come through `queryClient.invalidateQueries(['databases','list'])`
+ * — the legacy `databases-changed` window event has been retired.
  */
 export function DatasetSelector() {
-  const [databases, setDatabases] = useState<DatabaseListItem[]>([]);
-  const [loading, setLoading] = useState(true);
   const [csvUploadOpen, setCsvUploadOpen] = useState(false);
   const [sqliteUploadOpen, setSqliteUploadOpen] = useState(false);
   const [connectDbOpen, setConnectDbOpen] = useState(false);
@@ -39,36 +35,22 @@ export function DatasetSelector() {
   const selectedDbId = useChatStore((s) => s.selectedDbId);
   const setSelectedDbId = useChatStore((s) => s.setSelectedDbId);
 
-  const fetchDatabases = useCallback(async () => {
-    const data = await apiCall<DatabaseListItem[]>("/api/v1/databases");
-    if (data) {
-      setDatabases(data);
-      // Auto-select first DB if nothing is selected or the previously
-      // selected one is no longer visible. Pull `selectedDbId` fresh via
-      // `getState()` to avoid threading it through this callback's deps
-      // (which would re-run the subscription on every change).
-      const current = useChatStore.getState().selectedDbId;
-      const stillVisible = data.some((d) => d.db_id === current);
-      if (!stillVisible && data.length > 0) {
-        setSelectedDbId(data[0].db_id);
-      }
-    }
-    setLoading(false);
-  }, [setSelectedDbId]);
+  const { data: databases, isLoading } = useDatabases();
 
+  // Auto-select the first DB when nothing is selected (or the previous
+  // selection has disappeared). Driven by query state, not a fetch effect.
   useEffect(() => {
-    // External sync — kick a fetch + subscribe to cross-component invalidations.
-    // The lint rule below flags any setState-in-effect; the set* calls here
-    // happen after an `await` in fetchDatabases (i.e. post-async-boundary),
-    // which is exactly the external-sync pattern the rule's docs endorse.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void fetchDatabases();
-    const handler = () => void fetchDatabases();
-    window.addEventListener("databases-changed", handler);
-    return () => window.removeEventListener("databases-changed", handler);
-  }, [fetchDatabases]);
+    if (!databases || databases.length === 0) return;
+    const stillVisible = databases.some((d) => d.db_id === selectedDbId);
+    if (!stillVisible) {
+      setSelectedDbId(databases[0].db_id);
+    }
+  }, [databases, selectedDbId, setSelectedDbId]);
 
-  const activeDb = databases.find((d) => d.db_id === selectedDbId);
+  // Trigger label: render whatever the user already chose — no fetch
+  // dependency. Falls back to a sensible static string only when there is
+  // genuinely no selection yet (first ever load on a brand-new account).
+  const triggerLabel = selectedDbId ?? "Select database";
 
   return (
     <>
@@ -78,18 +60,11 @@ export function DatasetSelector() {
             variant="ghost"
             size="sm"
             className="gap-1.5 h-8 px-2.5 text-xs font-medium text-muted-foreground hover:text-foreground"
-            disabled={loading}
             aria-label="Select database"
           >
-            {loading ? (
-              <Loader2 className="size-3.5 animate-spin" />
-            ) : (
-              <Database className="size-3.5 text-primary dark:text-cyan-accent" />
-            )}
+            <Database className="size-3.5 text-primary dark:text-cyan-accent" />
             <span className="hidden sm:inline max-w-[160px] truncate">
-              {loading
-                ? "Loading..."
-                : (activeDb?.db_id ?? (databases.length === 0 ? "No databases" : "Select database"))}
+              {triggerLabel}
             </span>
             <ChevronDown className="size-3 opacity-60" />
           </Button>
@@ -99,10 +74,24 @@ export function DatasetSelector() {
           <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground">
             Databases
           </DropdownMenuLabel>
-          {databases.length === 0 && !loading && (
-            <DropdownMenuItem disabled>No databases found</DropdownMenuItem>
-          )}
-          {databases.map((db) => (
+
+          {(() => {
+            const list = databases ?? [];
+            if (isLoading && list.length === 0) {
+              return (
+                <div className="flex items-center gap-2 px-2 py-2 text-xs text-muted-foreground">
+                  <Loader2 className="size-3.5 animate-spin" />
+                  Loading…
+                </div>
+              );
+            }
+            if (!isLoading && list.length === 0) {
+              return <DropdownMenuItem disabled>No databases found</DropdownMenuItem>;
+            }
+            return null;
+          })()}
+
+          {databases?.map((db) => (
             <DropdownMenuItem
               key={db.db_id}
               onClick={() => setSelectedDbId(db.db_id)}
