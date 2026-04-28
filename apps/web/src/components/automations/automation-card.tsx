@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { useAutomationStore } from "@/stores/automation-store";
+import { useInvalidateAutomationRuns } from "@/hooks/use-automation-runs";
 import { cronToHumanReadable } from "@/lib/automation-utils";
 import { RunHistory } from "./run-history";
 import type { Automation, AutomationRun } from "@/types/automation";
@@ -66,6 +67,7 @@ function RunResultToast({ run }: { run: AutomationRun }) {
 export function AutomationCard({ automation, onDelete }: AutomationCardProps) {
   const toggleAutomation = useAutomationStore((s) => s.toggleAutomation);
   const runNow = useAutomationStore((s) => s.runNow);
+  const invalidateRuns = useInvalidateAutomationRuns();
   const startTestTrigger = useAutomationStore((s) => s.startTestTrigger);
   const stopTestTrigger = useAutomationStore((s) => s.stopTestTrigger);
   const testState = useAutomationStore((s) => s.activeTestTriggers[automation.id]);
@@ -88,6 +90,10 @@ export function AutomationCard({ automation, onDelete }: AutomationCardProps) {
     const result = await runNow(automation.id);
     setIsRunning(false);
 
+    if (result) {
+      void invalidateRuns(automation.id);
+    }
+
     if (result?.run) {
       toast(<RunResultToast run={result.run} />, {
         duration: 5000,
@@ -97,7 +103,7 @@ export function AutomationCard({ automation, onDelete }: AutomationCardProps) {
     } else {
       toast.error("Failed to trigger automation");
     }
-  }, [runNow, automation.id]);
+  }, [runNow, automation.id, invalidateRuns]);
 
   const handleStartTest = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
