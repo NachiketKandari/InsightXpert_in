@@ -1,40 +1,26 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
 import { ArrowRight, Database } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { fetchProfile } from "@/lib/databases/api";
-import type { DatabaseListItem, DatabaseProfile } from "@/types/database";
+import type { DatabaseListItem } from "@/types/database";
 
 interface DatabaseCardProps {
   item: DatabaseListItem;
 }
 
+function formatCount(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
+}
+
 export function DatabaseCard({ item }: DatabaseCardProps) {
-  const [profile, setProfile] = useState<DatabaseProfile | null>(null);
-  const [loaded, setLoaded] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const p = await fetchProfile(item.db_id);
-      if (!cancelled) {
-        setProfile(p);
-        setLoaded(true);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [item.db_id]);
-
-  const totalColumns = profile?.tables.reduce(
-    (sum, t) => sum + t.columns.length,
-    0,
-  );
+  const tables = item.table_count ?? 0;
+  const columns = item.column_count ?? 0;
+  const rows = item.row_count ?? 0;
 
   return (
     <div className="flex flex-col gap-3 rounded-lg border border-border bg-card p-4 hover:border-primary/60 transition-colors">
@@ -49,13 +35,11 @@ export function DatabaseCard({ item }: DatabaseCardProps) {
       </div>
 
       <div className="text-xs text-muted-foreground min-h-[1.5rem]">
-        {!loaded ? (
-          <span className="opacity-50">Loading…</span>
-        ) : profile ? (
+        {item.has_profile ? (
           <span className="text-emerald-600 dark:text-emerald-400">
-            Profiled · {profile.tables.length} table
-            {profile.tables.length !== 1 ? "s" : ""}
-            {totalColumns != null ? ` · ${totalColumns} columns` : ""}
+            Profiled · {tables} table{tables !== 1 ? "s" : ""} · {columns}{" "}
+            column{columns !== 1 ? "s" : ""}
+            {rows > 0 ? ` · ${formatCount(rows)} rows` : ""}
           </span>
         ) : (
           <span>Not profiled</span>

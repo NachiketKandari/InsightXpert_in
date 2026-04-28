@@ -44,6 +44,7 @@ from ..databases import repository as databases_repo
 from ..databases import service as visibility_service
 from ..db.schema import ddl as schema_ddl
 from ..logging import get_logger
+from ..profiling import repository as profiles_repo
 from ..profiling.runner import (
     ProfileFlags,
     count_columns,
@@ -78,6 +79,10 @@ def _validate_db_id(db_id: str) -> None:
 class DatabaseListItem(BaseModel):
     db_id: str
     source: str
+    has_profile: bool = False
+    table_count: int | None = None
+    column_count: int | None = None
+    row_count: int | None = None
 
 
 class UploadResponse(BaseModel):
@@ -128,15 +133,29 @@ async def list_databases(
     visible_ids = await asyncio.to_thread(
         visibility_service.visible_ids, cu.id, is_admin
     )
-    return [
-        DatabaseListItem(db_id=r.db_id, source=r.source)
-        for r in refs
+    # One DB round-trip for all profile summaries — replaces the per-card
+    # GET /databases/{id}/profile fetches the FE used to make.
+    summaries = await asyncio.to_thread(profiles_repo.list_summaries)
+    out: list[DatabaseListItem] = []
+    for r in refs:
         # If there's no row in the `databases` table for a given db_id the
         # item pre-dates the visibility layer — keep it listed for the owning
         # session so legacy uploads keep working for their uploader. For
         # bundled DBs (always seeded public) this branch never fires.
-        if r.db_id in visible_ids or r.source == "uploaded"
-    ]
+        if r.db_id not in visible_ids and r.source != "uploaded":
+            continue
+        s = summaries.get(r.db_id)
+        out.append(
+            DatabaseListItem(
+                db_id=r.db_id,
+                source=r.source,
+                has_profile=s is not None,
+                table_count=s["table_count"] if s else None,
+                column_count=s["column_count"] if s else None,
+                row_count=s["row_count"] if s else None,
+            )
+        )
+    return out
 
 
 @router.post("/upload", response_model=UploadResponse)

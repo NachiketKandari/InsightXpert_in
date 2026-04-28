@@ -16,6 +16,12 @@ export interface DatabaseListItem {
   db_id: string;
   /** "bundled" | "uploaded" — lowercased origin tag. */
   source: string;
+  /** True if a base profile row exists for this db. */
+  has_profile: boolean;
+  /** Populated when has_profile is true; null otherwise. */
+  table_count: number | null;
+  column_count: number | null;
+  row_count: number | null;
 }
 
 export interface DatabaseUploadResponse {

@@ -1,35 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
 import { ArrowLeft } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { PageContainer } from "@/components/layout/page-container";
 import { DatabaseCard } from "@/components/databases/database-card";
-import { fetchDatabases } from "@/lib/databases/api";
-import type { DatabaseListItem } from "@/types/database";
+import { useDatabases } from "@/hooks/use-databases";
 
 export default function DatabasesPage() {
-  const [items, setItems] = useState<DatabaseListItem[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const res = await fetchDatabases();
-      if (cancelled) return;
-      if (res === null) {
-        setError("Failed to load databases.");
-        setItems([]);
-      } else {
-        setItems(res);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const { data: items, isLoading, isError } = useDatabases();
 
   return (
     <div className="min-h-screen bg-background">
@@ -46,11 +26,13 @@ export default function DatabasesPage() {
 
       <PageContainer as="main">
         <div className="space-y-4">
-          {items === null ? (
+          {isLoading ? (
             <div className="text-sm text-muted-foreground">Loading…</div>
-          ) : error ? (
-            <div className="text-sm text-red-600 dark:text-red-400">{error}</div>
-          ) : items.length === 0 ? (
+          ) : isError ? (
+            <div className="text-sm text-red-600 dark:text-red-400">
+              Failed to load databases.
+            </div>
+          ) : !items || items.length === 0 ? (
             <div className="rounded-lg border border-dashed border-border p-8 text-center">
               <p className="text-sm font-medium">No databases yet</p>
               <p className="mt-1 text-xs text-muted-foreground">

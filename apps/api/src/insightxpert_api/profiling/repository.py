@@ -76,6 +76,60 @@ def exists(db_id: str, profile_kind: str = "base") -> bool:
     return get(db_id, profile_kind) is not None
 
 
+def list_db_ids(profile_kind: str = "base") -> set[str]:
+    """Return the set of db_ids that have a profile row for the given kind.
+
+    Single SELECT, returns just the id column — used by the databases list
+    endpoint to set ``has_profile`` per item without N round-trips.
+    """
+    with get_engine().connect() as conn:
+        rows = conn.execute(
+            select(database_profiles.c.db_id).where(
+                database_profiles.c.profile_kind == profile_kind,
+            )
+        ).all()
+    return {r[0] for r in rows}
+
+
+def list_summaries(profile_kind: str = "base") -> dict[str, dict[str, int]]:
+    """Return ``{db_id: {table_count, column_count, row_count}}`` for every
+    profile row of the given kind.
+
+    Replaces N per-card ``GET /databases/{id}/profile`` calls with one DB
+    round-trip + Python-side JSON parse. Caller filters by visibility.
+    """
+    import json
+
+    with get_engine().connect() as conn:
+        rows = conn.execute(
+            select(
+                database_profiles.c.db_id,
+                database_profiles.c.profile_json,
+            ).where(
+                database_profiles.c.profile_kind == profile_kind,
+            )
+        ).all()
+
+    out: dict[str, dict[str, int]] = {}
+    for db_id, profile_json in rows:
+        try:
+            tables = json.loads(profile_json).get("tables", [])
+        except (json.JSONDecodeError, AttributeError):
+            continue
+        column_count = 0
+        row_count = 0
+        for t in tables:
+            cols = t.get("columns") or []
+            column_count += len(cols)
+            row_count += int(t.get("row_count") or 0)
+        out[db_id] = {
+            "table_count": len(tables),
+            "column_count": column_count,
+            "row_count": row_count,
+        }
+    return out
+
+
 def delete_for_db(db_id: str) -> int:
     """Drop every profile_kind row for a given db_id. Returns rowcount."""
     with get_engine().begin() as conn:
