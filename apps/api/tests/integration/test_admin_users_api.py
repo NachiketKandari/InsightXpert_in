@@ -135,3 +135,40 @@ def test_delete_user(admin_client):
     # Second delete → 404
     dr2 = client.delete(f"/api/v1/admin/users/{uid}")
     assert dr2.status_code == 404
+
+
+def test_admin_can_disable_sharing(admin_client):
+    client, _ = admin_client
+    r = client.post("/api/v1/admin/users/", json={"email": "share-target@example.com", "role": "user"})
+    assert r.status_code == 200, r.text
+    uid = r.json()["id"]
+
+    resp = client.patch(
+        f"/api/v1/admin/users/{uid}/sharing-disabled",
+        json={"disabled": True},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["sharing_disabled"] is True
+
+    resp = client.patch(
+        f"/api/v1/admin/users/{uid}/sharing-disabled",
+        json={"disabled": False},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["sharing_disabled"] is False
+
+    # 404 on unknown user
+    resp404 = client.patch(
+        "/api/v1/admin/users/does-not-exist/sharing-disabled",
+        json={"disabled": True},
+    )
+    assert resp404.status_code == 404
+
+
+def test_non_admin_cannot_toggle_sharing(user_client):
+    user_c, user = user_client
+    resp = user_c.patch(
+        f"/api/v1/admin/users/{user.id}/sharing-disabled",
+        json={"disabled": True},
+    )
+    assert resp.status_code in (401, 403)

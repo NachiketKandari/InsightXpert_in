@@ -77,6 +77,7 @@ interface MessageBubbleProps {
   // a per-message closure, which would break React.memo's prop comparison.
   onFeedback?: (messageId: string, type: "up" | "down", comment?: string) => void;
   onMarkInsight?: (messageId: string, note?: string) => void;
+  readOnly?: boolean;
 }
 
 function MessageBubbleInner({
@@ -86,6 +87,7 @@ function MessageBubbleInner({
   onResend,
   onFeedback,
   onMarkInsight,
+  readOnly = false,
 }: MessageBubbleProps) {
   const isStreaming = useChatStore(selectIsActiveStreaming);
   const activeConversationId = useChatStore((s) => s.activeConversationId);
@@ -218,7 +220,7 @@ function MessageBubbleInner({
 
       {!isUser && !isStreaming && <MessageMetrics message={message} />}
 
-      {message.content && (
+      {message.content && !readOnly && (
         <MessageActions
           role={message.role}
           content={message.content}
@@ -257,6 +259,7 @@ export const MessageBubble = React.memo(MessageBubbleInner, (prev, next) => {
     prev.onRetry === next.onRetry &&
     prev.onResend === next.onResend &&
     prev.onFeedback === next.onFeedback &&
-    prev.onMarkInsight === next.onMarkInsight
+    prev.onMarkInsight === next.onMarkInsight &&
+    prev.readOnly === next.readOnly
   );
 });

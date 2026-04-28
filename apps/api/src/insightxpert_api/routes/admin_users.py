@@ -143,3 +143,34 @@ async def delete_user(
             status_code=status.HTTP_409_CONFLICT, detail="last_admin"
         ) from None
     return {"status": "ok"}
+
+
+class _SharingDisabledBody(BaseModel):
+    disabled: bool
+
+
+@router.patch("/{user_id}/sharing-disabled")
+async def set_user_sharing_disabled(
+    user_id: str,
+    body: _SharingDisabledBody,
+    cu: CurrentUser = Depends(require_admin),
+) -> dict:
+    """Admin toggle for the per-user share kill-switch."""
+    from sqlalchemy import update as sa_update
+
+    from ..db.engine import get_engine
+    from ..users.table import users
+
+    def _update() -> int:
+        with get_engine().begin() as conn:
+            result = conn.execute(
+                sa_update(users)
+                .where(users.c.id == user_id)
+                .values(sharing_disabled=1 if body.disabled else 0)
+            )
+            return result.rowcount
+
+    rowcount = await asyncio.to_thread(_update)
+    if rowcount == 0:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="user not found")
+    return {"id": user_id, "sharing_disabled": body.disabled}
