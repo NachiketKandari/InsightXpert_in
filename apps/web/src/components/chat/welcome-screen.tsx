@@ -1,27 +1,23 @@
 "use client";
 
-import { useRef, useState, useCallback, useEffect, type KeyboardEvent } from "react";
+import { useRef, useState, useCallback, useEffect, useMemo, startTransition, type KeyboardEvent } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Shuffle } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
-import { SAMPLE_QUESTIONS } from "@/lib/sample-questions";
 import { DatabasePickerPanel } from "@/components/dataset/database-picker-panel";
 import { InputToolbar } from "./input-toolbar";
 import { useChatStore } from "@/stores/chat-store";
 import { useClientConfigStore } from "@/stores/client-config-store";
 import { useVoiceInput } from "@/hooks/use-voice-input";
+import { useSampleQuestions } from "@/hooks/use-sample-questions";
 
-const ALL_QUESTIONS = SAMPLE_QUESTIONS.flatMap((cat) => cat.questions);
-
-function pickRandom(count: number, exclude?: string[]): string[] {
-  const pool = exclude
-    ? ALL_QUESTIONS.filter((q) => !exclude.includes(q))
-    : [...ALL_QUESTIONS];
+function pickRandom(pool: string[], count: number, exclude?: string[]): string[] {
+  const filtered = exclude ? pool.filter((q) => !exclude.includes(q)) : [...pool];
   const result: string[] = [];
-  for (let i = 0; i < count && pool.length > 0; i++) {
-    const idx = Math.floor(Math.random() * pool.length);
-    result.push(pool[idx]);
-    pool.splice(idx, 1);
+  for (let i = 0; i < count && filtered.length > 0; i++) {
+    const idx = Math.floor(Math.random() * filtered.length);
+    result.push(filtered[idx]);
+    filtered.splice(idx, 1);
   }
   return result;
 }
@@ -47,11 +43,30 @@ const item = {
 
 export function WelcomeScreen({ onSendMessage, onStop, isStreaming }: WelcomeScreenProps) {
   const [value, setValue] = useState("");
-  const [questions, setQuestions] = useState(() => pickRandom(3));
+  const [questions, setQuestions] = useState<string[]>([]);
   const [shuffleKey, setShuffleKey] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const displayName = useClientConfigStore((s) => s.config?.branding?.display_name);
   const { voiceState, voiceError, toggleVoice, clearVoiceText } = useVoiceInput(setValue);
+  const selectedDbId = useChatStore((s) => s.selectedDbId);
+  const { data: sampleData } = useSampleQuestions(selectedDbId ?? undefined);
+
+  // Build pool from per-DB sample questions, refreshing when data changes
+  const allQuestions = useMemo(
+    () => sampleData?.categories?.flatMap((cat) => cat.questions) ?? [],
+    [sampleData],
+  );
+
+  // Re-pick when the question pool changes (new DB, new generation).
+  // Wrap in startTransition to avoid "setState synchronously in effect" lint error.
+  useEffect(() => {
+    if (allQuestions.length > 0) {
+      startTransition(() => {
+        setQuestions(pickRandom(allQuestions, 3));
+        setShuffleKey((k) => k + 1);
+      });
+    }
+  }, [allQuestions]);
 
   // Subscribe to pendingInput changes outside the render cycle to avoid
   // cascading setState-in-effect warnings.
@@ -84,9 +99,9 @@ export function WelcomeScreen({ onSendMessage, onStop, isStreaming }: WelcomeScr
   );
 
   const handleShuffle = useCallback(() => {
-    setQuestions((prev) => pickRandom(3, prev));
+    setQuestions((prev) => pickRandom(allQuestions, 3, prev));
     setShuffleKey((k) => k + 1);
-  }, []);
+  }, [allQuestions]);
 
   return (
     <div className="flex flex-1 flex-col items-center justify-center px-3 sm:px-4 py-8 sm:py-12">

@@ -59,9 +59,8 @@ export function SampleQuestionsModal({ open, onOpenChange, dbId }: SampleQuestio
   const isFailed = status === "failed";
   const isRegenPending = regenerate.isPending;
 
-  const categories: SampleQuestionCategory[] = data?.categories ?? [];
-
   const filtered = useMemo(() => {
+    const categories: SampleQuestionCategory[] = data?.categories ?? [];
     const term = search.toLowerCase().trim();
     if (!term) return categories;
     return categories
@@ -70,7 +69,7 @@ export function SampleQuestionsModal({ open, onOpenChange, dbId }: SampleQuestio
         questions: cat.questions.filter((q) => q.toLowerCase().includes(term)),
       }))
       .filter((cat) => cat.questions.length > 0);
-  }, [search, categories]);
+  }, [search, data]);
 
   const totalVisible = useMemo(
     () => filtered.reduce((sum, cat) => sum + cat.questions.length, 0),
