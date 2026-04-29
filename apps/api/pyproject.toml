@@ -69,4 +69,5 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 markers = [
   "slow: requires a real Gemini API key; opt in via GEMINI_API_KEY_REAL",
+  "gemini: requires a live Gemini API key; skipped in CI without GEMINI_API_KEY",
 ]

@@ -27,7 +27,9 @@ export type ChunkType =
   | "agent_trace"
   // Legacy aliases still referenced in some fork renderers; kept for back-compat
   | "sql"
-  | "answer";
+  | "answer"
+  // Sample questions side-channel
+  | "sample_questions.ready";
 
 export interface ChatChunk {
   type: ChunkType;
