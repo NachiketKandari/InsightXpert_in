@@ -11,6 +11,12 @@ import type {
   DatabaseProfile,
   SchemaResponse,
 } from "@/types/database";
+import type { SampleQuestions } from "@/types/sample-questions";
+
+/** Full profile response — extends DatabaseProfile with sample_questions. */
+export interface ProfileResponse extends DatabaseProfile {
+  sample_questions: SampleQuestions | null;
+}
 
 // List DBs visible to the caller.
 //   GET /api/v1/databases → [{db_id, source}]
@@ -30,13 +36,13 @@ export function fetchSchema(dbId: string): Promise<SchemaResponse | null> {
 //   GET /api/v1/databases/{db_id}/profile
 export async function fetchProfile(
   dbId: string,
-): Promise<DatabaseProfile | null> {
+): Promise<ProfileResponse | null> {
   const res = await apiFetch(
     `/api/v1/databases/${encodeURIComponent(dbId)}/profile`,
   );
   if (!res.ok) return null;
   try {
-    return (await res.json()) as DatabaseProfile;
+    return (await res.json()) as ProfileResponse;
   } catch {
     return null;
   }
