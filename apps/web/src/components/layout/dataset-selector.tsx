@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ChevronDown, Database, Check, Loader2, Plus, FileUp, Plug } from "lucide-react";
+import { ChevronDown, Database, Check, Loader2, Plus, FileUp, Plug, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -15,6 +15,7 @@ import { CsvUploadDialog } from "@/components/dataset/csv-upload-dialog";
 import { SqliteUploadDialog } from "@/components/dataset/sqlite-upload-dialog";
 import { ConnectDbDialog } from "@/components/dataset/connect-db-dialog";
 import { useDatabases } from "@/hooks/use-databases";
+import { useSampleQuestions } from "@/hooks/use-sample-questions";
 import { useChatStore } from "@/stores/chat-store";
 
 /**
@@ -36,6 +37,7 @@ export function DatasetSelector() {
   const setSelectedDbId = useChatStore((s) => s.setSelectedDbId);
 
   const { data: databases, isLoading } = useDatabases();
+  const { regenerate: regenerateSampleQuestions } = useSampleQuestions(selectedDbId ?? undefined);
 
   // Auto-select the first DB when nothing is selected (or the previous
   // selection has disappeared). Driven by query state, not a fetch effect.
@@ -109,6 +111,17 @@ export function DatasetSelector() {
             </DropdownMenuItem>
           ))}
 
+          <DropdownMenuSeparator />
+          {selectedDbId && (
+            <DropdownMenuItem
+              onClick={() => regenerateSampleQuestions.mutate()}
+              disabled={regenerateSampleQuestions.isPending}
+              className="gap-2 cursor-pointer"
+            >
+              <RefreshCw className={`size-3.5 ${regenerateSampleQuestions.isPending ? "animate-spin" : ""}`} />
+              <span className="text-sm font-medium">Regenerate sample questions</span>
+            </DropdownMenuItem>
+          )}
           <DropdownMenuSeparator />
           <DropdownMenuItem
             onClick={() => setCsvUploadOpen(true)}
