@@ -27,7 +27,12 @@ class Settings(BaseSettings):
     # --- runtime -----------------------------------------------------------
     app_env: str = "local"  # local | staging | prod
     port: int = 8080
-    cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000"])
+    cors_origins: list[str] = Field(
+        default_factory=lambda: [
+            "http://localhost:3000",
+            "http://localhost:3001",
+        ]
+    )
     database_url: str = "sqlite:///./app.db"
 
     # --- database connection pool ------------------------------------------
@@ -56,6 +61,10 @@ class Settings(BaseSettings):
     gemini_api_key: str
     gemini_chat_model: str = "gemini-2.5-flash"
     gemini_embed_model: str = "gemini-embedding-001"
+
+    # --- voice / speech-to-text -------------------------------------------
+    # Deepgram Nova-3 streaming. Empty → /api/transcribe closes with 4002.
+    deepgram_api_key: str = ""
 
     # --- storage -----------------------------------------------------------
     gcs_bucket: str = ""  # empty → local-fs fallback (dev/tests)
