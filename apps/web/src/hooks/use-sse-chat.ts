@@ -1,12 +1,14 @@
 "use client";
 
 import { useCallback, useRef } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useChatStore } from "@/stores/chat-store";
 import { createSSEStream, type AgentMode } from "@/lib/sse-client";
 import { parseChunk } from "@/lib/chunk-parser";
 import { useInsightStore } from "@/stores/insight-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import type { AgentStep } from "@/types/chat";
+import type { ProfileResponse } from "@/lib/databases/api";
 
 function generateStepId() {
   return Math.random().toString(36).slice(2, 8);
@@ -14,6 +16,7 @@ function generateStepId() {
 
 export function useSSEChat() {
   const abortRef = useRef<AbortController | null>(null);
+  const queryClient = useQueryClient();
 
   const {
     activeConversationId,
@@ -245,6 +248,15 @@ export function useSSEChat() {
             addAgentStep(step);
           } else if (chunk.type === "enrichment_trace") {
             // Data-only chunk, stored via appendChunk but no UI step
+          } else if (chunk.type === "sample_questions.ready") {
+            const payload = chunk.data as { db_id?: string; sample_questions?: unknown } | null;
+            if (payload?.db_id && payload?.sample_questions) {
+              queryClient.setQueryData(
+                ["profile", payload.db_id],
+                (prev: ProfileResponse | undefined) =>
+                  prev ? { ...prev, sample_questions: payload.sample_questions } : prev,
+              );
+            }
           } else if (chunk.type === "error") {
             markLastRunningDone();
             const stepId = generateStepId();
@@ -301,6 +313,7 @@ export function useSSEChat() {
       clearAgentSteps,
       newConversation,
       updateLastAssistantTime,
+      queryClient,
     ]
   );
 
