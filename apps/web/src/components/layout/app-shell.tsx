@@ -34,6 +34,7 @@ export const AppShell = React.memo(function AppShell({ children }: { children: R
   const setDatasetViewerOpen = useChatStore((s) => s.setDatasetViewerOpen);
   const sampleQuestionsOpen = useChatStore((s) => s.sampleQuestionsOpen);
   const setSampleQuestionsOpen = useChatStore((s) => s.setSampleQuestionsOpen);
+  const selectedDbId = useChatStore((s) => s.selectedDbId);
   const isMobile = useIsMobile();
 
   // Desktop: left sidebar open by default; Mobile: collapsed
@@ -125,7 +126,7 @@ export const AppShell = React.memo(function AppShell({ children }: { children: R
       <DatasetViewer open={datasetViewerOpen} onOpenChange={setDatasetViewerOpen} />
 
       {/* Sample Questions modal — triggered from user menu */}
-      <SampleQuestionsModal open={sampleQuestionsOpen} onOpenChange={setSampleQuestionsOpen} />
+      <SampleQuestionsModal open={sampleQuestionsOpen} onOpenChange={setSampleQuestionsOpen} dbId={selectedDbId ?? undefined} />
     </div>
   );
 });
