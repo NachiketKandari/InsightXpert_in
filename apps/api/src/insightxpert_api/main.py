@@ -24,6 +24,7 @@ from .routes import (
     automations as automations_routes,
     chat,
     client_config,
+    config as config_routes,
     connections,
     conversations,
     databases,
@@ -34,6 +35,7 @@ from .routes import (
     shared_snapshots as shared_snapshots_routes,
     public_shares as public_shares_routes,
     sql,
+    voice as voice_routes,
 )
 
 # ---------------------------------------------------------------------------
@@ -204,6 +206,7 @@ def create_app() -> FastAPI:
     app.include_router(conversations.router)
     app.include_router(feedback.router)
     app.include_router(client_config.router)
+    app.include_router(config_routes.router)
     app.include_router(admin_users.router)
     app.include_router(admin_overview.router)
     app.include_router(admin_audit.router)
@@ -214,6 +217,7 @@ def create_app() -> FastAPI:
     app.include_router(admin_databases.router)
     app.include_router(shared_snapshots_routes.router)
     app.include_router(public_shares_routes.router)
+    app.include_router(voice_routes.router)
 
     from .routes import sentry_debug as sentry_debug_route
     app.include_router(sentry_debug_route.router)

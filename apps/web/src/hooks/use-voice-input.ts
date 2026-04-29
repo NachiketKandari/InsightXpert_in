@@ -1,20 +1,19 @@
 "use client";
 
 import { useRef, useState, useCallback, useEffect } from "react";
-import { SSE_BASE_URL } from "@/lib/constants";
 
 export type VoiceState = "idle" | "requesting" | "listening";
 
 function getWsBaseUrl(): string {
-  // Use SSE_BASE_URL (direct to backend) — WebSocket can't go through CDN proxy.
-  if (SSE_BASE_URL) {
-    const base = SSE_BASE_URL.replace(/^https/, "wss").replace(/^http/, "ws");
-    console.debug("[voice] WS base URL (from SSE_BASE_URL):", base);
-    return base;
-  }
+  // Voice auth rides on the signed `ix_session` cookie which is HttpOnly +
+  // SameSite=Lax — so it WON'T travel on a cross-origin WS handshake. Use
+  // the page origin and let Next's dev `rewrites()` proxy `/api/transcribe`
+  // through to the backend (it preserves the cookie because, to the browser,
+  // the WS is same-origin). In prod the FE/BE are colocated behind the same
+  // domain so this is also correct there. Do NOT branch on NEXT_PUBLIC_API_URL.
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
   const base = `${proto}//${window.location.host}`;
-  console.debug("[voice] WS base URL (from location):", base);
+  console.debug("[voice] WS base URL:", base);
   return base;
 }
 
