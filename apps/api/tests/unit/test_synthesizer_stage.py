@@ -82,6 +82,25 @@ def _ctx_with_rows(rows: list[list[object]]) -> PipelineContext:
     return ctx
 
 
+def test_prompt_forbids_combined_footnote_markers() -> None:
+    """The synthesizer prompt must explicitly forbid combined footnote markers
+    like `[^3, 5, 6]` — markdown footnote parsers only understand single-id
+    markers, so combined forms render as broken literal text in the UI.
+
+    See answer-chunk.tsx + lib/footnote-parser.ts (expandCombinedFootnoteMarkers)
+    for the FE defense-in-depth that catches whatever slips past the prompt.
+    """
+    text = PROMPT_PATH.read_text(encoding="utf-8")
+    assert "NEVER combine" in text, (
+        "answer_synthesizer.j2 must explicitly forbid combined markers "
+        "(text 'NEVER combine' missing). Multi-source claims must use "
+        "adjacent markers like [^3][^5][^6], never [^3, 5, 6]."
+    )
+    # The negative examples and positive guidance must both appear.
+    assert "[^3, 5, 6]" in text or "[^3,5,6]" in text
+    assert "[^3][^5][^6]" in text
+
+
 async def test_prompt_includes_references_section_and_rows_directive() -> None:
     """The synthesizer prompt must instruct the LLM to emit a 5th
     `## References` section using `{rows=...}` footnote directives, which the
