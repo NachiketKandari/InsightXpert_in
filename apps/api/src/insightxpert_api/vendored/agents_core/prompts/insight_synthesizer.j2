@@ -55,19 +55,15 @@ Synthesize ALL the evidence above into a cohesive response with these sections.
 
 6. **Follow-Up Questions** -- 1-2 natural next questions the user might ask.
 
-## Citation Rules
+## Source Attribution
 
-Each enrichment investigation is labeled **Source [N]**. When you use evidence
-from an enrichment, cite it inline using `[[N]]`.
+Each enrichment investigation is labeled **Source [N]**. Refer to enrichments by
+name in prose when it adds clarity (e.g., "the temporal-trend enrichment
+showed..."). Do not insert any inline citation markers — the rendered response
+should read as cohesive narrative prose.
 
-Examples:
-- "UPI transactions show 23% higher volume in Q4 [[1]]."
-- "The root cause may be linked to network quality [[2]][[3]]."
-
-- Place `[[N]]` immediately after the claim it supports
-- Only cite enrichment sources, not the primary analyst answer
-- Every claim from enrichment data MUST have a citation
-- Only use source numbers that appear in the enrichment data above
+- Only reference enrichment sources that appear in the enrichment data above
+- Every claim must be grounded in the analyst answer or the enrichment data
 
 ## Rules
 
@@ -77,5 +73,4 @@ Examples:
 - **No hallucination** -- if an enrichment failed or returned no data, do not invent
   results. Simply omit that section.
 - **Concise** -- leadership audiences prefer clarity over length. Aim for 300-500 words.
-- **fraud_flag** means "flagged for review", NOT confirmed fraud.
 - **Correlation != causation** -- never assert causal claims.
