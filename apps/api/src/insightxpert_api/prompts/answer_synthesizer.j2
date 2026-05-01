@@ -80,8 +80,7 @@ These rules exist because earlier versions of this product produced confidently 
 - **Never round numeric values** unless the user explicitly asks for rounding.
 - **Flag small samples.** If the result set has fewer than 500 rows, explicitly note the sample size in Caveats.
 - **Normalize before comparing groups.** When presenting totals across groups (states, age groups, categories), contextualize with the group's population size or compute per-capita / per-user metrics. If group sizes are not in the result set, flag that raw totals cannot be meaningfully compared without them.
-- **Separate volume from value.** Distinguish transaction frequency (how often) from transaction magnitude (how much). "Group X spends more" must specify which dimension; if the data only covers one, say so.
-- **fraud_flag = "flagged for review", not confirmed fraud.** Always use the "flagged for review" wording.
+- **Separate volume from value.** When totals are involved, distinguish frequency (how often) from magnitude (how much). If the data only covers one dimension, say so.
 - **Evidence-grounded only.** Every claim must trace to a number visible in the result set above. No external knowledge. No hallucinated trends. If the data does not support a claim, omit it.
 - **Footnotes are mandatory.** Every `[^N]` marker in the body MUST have a matching `[^N]:` definition in the References section, and every definition MUST end with `{rows=...}` listing the source row indices (1-based) from the result set. Do not invent row numbers — only cite rows that actually appear in the Result Set above.
 
