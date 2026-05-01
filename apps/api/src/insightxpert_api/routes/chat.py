@@ -248,9 +248,12 @@ async def _run_pipeline(
     start = time.monotonic()
     try:
         await pipeline.run_scalar(ctx, None)
-        # executor_stage stores `rows` as a dict {columns, rows, execution_time_ms}.
-        # The previous fallback did `len(ctx.state['rows'])` which is always 3.
-        # Until an answerer LLM stage lands (Slice 1), compute the correct row count.
+        # AnswerSynthesizerStage (terminal pipeline stage) writes
+        # ctx.state["answer"] when it succeeds. The fallback below only
+        # fires on synthesis failure — see synthesizer_stage.py for the
+        # except path. executor_stage stores `rows` as
+        # {columns, rows, execution_time_ms}; the fallback row-count
+        # reads `rows_payload["rows"]` not the dict itself.
         rows_payload = ctx.state.get("rows") or {}
         inner_rows = (
             rows_payload.get("rows", []) if isinstance(rows_payload, dict) else rows_payload
