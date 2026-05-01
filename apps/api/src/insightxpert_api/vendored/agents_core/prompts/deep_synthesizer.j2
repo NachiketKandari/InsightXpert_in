@@ -39,8 +39,8 @@ fabricate sections for dimensions with no data.
 
 ### Dimensional Sections (include only those with evidence)
 
-2. **WHO** — Actor-level insights: which customer segments, age groups, or
-   sender/receiver profiles are relevant? How do metrics differ across actors?
+2. **WHO** — Actor-level insights: which entities, segments, or profiles in the
+   data are relevant? How do metrics differ across actors?
 
 3. **WHAT** — Metric deep-dive: what are the key numbers, distributions, and
    notable values? How do they compare to benchmarks or averages?
@@ -48,11 +48,11 @@ fabricate sections for dimensions with no data.
 4. **WHEN** — Temporal patterns: how does the metric behave over time? Are
    there trends, seasonality, or notable periods?
 
-5. **WHERE** — Geographic patterns: how does the metric vary across states,
-   cities, or regions? Which locations stand out?
+5. **WHERE** — Geographic or location patterns: how does the metric vary across
+   the locations represented in the data? Which stand out?
 
-6. **HOW** — Mechanism insights: how do payment types, devices, networks, or
-   banks affect the metric? Which channels dominate or underperform?
+6. **HOW** — Mechanism insights: how do the channels, types, or methods present
+   in the schema affect the metric? Which dominate or underperform?
 
 ### Closing Sections
 
@@ -64,32 +64,27 @@ fabricate sections for dimensions with no data.
    grounded in the evidence.
    Each recommendation MUST cite specific segments,
    geographies, categories, or thresholds from the data — not generic advice.
-   Bad: "Tailor marketing to younger users." Good: "Target UPI promotions at
-   26-35 users in Maharashtra and Karnataka, who account for 42% of transaction
-   volume but have a 6.1% failure rate (vs. 3.8% average) [[2]]."
+   Bad: "Tailor outreach to younger users." Good: "Focus on the 26-35 cohort in
+   the top two regions, who account for 42% of volume but underperform the
+   dataset average by ~2.3 percentage points."
 
 9. **Follow-Up Questions** — 1-2 natural next questions the user might ask to
    deepen their understanding.
 
-## Citation Rules
+## Source Attribution
 
 Each source is labeled **Source [N]** where N is a number (1, 2, 3, etc.).
 Source [1] is always the original analyst answer. Sources [2]+ are enrichment
 tasks targeting specific dimensions.
 
-When you use evidence from a source, cite it inline using `[[N]]`.
-
-Examples:
-- "UPI transactions show 23% higher volume in Q4 [[2]]."
-- "The failure rate correlates with network type (r=0.72) [[2]][[3]]."
+Refer to sources by name in prose when it adds clarity (e.g., "the temporal-trend
+enrichment showed..."). Do not insert any inline citation markers — the rendered
+response should read as cohesive narrative prose.
 
 Rules:
-- Place `[[N]]` immediately after the claim it supports
-- Every claim from enrichment sources (Source [2]+) MUST have a citation
-- Source [1] does not need `[[1]]` on every claim since it directly answered the
-  user's question. Cite `[[1]]` when contrasting with enrichment sources.
-- Only use source numbers that appear in the evidence above
-- Failed sources should not be cited
+- Every claim must be grounded in the evidence from the sources above
+- Only reference sources that appear in the evidence above
+- Failed sources should not be referenced
 
 ## Rules
 
@@ -99,5 +94,4 @@ Rules:
 - **Caveat flagging** — flag small samples, potential confounders, synthetic data.
 - **No hallucination** — do not invent results for failed or missing sources.
 - **Concise** — aim for 300-500 words for 1-2 sources, up to 700 for 3+.
-- **fraud_flag** means "flagged for review", NOT confirmed fraud.
 - **Correlation != causation** — never assert causal claims.

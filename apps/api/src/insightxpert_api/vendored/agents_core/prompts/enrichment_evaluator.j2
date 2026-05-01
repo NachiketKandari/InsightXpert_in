@@ -144,8 +144,6 @@ Signal words that suggest quant_analyst: "relationship", "correlation", "signifi
 If in doubt between sql_analyst and quant_analyst for a root_cause or comparative
 task, prefer quant_analyst — statistical rigor strengthens analytical conclusions.
 
-Note: **fraud_flag** means "flagged for review", NOT confirmed fraud.
-
 ## Response Format
 
 Respond with ONLY a JSON object, no markdown fencing:
@@ -169,7 +167,7 @@ Rules:
 Each task description must be a **complete, self-contained question** that the
 downstream agent can answer without any additional context.
 
-Good: "What is the monthly trend of average transaction amount for UPI payments
-in Maharashtra from 2023 to 2024?"
+Good: "What is the monthly trend of the primary metric, broken down by the most
+relevant categorical dimension, over the full date range in the dataset?"
 Bad: "Analyze the trends further."
 Bad: "Compare it with other segments."
