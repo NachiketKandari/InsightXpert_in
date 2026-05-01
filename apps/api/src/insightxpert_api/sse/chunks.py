@@ -28,7 +28,7 @@ from __future__ import annotations
 import json
 from enum import Enum
 from time import time
-from typing import Union
+from typing import Literal, Union
 
 from pydantic import BaseModel, Field
 
@@ -68,6 +68,9 @@ class ChunkType(str, Enum):
 
     # --- Sample-questions ------------------------------------------------
     sample_questions_ready = "sample_questions.ready"
+
+    # --- Auto-mode router (synthetic chunk emitted before pipeline starts) -
+    auto_routed = "auto_routed"
 
     # --- Tier-4: orchestration transparency ------------------------------
     stats_context = "stats_context"
@@ -357,6 +360,18 @@ class SampleQuestionsReadyPayload(BaseModel):
     sample_questions: "SampleQuestions"  # forward-ref to sample_questions.types
 
 
+class AutoRoutedPayload(BaseModel):
+    """Routing decision emitted as the first chunk when ``agent_mode="auto"``.
+
+    The router (``services/mode_router.py``) classifies the question into one
+    of the two real modes; the FE renders this as a small pill at the top of
+    the assistant message so the routing is transparent.
+    """
+
+    mode: Literal["basic", "agentic"]
+    reason: str
+
+
 # ---------------------------------------------------------------------------
 # Envelope
 # ---------------------------------------------------------------------------
@@ -397,6 +412,8 @@ ChunkPayload = Union[
     ClarificationPayload,
     # Sample-questions
     SampleQuestionsReadyPayload,
+    # Auto-mode routing
+    AutoRoutedPayload,
 ]
 
 

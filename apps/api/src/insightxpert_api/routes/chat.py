@@ -32,8 +32,10 @@ from ..pipeline.stage import PipelineContext
 from ..services.conversation_store import ConversationStore, get_conversation_store
 from ..services.database_service import DatabaseService
 from ..services.profile_service import ProfileService
+from ..services.mode_router import RouteDecision, classify_mode
 from ..sse.chunks import (
     AnswerGeneratedPayload,
+    AutoRoutedPayload,
     ChatChunk as EnvelopeChatChunk,
     ChunkType,
     ErrorPayload,
@@ -136,7 +138,13 @@ class ChatRequest(BaseModel):
     # B2: when set, dispatch to the vendored orchestrator_loop with our
     # pipeline-wrapping analyst injected. When None, route falls back to the
     # legacy Phase A pipeline path so existing tests/clients stay green.
-    agent_mode: Literal["basic", "agentic"] | None = None
+    # ``"auto"`` triggers a server-side LLM classifier (services/mode_router)
+    # that decides between basic / agentic. The resolved mode is also emitted
+    # as a synthetic ``auto_routed`` chunk so the FE can show what was picked
+    # and why. The FE may also call ``POST /chat/route`` first and resolve to
+    # a concrete mode itself; we still re-classify here as defense-in-depth
+    # if a client sends ``"auto"`` directly.
+    agent_mode: Literal["basic", "agentic", "auto"] | None = None
     # Tier-1 full-schema mode (admin only). Precedence: this value (if admin)
     # → per-DB ``pipeline_mode_default`` → system default ``"linked"``.
     # Non-admin callers that send a non-null value get 403.
@@ -152,6 +160,38 @@ class ChatAnswerResponse(BaseModel):
 class ChatPollResponse(BaseModel):
     conversation_id: str
     chunks: list[dict[str, Any]]
+
+
+async def _resolve_auto_mode(
+    body: "ChatRequest",
+    settings: Settings,
+    emitter: "EventEmitter | None" = None,
+) -> RouteDecision | None:
+    """If ``body.agent_mode == "auto"``, classify and mutate ``body.agent_mode``
+    to the resolved concrete mode. Returns the ``RouteDecision`` so callers
+    can also surface it (e.g. emit an ``auto_routed`` chunk).
+
+    Defense-in-depth: even if the FE already pre-routed via ``/chat/route``,
+    we never trust ``"auto"`` reaching this layer — we re-classify so a
+    misbehaving client cannot send arbitrary modes through.
+
+    When ``emitter`` is provided, an ``auto_routed`` chunk is queued so the
+    UI can show the routing decision before any pipeline activity starts.
+    """
+    if body.agent_mode != "auto":
+        return None
+    decision = await classify_mode(
+        question=body.message,
+        db_id=body.db_id,
+        settings=settings,
+    )
+    body.agent_mode = decision.mode
+    if emitter is not None:
+        await emitter.emit(
+            ChunkType.auto_routed,
+            AutoRoutedPayload(mode=decision.mode, reason=decision.reason),
+        )
+    return decision
 
 
 def _resolve_pipeline_mode(body: "ChatRequest", cu: CurrentUser) -> str:
@@ -360,6 +400,12 @@ async def chat_sse(
         convo.conversation_id,
         on_emit=_on_emit,
     )
+    # Resolve auto-mode here (defense in depth — even if FE pre-routed via
+    # /chat/route, never trust ``"auto"`` reaching the dispatcher). The
+    # auto_routed chunk is queued on the emitter so it streams as the very
+    # first chunk before any pipeline activity.
+    await _resolve_auto_mode(body, settings, emitter)
+
     snapshot_rec = {
         "user_id": cu.id,
         "conversation_id": convo.conversation_id,
@@ -682,6 +728,7 @@ async def chat_poll(
             cu.id, convo.conversation_id, chunk.model_dump(mode="json")
         ),
     )
+    await _resolve_auto_mode(body, settings, emitter)
     if body.agent_mode is not None:
         chunks = await _collect_chunks_orchestrator(
             body, cu, settings, convo_store, emitter, convo.conversation_id
@@ -724,6 +771,7 @@ async def chat_answer(
             cu.id, convo.conversation_id, chunk.model_dump(mode="json")
         ),
     )
+    await _resolve_auto_mode(body, settings, emitter)
     if body.agent_mode is not None:
         chunks = await _collect_chunks_orchestrator(
             body, cu, settings, convo_store, emitter, convo.conversation_id
@@ -768,3 +816,39 @@ async def chat_answer(
         answer=answer,
         sql=sqls,
     )
+
+
+# ---------------------------------------------------------------------------
+# Auto-mode pre-flight router
+# ---------------------------------------------------------------------------
+
+
+class ChatRouteRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=4096)
+    db_id: str = Field(min_length=1, max_length=128)
+
+
+class ChatRouteResponse(BaseModel):
+    mode: Literal["basic", "agentic"]
+    reason: str
+
+
+@router.post("/chat/route", response_model=ChatRouteResponse)
+async def chat_route(
+    body: ChatRouteRequest,
+    cu: CurrentUser = Depends(get_current_user),
+    settings: Settings = Depends(get_settings),
+) -> ChatRouteResponse:
+    """Classify a question for the auto-mode chat dispatch.
+
+    Called by the FE when ``agentMode === "auto"`` so the UI can show the
+    routed mode + reason before the (heavier) ``/chat`` request starts. The
+    server-side fallback in ``/chat`` re-classifies if a client sends
+    ``agent_mode="auto"`` directly — never trust the client.
+    """
+    decision = await classify_mode(
+        question=body.question,
+        db_id=body.db_id,
+        settings=settings,
+    )
+    return ChatRouteResponse(mode=decision.mode, reason=decision.reason)
