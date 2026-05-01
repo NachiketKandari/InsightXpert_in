@@ -25,6 +25,16 @@ def _vendored_prompt(*parts: str) -> str:
     return str(base.joinpath(*parts))
 
 
+def _project_prompt(*parts: str) -> str:
+    """Resolve a prompt path under apps/api/src/insightxpert_api/prompts/.
+
+    Used for prompts that are project-original (not vendored from
+    public/InsightXpert). Sibling helper to ``_vendored_prompt``.
+    """
+    base = Path(__file__).resolve().parent.parent / "prompts"
+    return str(base.joinpath(*parts))
+
+
 PipelineMode = Literal["linked", "full_schema"]
 
 
@@ -51,6 +61,7 @@ def default_pipeline(
     from .linker_stage import SchemaLinkerStage
     from .profiler_stage import ProfilerStage
     from .refiner_stage import SqlRefinerStage
+    from .synthesizer_stage import AnswerSynthesizerStage
     from .validator_stage import SqlValidatorStage
 
     llm = GeminiLLM(
@@ -83,6 +94,10 @@ def default_pipeline(
             max_iters=settings.max_refinement_iterations,
             db_svc=db_svc,
             prompt_path=_vendored_prompt("prompts", "refine_sql.j2"),
+        ),
+        AnswerSynthesizerStage(
+            llm=llm,
+            prompt_path=_project_prompt("answer_synthesizer.j2"),
         ),
     ])
     # Expose the adapter so the route layer can read per-turn token totals
