@@ -66,6 +66,7 @@ async def orchestrator_loop(
     clarification_enabled: bool = False,
     rag_retrieval: bool = True,
     analyst_impl=None,
+    documentation_override: str | None = None,
 ) -> AsyncGenerator[ChatChunk, None]:
     """Run the orchestrator pipeline.
 
@@ -112,7 +113,15 @@ async def orchestrator_loop(
             )
 
     effective_ddl = ddl_override or DDL
-    effective_docs = docs_override or DOCUMENTATION
+    # ``documentation_override`` (caller-supplied, profile-derived) wins over
+    # the upstream dataset_service lookup, which in turn wins over the empty
+    # ``DOCUMENTATION`` fallback. This is how the chat dispatcher injects the
+    # active database's profile-driven business context into the analyst's
+    # system prompt without depending on upstream's dataset_service.
+    effective_docs = documentation_override or docs_override or DOCUMENTATION
+    if documentation_override is not None:
+        # Also forward to the analyst path below.
+        docs_override = documentation_override
 
     # Resolve effective clarification_enabled: if skip_clarification is True
     # (user clicked "Just answer"), disable clarification for this request.

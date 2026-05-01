@@ -45,6 +45,9 @@ from ..sse.emitter import EventEmitter
 from ..storage import build_store
 from ..vendored.agents_core.api.models import ChatChunk as VendoredChatChunk
 from ..vendored.agents_core.orchestrator import orchestrator_loop
+from ..vendored.agents_core.training.documentation import (
+    documentation_from_profile,
+)
 
 router = APIRouter(prefix="/api/v1", tags=["chat"])
 log = get_logger("chat")
@@ -544,6 +547,24 @@ async def _run_orchestrator(
         prof_svc=prof_svc,
     )
 
+    # Build profile-driven business context for the active database. This
+    # replaces the previous hardcoded UPI ``DOCUMENTATION`` block that was
+    # being injected into the analyst's system prompt regardless of which
+    # database the user had selected. Failure to load is non-fatal — the
+    # orchestrator falls back to an empty doc string.
+    documentation_md: str | None = None
+    try:
+        profile = await asyncio.to_thread(prof_svc.load, cu.id, body.db_id)
+        if profile is not None:
+            documentation_md = documentation_from_profile(profile)
+    except Exception:  # noqa: BLE001
+        log.warning(
+            "chat.documentation_build_failed",
+            session_id=cu.id,
+            db_id=body.db_id,
+            exc_info=True,
+        )
+
     answer_text = ""
     final_sql_seen: str | None = None
     try:
@@ -560,6 +581,7 @@ async def _run_orchestrator(
             rag_retrieval=False,  # no vector store wired in v1
             stats_context_injection=False,  # StatsResolver not wired
             clarification_enabled=False,
+            documentation_override=documentation_md,
         ):
             envelope = _vendored_to_envelope(vchunk)
             if envelope is None:
