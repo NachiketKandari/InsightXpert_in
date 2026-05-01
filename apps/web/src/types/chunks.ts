@@ -94,3 +94,18 @@ export interface AnswerGeneratedData {
 export interface AnswerDeltaData {
   text: string;
 }
+
+/**
+ * Per-DB few-shot QA pair retrieved during the route's preflight.
+ *
+ * Emitted as a single ``few_shot_retrieved`` chunk before any pipeline
+ * activity, so the trace UI can show "we pulled this similar example" up
+ * front. The same pair is then threaded into the SQL-gen prompt's
+ * ``{% if few_shot_example %}`` block.
+ */
+export interface FewShotRetrievedData {
+  question: string;
+  gold_sql: string;
+  similarity: number;
+  source_db_id: string;
+}

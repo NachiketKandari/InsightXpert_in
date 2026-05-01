@@ -9,6 +9,7 @@
  *  Anything not in this map gets title-cased by `getChunkTypeLabel`. */
 export const CHUNK_TYPE_LABELS: Record<string, string> = {
   profile_loaded: "Loaded database profile",
+  few_shot_retrieved: "Pulled similar example",
   schema_linking_started: "Linking schema",
   candidate_sqls_generated: "Drafted trial queries",
   literals_extracted: "Extracted literals",

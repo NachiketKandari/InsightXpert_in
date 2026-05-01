@@ -32,6 +32,7 @@ import { SqlExecutingChunk } from "./sql-executing-chunk";
 import { RowsReturnedChunk } from "./rows-returned-chunk";
 import { AnswerGeneratedChunk } from "./answer-generated-chunk";
 import { AutoRoutedChunk } from "./auto-routed-chunk";
+import { FewShotRetrievedChunk } from "./few-shot-chunk";
 import type {
   ProfileLoadedData,
   SchemaLinkingStartedData,
@@ -44,6 +45,7 @@ import type {
   SqlExecutingData,
   RowsReturnedData,
   AnswerGeneratedData,
+  FewShotRetrievedData,
 } from "@/types/chunks";
 
 /** Inline progress step: spinner → checkmark after a brief delay during streaming. */
@@ -343,6 +345,14 @@ function ChunkRendererInner({ chunk, isComplete, isStreaming, enrichmentTraces, 
     // delta to message.content; the existing answer rendering picks it up.
     case "answer_delta":
       return null;
+
+    case "few_shot_retrieved":
+      content = (
+        <FewShotRetrievedChunk
+          data={chunk.data as unknown as FewShotRetrievedData}
+        />
+      );
+      break;
 
     case "auto_routed": {
       const mode = chunk.data?.mode as "basic" | "agentic" | undefined;

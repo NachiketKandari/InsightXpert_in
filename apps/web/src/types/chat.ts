@@ -32,7 +32,9 @@ export type ChunkType =
   // Sample questions side-channel
   | "sample_questions.ready"
   // Auto-mode router decision (synthetic, emitted before pipeline activity)
-  | "auto_routed";
+  | "auto_routed"
+  // Few-shot retrieval (preflight transparency, before schema linking)
+  | "few_shot_retrieved";
 
 export interface ChatChunk {
   type: ChunkType;
