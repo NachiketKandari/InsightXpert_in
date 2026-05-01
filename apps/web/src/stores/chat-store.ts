@@ -343,11 +343,12 @@ export const useChatStore = create<ChatState>()(persist((set, get) => ({
         // persistence) work uniformly. The Tier-3 answer_generated chunk
         // carries the text inside data.text; Tier-2 answer/insight chunks use
         // the legacy top-level chunk.content field.
-        const answerGeneratedText =
-          chunk.type === "answer_generated" &&
-          typeof (chunk.data as { text?: unknown } | null)?.text === "string"
-            ? (chunk.data as { text: string }).text
+        const answerData =
+          chunk.type === "answer_generated"
+            ? (chunk.data as { text?: unknown })
             : null;
+        const answerGeneratedText =
+          typeof answerData?.text === "string" ? answerData.text : null;
         const legacyContent =
           (chunk.type === "answer" || chunk.type === "insight") && chunk.content
             ? chunk.content
