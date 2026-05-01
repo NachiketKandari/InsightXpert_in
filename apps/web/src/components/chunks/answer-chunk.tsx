@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ChevronDown, ChevronRight } from "lucide-react";
@@ -9,9 +9,32 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import {
+  parseFootnoteRowMap,
+  stripRowsDirectives,
+} from "@/lib/footnote-parser";
+import { useChatStore } from "@/stores/chat-store";
 
 interface AnswerChunkProps {
   content: string;
+  /**
+   * The id of the assistant message this answer belongs to. Used to scope
+   * footnote-citation highlights so the data-table chunk for the same message
+   * (and only that message) flashes the cited rows. Optional for back-compat
+   * with older callers, but every in-thread render path passes it.
+   */
+  messageId?: string;
+}
+
+/** Extract a footnote id from a remark-gfm footnote anchor href. */
+function footnoteIdFromHref(href: string | undefined): string | null {
+  if (!href) return null;
+  // remark-gfm emits anchors like:
+  //   #user-content-fn-1            (footnote definition target)
+  //   #user-content-fnref-1         (back-ref from definition)
+  //   #user-content-fnref-1-2       (multi-ref disambiguation suffix)
+  const m = href.match(/^#user-content-fn(?:ref)?-([^-\s]+)/);
+  return m ? m[1] : null;
 }
 
 /** Normalize dashes (em-dash, en-dash, hyphen) to spaces and collapse whitespace. */
@@ -97,7 +120,13 @@ function parseSections(markdown: string): {
 }
 
 /** Shared markdown renderer for analyst sections. */
-function AnalystMarkdown({ content }: { content: string }) {
+function AnalystMarkdown({
+  content,
+  onFootnoteClick,
+}: {
+  content: string;
+  onFootnoteClick?: (footnoteId: string) => void;
+}) {
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
@@ -176,16 +205,44 @@ function AnalystMarkdown({ content }: { content: string }) {
             {children}
           </td>
         ),
-        a: ({ children, href }) => (
-          <a
-            href={href}
-            className="text-primary underline underline-offset-2 hover:text-primary/80"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            {children}
-          </a>
-        ),
+        a: ({ children, href }) => {
+          const footnoteId = footnoteIdFromHref(href);
+          if (footnoteId !== null) {
+            // remark-gfm wraps footnote markers in <sup><a>...</a></sup>.
+            // Intercept the click so we can flash the cited rows in the
+            // data-table above instead of jumping to the page anchor.
+            const isBackref = href?.includes("user-content-fnref-");
+            return (
+              <a
+                href={href}
+                data-footnote-id={footnoteId}
+                onClick={(e) => {
+                  if (onFootnoteClick) {
+                    e.preventDefault();
+                    onFootnoteClick(footnoteId);
+                  }
+                }}
+                className={
+                  isBackref
+                    ? "text-primary/70 hover:text-primary underline-offset-2 no-underline"
+                    : "text-primary font-medium hover:text-primary/80 underline-offset-2 hover:underline cursor-pointer"
+                }
+              >
+                {children}
+              </a>
+            );
+          }
+          return (
+            <a
+              href={href}
+              className="text-primary underline underline-offset-2 hover:text-primary/80"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {children}
+            </a>
+          );
+        },
         blockquote: ({ children }) => (
           <blockquote className="border-l-2 border-primary/50 pl-3 text-sm text-muted-foreground italic my-2">
             {children}
@@ -202,9 +259,11 @@ function AnalystMarkdown({ content }: { content: string }) {
 function CollapsibleSection({
   title,
   content,
+  onFootnoteClick,
 }: {
   title: string;
   content: string;
+  onFootnoteClick?: (footnoteId: string) => void;
 }) {
   const [isOpen, setIsOpen] = useState(false);
 
@@ -222,15 +281,40 @@ function CollapsibleSection({
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div className="px-3 pt-2 pb-1">
-          <AnalystMarkdown content={content} />
+          <AnalystMarkdown content={content} onFootnoteClick={onFootnoteClick} />
         </div>
       </CollapsibleContent>
     </Collapsible>
   );
 }
 
-function AnswerChunkInner({ content }: AnswerChunkProps) {
-  const { preamble, sections } = useMemo(() => parseSections(content), [content]);
+function AnswerChunkInner({ content, messageId }: AnswerChunkProps) {
+  // Parse the {rows=...} footnote directives BEFORE we strip them, so we can
+  // wire each [^N] click to the right rows in the data-table above. Then
+  // strip the directives from the markdown source so they don't render as
+  // visible noise inside the References section.
+  const { footnoteRows, displayContent } = useMemo(() => {
+    const rows = parseFootnoteRowMap(content);
+    const stripped = stripRowsDirectives(content);
+    return { footnoteRows: rows, displayContent: stripped };
+  }, [content]);
+
+  const setMessageHighlight = useChatStore((s) => s.setMessageHighlight);
+
+  const handleFootnoteClick = useCallback(
+    (footnoteId: string) => {
+      if (!messageId) return;
+      const rowIndices = footnoteRows[footnoteId] ?? [];
+      if (rowIndices.length === 0) return;
+      setMessageHighlight({ messageId, rowIndices });
+    },
+    [messageId, footnoteRows, setMessageHighlight],
+  );
+
+  const { preamble, sections } = useMemo(
+    () => parseSections(displayContent),
+    [displayContent],
+  );
   const primarySections = sections.filter((s) => s.isPrimary);
   const secondarySections = sections.filter((s) => !s.isPrimary);
   const hasSections = sections.length > 0;
@@ -239,14 +323,22 @@ function AnswerChunkInner({ content }: AnswerChunkProps) {
     <div className="prose-invert prose-sm max-w-none">
       {hasSections ? (
         <div className="space-y-3">
-          {preamble && <AnalystMarkdown content={preamble} />}
+          {preamble && (
+            <AnalystMarkdown
+              content={preamble}
+              onFootnoteClick={handleFootnoteClick}
+            />
+          )}
 
           {primarySections.map((section, i) => (
             <div key={`primary-${i}`}>
               <h3 className="text-sm font-semibold text-foreground mt-2 mb-1.5">
                 {section.title}
               </h3>
-              <AnalystMarkdown content={section.content} />
+              <AnalystMarkdown
+                content={section.content}
+                onFootnoteClick={handleFootnoteClick}
+              />
             </div>
           ))}
 
@@ -257,13 +349,17 @@ function AnswerChunkInner({ content }: AnswerChunkProps) {
                   key={`secondary-${i}`}
                   title={section.title}
                   content={section.content}
+                  onFootnoteClick={handleFootnoteClick}
                 />
               ))}
             </div>
           )}
         </div>
       ) : (
-        <AnalystMarkdown content={content} />
+        <AnalystMarkdown
+          content={displayContent}
+          onFootnoteClick={handleFootnoteClick}
+        />
       )}
     </div>
   );

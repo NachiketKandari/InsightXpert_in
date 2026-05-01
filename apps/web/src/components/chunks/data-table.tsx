@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect, useRef } from "react";
+import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 
 interface DataTableProps {
@@ -16,6 +18,17 @@ interface DataTableProps {
   headerCellClassName?: string;
   rowClassName?: (index: number) => string;
   cellClassName?: string;
+  /**
+   * 0-based row indices to flash with a yellow highlight. The first index in
+   * the array is also scrolled into view. Driven by citation footnote
+   * clicks in AnswerChunk; see `chat-store.messageHighlight`.
+   */
+  highlightedRowIndices?: number[];
+  /**
+   * Timestamp from the highlight store; when this changes the animation
+   * re-triggers (used as the framer-motion `key` for highlighted rows).
+   */
+  highlightTs?: number | null;
 }
 
 export function DataTable({
@@ -31,8 +44,29 @@ export function DataTable({
   headerCellClassName,
   rowClassName,
   cellClassName,
+  highlightedRowIndices,
+  highlightTs,
 }: DataTableProps) {
   const scrollStyle = maxHeight !== "none" ? { maxHeight } : undefined;
+
+  // Indices to flash. Empty/undefined = no highlight active.
+  const highlightSet = new Set(highlightedRowIndices ?? []);
+  const firstHighlight =
+    highlightedRowIndices && highlightedRowIndices.length > 0
+      ? Math.min(...highlightedRowIndices)
+      : null;
+
+  const rowRefs = useRef<Record<number, HTMLTableRowElement | null>>({});
+
+  // When a new highlight arrives (ts changes), scroll the first cited row
+  // into view. Native smooth-scroll, no library.
+  useEffect(() => {
+    if (firstHighlight == null || highlightTs == null) return;
+    const el = rowRefs.current[firstHighlight];
+    if (el && typeof el.scrollIntoView === "function") {
+      el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  }, [firstHighlight, highlightTs]);
 
   return (
     <div className={cn("", className)}>
@@ -71,15 +105,37 @@ export function DataTable({
             </tr>
           </thead>
           <tbody className={loading ? "opacity-40 transition-opacity" : "transition-opacity"}>
-            {rows.map((row, i) => (
-              <tr
-                key={i}
-                className={
-                  rowClassName
-                    ? rowClassName(i)
-                    : i % 2 === 0
-                      ? "bg-transparent"
-                      : "bg-muted/20"
+            {rows.map((row, i) => {
+              const isHighlighted = highlightSet.has(i);
+              const baseClass = rowClassName
+                ? rowClassName(i)
+                : i % 2 === 0
+                  ? "bg-transparent"
+                  : "bg-muted/20";
+              return (
+              <motion.tr
+                ref={(el) => {
+                  rowRefs.current[i] = el;
+                }}
+                // Re-key on each new highlight so framer re-runs the animation
+                // (re-clicking the same footnote re-flashes the row).
+                key={isHighlighted && highlightTs != null ? `${i}-${highlightTs}` : i}
+                className={baseClass}
+                animate={
+                  isHighlighted
+                    ? {
+                        backgroundColor: [
+                          "rgba(234,179,8,0.30)",
+                          "rgba(234,179,8,0.30)",
+                          "rgba(234,179,8,0.00)",
+                        ],
+                      }
+                    : undefined
+                }
+                transition={
+                  isHighlighted
+                    ? { duration: 2.5, times: [0, 0.2, 1], ease: "easeOut" }
+                    : undefined
                 }
               >
                 {showRowNumbers && (
@@ -102,8 +158,9 @@ export function DataTable({
                     )}
                   </td>
                 ))}
-              </tr>
-            ))}
+              </motion.tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

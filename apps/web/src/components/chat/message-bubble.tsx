@@ -204,6 +204,7 @@ function MessageBubbleInner({
                     enrichmentTraces={enrichmentTraces}
                     orchestratorPlan={orchestratorPlan}
                     agentTraces={agentTraces}
+                    messageId={message.id}
                   />
                 );
               })}

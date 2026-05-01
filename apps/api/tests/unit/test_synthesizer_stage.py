@@ -82,6 +82,26 @@ def _ctx_with_rows(rows: list[list[object]]) -> PipelineContext:
     return ctx
 
 
+async def test_prompt_includes_references_section_and_rows_directive() -> None:
+    """The synthesizer prompt must instruct the LLM to emit a 5th
+    `## References` section using `{rows=...}` footnote directives, which the
+    FE parses for clickable citations."""
+    llm = AsyncMock()
+    llm.async_generate = AsyncMock(return_value="**Direct Answer** ok.")
+    stage = AnswerSynthesizerStage(llm=llm, prompt_path=str(PROMPT_PATH))
+    ctx = _ctx_with_rows([["customers", "table"]])
+
+    await stage.run(ctx, None)
+
+    prompt_arg = llm.async_generate.await_args.args[0]
+    assert "## References" in prompt_arg
+    assert "{rows=" in prompt_arg
+    # Ensure the spec lists all four supported syntaxes.
+    assert "{rows=N}" in prompt_arg
+    assert "{rows=N,M,P}" in prompt_arg
+    assert "{rows=N-M}" in prompt_arg
+
+
 async def test_success_writes_answer_to_ctx_state() -> None:
     full_answer = (
         "**Direct Answer** This database has 5 tables.\n\n"

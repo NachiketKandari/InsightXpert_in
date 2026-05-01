@@ -77,9 +77,17 @@ interface ChunkRendererProps {
   enrichmentTraces?: EnrichmentTrace[];
   orchestratorPlan?: OrchestratorPlan | null;
   agentTraces?: AgentTrace[];
+  /**
+   * Id of the assistant message owning this chunk. Threaded through so that
+   * AnswerChunk / AnswerGeneratedChunk can dispatch citation highlights to
+   * the data-table chunk for the same message, and ToolResultChunk can
+   * subscribe to highlights addressed at it. Optional for back-compat with
+   * legacy callers; in-thread renders always pass it.
+   */
+  messageId?: string;
 }
 
-function ChunkRendererInner({ chunk, isComplete, isStreaming, enrichmentTraces, orchestratorPlan, agentTraces }: ChunkRendererProps) {
+function ChunkRendererInner({ chunk, isComplete, isStreaming, enrichmentTraces, orchestratorPlan, agentTraces, messageId }: ChunkRendererProps) {
   const parsed = useMemo(
     () => (chunk.type === "tool_result" ? parseToolResult(chunk) : null),
     [chunk],
@@ -140,7 +148,7 @@ function ChunkRendererInner({ chunk, isComplete, isStreaming, enrichmentTraces, 
     case "tool_result":
       content = (
         <>
-          <ToolResultChunk chunk={chunk} parsedData={parsed} />
+          <ToolResultChunk chunk={chunk} parsedData={parsed} messageId={messageId} />
           {willShowChart && parsed && (
             <>
               <motion.div
@@ -177,7 +185,7 @@ function ChunkRendererInner({ chunk, isComplete, isStreaming, enrichmentTraces, 
       content = (
         <>
           <ProgressStep label="Generating answer" isComplete={isComplete} />
-          <AnswerChunk content={legacyText} />
+          <AnswerChunk content={legacyText} messageId={messageId} />
         </>
       );
       break;
@@ -197,7 +205,7 @@ function ChunkRendererInner({ chunk, isComplete, isStreaming, enrichmentTraces, 
           {enrichmentTraces && enrichmentTraces.length > 0 ? (
             <InsightChunk content={insightText} traces={enrichmentTraces} />
           ) : (
-            <AnswerChunk content={insightText} />
+            <AnswerChunk content={insightText} messageId={messageId} />
           )}
         </>
       );
@@ -321,6 +329,7 @@ function ChunkRendererInner({ chunk, isComplete, isStreaming, enrichmentTraces, 
           <ProgressStep label="Generated answer" isComplete={isComplete} />
           <AnswerGeneratedChunk
             data={chunk.data as unknown as AnswerGeneratedData}
+            messageId={messageId}
           />
         </>
       );
