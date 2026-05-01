@@ -47,6 +47,7 @@ from jinja2 import Template
 
 from ..llm import LLMProvider
 from ..logging import get_logger
+from ..sse.chunks import AnswerDeltaPayload, ChunkType
 from .stage import PipelineContext
 
 log = get_logger("pipeline.synthesizer_stage")
@@ -86,16 +87,38 @@ class AnswerSynthesizerStage:
             row_count=row_count,
         )
 
+        # Streaming path: yield deltas as they arrive so the FE can render the
+        # answer materializing live. We accumulate locally and write the full
+        # text to ctx.state["answer"] on completion — the route epilogue still
+        # emits the terminal answer_generated chunk with the canonical text.
+        #
+        # Note: this stage emits incremental answer_delta chunks DURING run(),
+        # which is a deliberate departure from the project's "stage writes
+        # state, route emits" pattern. Streaming inherently requires
+        # mid-execution emits; the pattern still holds for the terminal
+        # answer_generated emission, which remains the route's responsibility.
+        chunks: list[str] = []
         try:
-            answer = (await self._llm.async_generate(prompt)).strip()
+            stream = self._llm.async_generate_stream(prompt)
+            async for delta in stream:
+                if not delta:
+                    continue
+                chunks.append(delta)
+                if ctx.emitter is not None:
+                    await ctx.emitter.emit(
+                        ChunkType.answer_delta,
+                        AnswerDeltaPayload(text=delta),
+                    )
+            answer = "".join(chunks).strip()
             if not answer:
-                # Empty LLM response — treat as failure for fallback purposes.
+                # Empty stream — treat as failure for fallback purposes.
                 raise ValueError("empty response from LLM")
         except Exception as exc:  # noqa: BLE001 — never abort the turn on synthesis failure
             log.warning(
                 "answer_synthesis_failed",
                 error=str(exc),
                 error_type=type(exc).__name__,
+                partial_chunks=len(chunks),
             )
             answer = f"Query returned {row_count} rows."
 
