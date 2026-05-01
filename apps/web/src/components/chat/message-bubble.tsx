@@ -11,6 +11,17 @@ import { useCurrentUser } from "@/hooks/use-current-user";
 import type { Message, EnrichmentTrace, OrchestratorPlan, AgentTrace } from "@/types/chat";
 import { downloadMessageReport, downloadConversationReport } from "@/lib/export-report";
 
+// Chunk types whose UI renderers care about an "is this stage finished?" hint.
+// A chunk is considered complete when a later chunk has arrived, or when the
+// overall stream has ended. Other chunk types render statically and do not
+// need the hint (they pass undefined).
+const COMPLETABLE_CHUNK_TYPES = new Set<string>([
+  "status",
+  "tool_call",
+  "answer",
+  "sql_executing", // bug fix 2026-05-01: was missing → spinner never stopped
+]);
+
 const MessageMetrics = React.memo(function MessageMetrics({ message }: { message: Message }) {
   const { wallTimeMs, generationTimeMs, inputTokens, outputTokens } = message;
   if (!wallTimeMs && !generationTimeMs && !inputTokens && !outputTokens) return null;
@@ -178,21 +189,24 @@ function MessageBubbleInner({
         <div className="w-full space-y-3">
           {message.chunks.length > 0 ? (
             <>
-              {message.chunks.map((chunk, i) => (
-                <ChunkRenderer
-                  key={i}
-                  chunk={chunk}
-                  isComplete={
-                    chunk.type === "status" || chunk.type === "tool_call" || chunk.type === "answer"
-                      ? i < message.chunks.length - 1 || !isStreaming
-                      : undefined
-                  }
-                  isStreaming={isStreaming && !!isLastAssistant}
-                  enrichmentTraces={enrichmentTraces}
-                  orchestratorPlan={orchestratorPlan}
-                  agentTraces={agentTraces}
-                />
-              ))}
+              {message.chunks.map((chunk, i) => {
+                const completable = COMPLETABLE_CHUNK_TYPES.has(chunk.type);
+                return (
+                  <ChunkRenderer
+                    key={i}
+                    chunk={chunk}
+                    isComplete={
+                      completable
+                        ? i < message.chunks.length - 1 || !isStreaming
+                        : undefined
+                    }
+                    isStreaming={isStreaming && !!isLastAssistant}
+                    enrichmentTraces={enrichmentTraces}
+                    orchestratorPlan={orchestratorPlan}
+                    agentTraces={agentTraces}
+                  />
+                );
+              })}
               {isStreaming && isLastAssistant && (() => {
                 const last = message.chunks[message.chunks.length - 1];
                 if (last?.type === "answer" || last?.type === "error") return null;
