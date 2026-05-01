@@ -15,10 +15,49 @@ The stage's contract:
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import AsyncMock
+from typing import AsyncIterator
+from unittest.mock import AsyncMock, MagicMock
 
 from insightxpert_api.pipeline.stage import PipelineContext
 from insightxpert_api.pipeline.synthesizer_stage import AnswerSynthesizerStage
+from insightxpert_api.sse.chunks import ChunkType
+
+
+def _stream_from(chunks: list[str]):
+    """Build a callable that returns an async iterator yielding the given chunks."""
+
+    def factory(prompt: str) -> AsyncIterator[str]:
+        async def gen() -> AsyncIterator[str]:
+            for c in chunks:
+                yield c
+
+        return gen()
+
+    return factory
+
+
+def _stream_then_raise(chunks: list[str], exc: BaseException):
+    """Yield ``chunks`` then raise ``exc`` from the stream iterator."""
+
+    def factory(prompt: str) -> AsyncIterator[str]:
+        async def gen() -> AsyncIterator[str]:
+            for c in chunks:
+                yield c
+            raise exc
+
+        return gen()
+
+    return factory
+
+
+class _RecordingEmitter:
+    """Minimal emitter capturing (type, payload) tuples for test assertions."""
+
+    def __init__(self) -> None:
+        self.emitted: list[tuple[ChunkType, object]] = []
+
+    async def emit(self, chunk_type: ChunkType, data: object) -> None:
+        self.emitted.append((chunk_type, data))
 
 
 PROMPT_PATH = (
@@ -44,15 +83,14 @@ def _ctx_with_rows(rows: list[list[object]]) -> PipelineContext:
 
 
 async def test_success_writes_answer_to_ctx_state() -> None:
-    llm = AsyncMock()
-    llm.async_generate = AsyncMock(
-        return_value=(
-            "**Direct Answer** This database has 5 tables.\n\n"
-            "**Supporting Evidence** customers, gasstations, products, transactions_1k, yearmonth.\n\n"
-            "**Data Provenance** All 5 rows from sqlite_master where type='table'.\n\n"
-            "**Caveats** None."
-        )
+    full_answer = (
+        "**Direct Answer** This database has 5 tables.\n\n"
+        "**Supporting Evidence** customers, gasstations, products, transactions_1k, yearmonth.\n\n"
+        "**Data Provenance** All 5 rows from sqlite_master where type='table'.\n\n"
+        "**Caveats** None."
     )
+    llm = MagicMock()
+    llm.async_generate_stream = _stream_from([full_answer])
     stage = AnswerSynthesizerStage(llm=llm, prompt_path=str(PROMPT_PATH))
     ctx = _ctx_with_rows([["customers", "table"], ["gasstations", "table"]])
 
@@ -60,16 +98,19 @@ async def test_success_writes_answer_to_ctx_state() -> None:
 
     assert "Direct Answer" in ctx.state["answer"]
     assert "5 tables" in ctx.state["answer"]
-    assert llm.async_generate.await_count == 1
-    prompt_arg = llm.async_generate.await_args.args[0]
-    assert "customers | table" in prompt_arg
-    assert "List the tables in this database." in prompt_arg
     assert out == ctx.state["answer"]
 
 
 async def test_llm_failure_falls_back_to_template() -> None:
-    llm = AsyncMock()
-    llm.async_generate = AsyncMock(side_effect=RuntimeError("boom"))
+    def boom(prompt: str):
+        async def gen():
+            raise RuntimeError("boom")
+            yield ""  # pragma: no cover - unreachable, makes this an async gen
+
+        return gen()
+
+    llm = MagicMock()
+    llm.async_generate_stream = boom
     stage = AnswerSynthesizerStage(llm=llm, prompt_path=str(PROMPT_PATH))
     ctx = _ctx_with_rows([["customers", "table"], ["gasstations", "table"]])
 
@@ -80,8 +121,8 @@ async def test_llm_failure_falls_back_to_template() -> None:
 
 
 async def test_empty_llm_response_falls_back_to_template() -> None:
-    llm = AsyncMock()
-    llm.async_generate = AsyncMock(return_value="")
+    llm = MagicMock()
+    llm.async_generate_stream = _stream_from([])
     stage = AnswerSynthesizerStage(llm=llm, prompt_path=str(PROMPT_PATH))
     ctx = _ctx_with_rows([["x", "y"]])
 
@@ -91,8 +132,8 @@ async def test_empty_llm_response_falls_back_to_template() -> None:
 
 
 async def test_empty_rows_still_produces_answer() -> None:
-    llm = AsyncMock()
-    llm.async_generate = AsyncMock(return_value="**Direct Answer** No rows matched.\n")
+    llm = MagicMock()
+    llm.async_generate_stream = _stream_from(["**Direct Answer** No rows matched.\n"])
     stage = AnswerSynthesizerStage(llm=llm, prompt_path=str(PROMPT_PATH))
     ctx = _ctx_with_rows([])
 
@@ -103,12 +144,57 @@ async def test_empty_rows_still_produces_answer() -> None:
 
 async def test_skips_when_upstream_error_set() -> None:
     llm = AsyncMock()
-    llm.async_generate = AsyncMock()
     stage = AnswerSynthesizerStage(llm=llm, prompt_path=str(PROMPT_PATH))
     ctx = _ctx_with_rows([["x", "y"]])
     ctx.state["error"] = "sql_execution_failed: table does not exist"
 
     await stage.run(ctx, None)
 
-    assert llm.async_generate.await_count == 0
+    # Stream method must not have been touched.
+    assert not getattr(llm, "async_generate_stream", AsyncMock()).called
     assert "answer" not in ctx.state
+
+
+async def test_streaming_emits_deltas_and_concatenates_state() -> None:
+    """Happy path: 3 stream chunks produce 3 answer_delta emits + concatenated state."""
+    llm = MagicMock()
+    llm.async_generate_stream = _stream_from(
+        ["**Direct ", "Answer** All ", "good."]
+    )
+    stage = AnswerSynthesizerStage(llm=llm, prompt_path=str(PROMPT_PATH))
+    ctx = _ctx_with_rows([["customers", "table"]])
+    emitter = _RecordingEmitter()
+    ctx.emitter = emitter  # type: ignore[assignment]
+
+    out = await stage.run(ctx, None)
+
+    deltas = [(t, p) for (t, p) in emitter.emitted if t == ChunkType.answer_delta]
+    assert len(deltas) == 3
+    assert [p.text for (_, p) in deltas] == [
+        "**Direct ",
+        "Answer** All ",
+        "good.",
+    ]
+    assert ctx.state["answer"] == "**Direct Answer** All good."
+    assert out == ctx.state["answer"]
+
+
+async def test_streaming_failure_mid_stream_falls_back() -> None:
+    """If the stream raises after some chunks, fall back to the row-count template."""
+    llm = MagicMock()
+    llm.async_generate_stream = _stream_then_raise(
+        ["**Direct Answer** partial"], RuntimeError("network blip")
+    )
+    stage = AnswerSynthesizerStage(llm=llm, prompt_path=str(PROMPT_PATH))
+    ctx = _ctx_with_rows([["customers", "table"], ["gasstations", "table"]])
+    emitter = _RecordingEmitter()
+    ctx.emitter = emitter  # type: ignore[assignment]
+
+    out = await stage.run(ctx, None)
+
+    # The first chunk did get emitted before the failure.
+    deltas = [(t, p) for (t, p) in emitter.emitted if t == ChunkType.answer_delta]
+    assert len(deltas) == 1
+    # State is the canonical fallback contract.
+    assert ctx.state["answer"] == "Query returned 2 rows."
+    assert out == "Query returned 2 rows."

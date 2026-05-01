@@ -84,6 +84,11 @@ export function useSSEChat() {
 
           appendChunk(chunk);
 
+          // answer_delta is a streaming text-append signal handled inside
+          // appendChunk (it accumulates onto message.content). It must NOT
+          // produce a timeline step — bail before any of the branches below.
+          if (chunk.type === "answer_delta") return;
+
           // Update agent step timeline.
           // Only mark the previous running step as done when a NEW phase
           // begins (status, tool_call, tool_result, answer, error).

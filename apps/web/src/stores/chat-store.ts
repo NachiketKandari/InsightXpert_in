@@ -373,6 +373,30 @@ export const useChatStore = create<ChatState>()(persist((set, get) => ({
           return { ...c, messages };
         }
 
+        // Streaming answer_delta: append text onto the assistant message's
+        // content so the markdown answer materializes live as Gemini emits
+        // tokens. Multiple deltas may arrive in a single render frame —
+        // because we read lastMsg.content from the freshly-snapshotted state
+        // inside this set() callback, every queued delta accumulates.
+        // Deltas are NOT pushed onto the chunks array (they are silent —
+        // chunk-renderer renders nothing for them); only the running
+        // content reflects the stream. The terminal answer_generated chunk
+        // below replaces (not appends) so transient stream errors / retries
+        // cannot leave the message truncated.
+        if (chunk.type === "answer_delta") {
+          const deltaText =
+            typeof (chunk.data as { text?: unknown })?.text === "string"
+              ? ((chunk.data as { text: string }).text)
+              : "";
+          if (!deltaText) return c;
+          const updated: Message = {
+            ...lastMsg,
+            content: (lastMsg.content ?? "") + deltaText,
+          };
+          messages[messages.length - 1] = updated;
+          return { ...c, messages, updatedAt: Date.now() };
+        }
+
         // Pull the natural-language answer text into message.content so that
         // downstream consumers (MessageActions visibility gate, conversation
         // persistence) work uniformly. The Tier-3 answer_generated chunk

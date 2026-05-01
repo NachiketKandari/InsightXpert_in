@@ -330,6 +330,11 @@ function ChunkRendererInner({ chunk, isComplete, isStreaming, enrichmentTraces, 
     case "metrics":
       return null;
 
+    // answer_delta is a streaming-only signal — chat-store appends each
+    // delta to message.content; the existing answer rendering picks it up.
+    case "answer_delta":
+      return null;
+
     case "auto_routed": {
       const mode = chunk.data?.mode as "basic" | "agentic" | undefined;
       const reason = (chunk.data?.reason as string | undefined) ?? "";
