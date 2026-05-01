@@ -150,6 +150,83 @@ def test_chat_answer_orchestrator_path(authed_client: TestClient):
     assert body["sql"] == ["SELECT 1"]
 
 
+def test_vendored_to_envelope_drops_unknown_types():
+    """Unknown vendored chunk types must be dropped, not coerced into a
+    placeholder ``status`` envelope. The previous behaviour produced raw
+    ``[type_name]`` labels in the trace UI for any forward-compat chunk
+    that wasn't yet modelled in ChunkType."""
+    from insightxpert_api.routes.chat import _vendored_to_envelope
+    from insightxpert_api.vendored.agents_core.api.models import ChatChunk as V
+
+    unknown = V(
+        type="some_future_chunk_type",
+        data={"foo": "bar"},
+        conversation_id="c1",
+        timestamp=0.0,
+    )
+    assert _vendored_to_envelope(unknown) is None
+
+    # Sanity: the existing sql/answer drop still returns None.
+    assert _vendored_to_envelope(
+        V(type="sql", sql="SELECT 1", data=None, conversation_id="c1", timestamp=0.0)
+    ) is None
+    assert _vendored_to_envelope(
+        V(type="answer", content="hi", data=None, conversation_id="c1", timestamp=0.0)
+    ) is None
+
+    # And known types still translate.
+    known = V(
+        type="sql_generated",
+        data={"sql": "SELECT 1", "iteration": 0},
+        conversation_id="c1",
+        timestamp=0.0,
+    )
+    out = _vendored_to_envelope(known)
+    assert out is not None
+    assert out.type == ChunkType.sql_generated
+
+
+def test_chat_poll_filters_unknown_vendored_chunks(authed_client: TestClient):
+    """End-to-end: an orchestrator that yields an unknown-type chunk must
+    not surface a synthetic ``status`` chunk on the wire."""
+
+    async def stub(**kwargs):
+        from insightxpert_api.vendored.agents_core.api.models import ChatChunk as V
+
+        cid = kwargs.get("conversation_id") or ""
+        yield V(
+            type="future_unknown_thing",
+            data={"hello": "world"},
+            conversation_id=cid,
+            timestamp=0.0,
+        )
+        yield V(
+            type="answer_generated",
+            data={"text": "ok"},
+            conversation_id=cid,
+            timestamp=0.0,
+        )
+
+    with patch("insightxpert_api.routes.chat.orchestrator_loop", new=stub):
+        r = authed_client.post(
+            "/api/v1/chat/poll",
+            json={
+                "message": "q",
+                "db_id": "california_schools",
+                "agent_mode": "agentic",
+            },
+        )
+        assert r.status_code == 200, r.text
+
+    types = [c["type"] for c in r.json()["chunks"]]
+    # No fallback `status` envelope from the unknown-type chunk.
+    assert "status" not in types
+    # And no chunk carries a ``[future_unknown_thing]`` placeholder message.
+    for c in r.json()["chunks"]:
+        data = c.get("data") or {}
+        assert data.get("message") != "[future_unknown_thing]"
+
+
 def test_chat_legacy_path_still_works(authed_client: TestClient, patched_pipeline):
     """Without agent_mode, the legacy Phase A pipeline path must remain engaged."""
     r = authed_client.post(
