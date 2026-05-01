@@ -110,6 +110,12 @@ function ChunkRendererInner({ chunk, isComplete, isStreaming, enrichmentTraces, 
       const ragContext = Array.isArray(rawRag) ? (rawRag as string[]) : undefined;
       // Strict envelope: `data.message`. Legacy flat `content` kept as fallback.
       const msg = (chunk.data?.message as string | undefined) ?? chunk.content ?? "";
+      // Drop bare status chunks: with no message text and no rag_context to
+      // surface, rendering them produces a lonely green checkmark with an
+      // empty label. Filter rather than render an empty StatusChunk.
+      if (msg.trim() === "" && (!ragContext || ragContext.length === 0)) {
+        return null;
+      }
       content = <StatusChunk content={msg} isComplete={isComplete} ragContext={ragContext} />;
       break;
     }
