@@ -3,6 +3,7 @@ import {
   parseRowsSpec,
   parseFootnoteRowMap,
   stripRowsDirectives,
+  expandCombinedFootnoteMarkers,
 } from "./footnote-parser";
 
 describe("parseRowsSpec", () => {
@@ -69,6 +70,65 @@ describe("parseFootnoteRowMap", () => {
   it("does not throw on malformed directives", () => {
     const md = "[^1]: weird {rows=abc}";
     expect(parseFootnoteRowMap(md)).toEqual({ "1": [] });
+  });
+});
+
+describe("expandCombinedFootnoteMarkers", () => {
+  it("expands a comma+space combined marker into adjacent single-id markers", () => {
+    expect(expandCombinedFootnoteMarkers("scores [^3, 5, 6].")).toBe(
+      "scores [^3][^5][^6].",
+    );
+  });
+
+  it("expands a no-space comma combined marker", () => {
+    expect(expandCombinedFootnoteMarkers("scores [^3,5,6].")).toBe(
+      "scores [^3][^5][^6].",
+    );
+  });
+
+  it("expands an inclusive range marker", () => {
+    expect(expandCombinedFootnoteMarkers("scores [^3-6].")).toBe(
+      "scores [^3][^4][^5][^6].",
+    );
+  });
+
+  it("expands a mixed list+range marker", () => {
+    expect(expandCombinedFootnoteMarkers("scores [^3, 5-7].")).toBe(
+      "scores [^3][^5][^6][^7].",
+    );
+  });
+
+  it("leaves a plain single-id marker unchanged", () => {
+    expect(expandCombinedFootnoteMarkers("scores [^3].")).toBe(
+      "scores [^3].",
+    );
+  });
+
+  it("leaves footnote definition lines unchanged (colon after bracket)", () => {
+    const md = "[^3]: schools table — 49 metadata columns {rows=1}";
+    expect(expandCombinedFootnoteMarkers(md)).toBe(md);
+  });
+
+  it("expands every combined marker in a realistic paragraph", () => {
+    const input =
+      "Whitney High consistently scores in the mid-600s [^3, 5, 6], " +
+      "while Soledad Charter reports in the low 300s [^2]. " +
+      "Range cite [^7-9] and tight cite [^10,11].";
+    const expected =
+      "Whitney High consistently scores in the mid-600s [^3][^5][^6], " +
+      "while Soledad Charter reports in the low 300s [^2]. " +
+      "Range cite [^7][^8][^9] and tight cite [^10][^11].";
+    expect(expandCombinedFootnoteMarkers(input)).toBe(expected);
+  });
+
+  it("does not touch named (non-numeric) footnote markers", () => {
+    expect(expandCombinedFootnoteMarkers("see [^note-1].")).toBe(
+      "see [^note-1].",
+    );
+  });
+
+  it("dedupes repeated ids inside a combined marker", () => {
+    expect(expandCombinedFootnoteMarkers("[^3, 3, 5]")).toBe("[^3][^5]");
   });
 });
 

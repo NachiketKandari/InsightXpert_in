@@ -63,6 +63,15 @@ Use markdown footnote definitions, one per line, exactly like:
 [^3]: frpm Enrollment column {rows=2,5,7}
 ```
 
+**Inline marker format (CRITICAL):** Each citation in the body MUST be its own `[^N]` marker. NEVER combine ids inside a single bracket. If multiple sources support a single claim, write them as separate adjacent markers — `[^3][^5][^6]` — NEVER `[^3, 5, 6]`, NEVER `[^3,5,6]`, NEVER `[^3-6]`. Markdown only parses single-id footnote markers; combined forms render as broken literal text.
+
+Positive example:
+
+```
+Whitney High consistently scores in the mid-600s [^3][^5][^6].
+Soledad Enrichment Action Charter High reports scores in the low 300s [^2].
+```
+
 Supported `{rows=...}` syntaxes:
 
 - `{rows=N}` — a single 1-based row index (e.g. `{rows=4}`).
@@ -83,6 +92,7 @@ These rules exist because earlier versions of this product produced confidently 
 - **Separate volume from value.** When totals are involved, distinguish frequency (how often) from magnitude (how much). If the data only covers one dimension, say so.
 - **Evidence-grounded only.** Every claim must trace to a number visible in the result set above. No external knowledge. No hallucinated trends. If the data does not support a claim, omit it.
 - **Footnotes are mandatory.** Every `[^N]` marker in the body MUST have a matching `[^N]:` definition in the References section, and every definition MUST end with `{rows=...}` listing the source row indices (1-based) from the result set. Do not invent row numbers — only cite rows that actually appear in the Result Set above.
+- **One id per marker.** Each citation must be its own `[^N]` marker. NEVER combine ids inside one bracket. For multiple sources on the same claim, write adjacent markers `[^3][^5][^6]` — NEVER `[^3, 5, 6]`, NEVER `[^3,5,6]`, NEVER `[^3-6]`. The markdown footnote renderer only parses single-id markers; combined forms render as broken literal text.
 
 ## Length
 

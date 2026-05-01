@@ -81,3 +81,70 @@ export function parseFootnoteRowMap(markdown: string): Record<string, number[]> 
 export function stripRowsDirectives(markdown: string): string {
   return markdown.replace(/\s*\{rows=[^}]*\}/g, "");
 }
+
+/**
+ * Defense-in-depth pre-parser. Models occasionally collapse multiple footnote
+ * citations into a single bracket — `[^3, 5, 6]`, `[^3,5,6]`, `[^3-6]` — which
+ * react-markdown / remark-gfm cannot parse (it only understands single-id
+ * markers like `[^3]`). The unparsed form leaks through as broken literal text.
+ *
+ * This helper rewrites combined inline markers into adjacent single-id markers
+ * (e.g. `[^3][^5][^6]`) before handing the markdown to ReactMarkdown so the
+ * existing footnote-id click handlers wire up normally.
+ *
+ * Definition lines (`[^3]: ...`) are left untouched — those have a colon
+ * immediately after the closing bracket and must not be split.
+ *
+ * Supported combined forms:
+ *   [^3, 5, 6]   →  [^3][^5][^6]
+ *   [^3,5,6]     →  [^3][^5][^6]
+ *   [^3-6]       →  [^3][^4][^5][^6]
+ *   [^3, 5-7]    →  [^3][^5][^6][^7]
+ *
+ * Plain `[^3]` markers and definition lines are returned unchanged.
+ */
+export function expandCombinedFootnoteMarkers(markdown: string): string {
+  // Match `[^...]` NOT immediately followed by `:` (which would mean a
+  // definition line). Capture the body between the brackets so we can decide
+  // whether it needs expansion.
+  return markdown.replace(/\[\^([^\]]+)\](?!:)/g, (match, body: string) => {
+    // Single integer id — leave alone (the common case).
+    if (/^\s*\d+\s*$/.test(body)) return match;
+
+    // Only attempt to expand if the body looks like a numeric list/range:
+    // digits, commas, dashes, and whitespace only. Anything else (e.g. named
+    // footnotes like `[^note-1]`) is left untouched.
+    if (!/^[\s\d,\-]+$/.test(body)) return match;
+
+    const ids: number[] = [];
+    for (const part of body.split(",")) {
+      const piece = part.trim();
+      if (!piece) continue;
+      const rangeMatch = piece.match(/^(\d+)\s*-\s*(\d+)$/);
+      if (rangeMatch) {
+        const start = parseInt(rangeMatch[1], 10);
+        const end = parseInt(rangeMatch[2], 10);
+        if (!Number.isFinite(start) || !Number.isFinite(end)) return match;
+        const lo = Math.min(start, end);
+        const hi = Math.max(start, end);
+        for (let n = lo; n <= hi; n++) ids.push(n);
+        continue;
+      }
+      const single = parseInt(piece, 10);
+      if (!Number.isFinite(single)) return match;
+      ids.push(single);
+    }
+
+    if (ids.length === 0) return match;
+
+    // Dedupe preserving first-occurrence order so `[^3, 3, 5]` → `[^3][^5]`.
+    const seen = new Set<number>();
+    const out: string[] = [];
+    for (const id of ids) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      out.push(`[^${id}]`);
+    }
+    return out.join("");
+  });
+}
