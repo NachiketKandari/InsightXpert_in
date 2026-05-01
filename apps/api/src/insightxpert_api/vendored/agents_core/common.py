@@ -98,9 +98,25 @@ class AnalystCollector:
         )
 
     def process_chunk(self, chunk: ChatChunk) -> None:
-        """Update collector state from a single analyst chunk."""
+        """Update collector state from a single analyst chunk.
+
+        Captures ``rows`` from either:
+          * Tier-3 ``rows_returned`` (canonical pipeline shape: positional rows +
+            ``columns`` list, converted here to ``list[dict]``); or
+          * Tier-2 ``tool_result`` with ``tool == "run_sql"`` (legacy shape that
+            carries ``result`` as a JSON-encoded string of an already-keyed payload).
+        """
         if chunk.type == "sql" and chunk.sql:
             self.sql = chunk.sql
+        elif chunk.type == "rows_returned" and chunk.data:
+            cols = chunk.data.get("columns") or []
+            positional_rows = chunk.data.get("rows") or []
+            if positional_rows:
+                # Mirror the dict shape the legacy tool_result branch builds, so
+                # downstream consumers (OriginalAnalystResult.rows, enrichment
+                # agents, response_generator) see a uniform schema regardless of
+                # which emission path produced the rows.
+                self.rows = [dict(zip(cols, r, strict=False)) for r in positional_rows]
         elif chunk.type == "tool_result" and chunk.data:
             tool_name = chunk.data.get("tool", "")
             if tool_name == "run_sql" and chunk.data.get("result"):

@@ -14,7 +14,6 @@ emits a deterministic chunk sequence via the emitter.
 from __future__ import annotations
 
 import asyncio
-import json
 from dataclasses import dataclass, field
 
 import pytest
@@ -156,13 +155,19 @@ async def test_analyst_emits_expected_chunk_sequence(_patch_pipeline, tmp_path):
     assert types.index("sql_executing") < types.index("rows_returned")
     assert types.index("rows_returned") < types.index("answer_generated")
 
-    # Synthetic tier-2 pair must be present, bracketed around the SQL exec.
+    # Synthetic tier-2 pre-pair must still be present, bracketed BEFORE the
+    # SQL exec — AnalystCollector.sql still relies on the flat-shape ``sql``
+    # chunk, and the orchestrator log still consumes ``tool_call``. The
+    # POST-execution ``tool_result`` was removed on 2026-05-01: the canonical
+    # rows_returned chunk is now the sole result-of-execution emission, and
+    # AnalystCollector reads rows from it directly.
     assert "sql" in types
     assert "tool_call" in types
-    assert "tool_result" in types
     assert types.index("sql") < types.index("sql_executing")
     assert types.index("tool_call") < types.index("sql_executing")
-    assert types.index("rows_returned") < types.index("tool_result")
+    assert "tool_result" not in types, (
+        "synthetic tool_result should no longer be emitted after rows_returned"
+    )
 
     # Answer chunk (flat vendored shape) is last-ish and carries content.
     answer_chunks = [c for c in chunks if c.type == "answer"]
@@ -318,11 +323,12 @@ async def test_analyst_recovers_from_executor_error_via_refiner(monkeypatch, tmp
     assert "answer_generated" in types, f"missing answer_generated; got {types}"
     assert "answer" in types, f"missing answer; got {types}"
 
-    # tool_result must carry the refined rows, not be empty.
-    tool_results = [c for c in chunks if c.type == "tool_result"]
-    assert len(tool_results) == 1
-    parsed = json.loads(tool_results[0].data["result"])
-    assert parsed["rows"] == [{"n": 42}]
+    # The refined rows must reach the collector via rows_returned (the
+    # synthetic tool_result post-emission was removed on 2026-05-01).
+    rows_returned = [c for c in chunks if c.type == "rows_returned"]
+    assert len(rows_returned) == 1
+    assert rows_returned[0].data["rows"] == [[42]]
+    assert rows_returned[0].data["columns"] == ["n"]
 
     # AnalystCollector state must reflect recovery.
     assert collector.had_error is False
@@ -332,8 +338,8 @@ async def test_analyst_recovers_from_executor_error_via_refiner(monkeypatch, tmp
 
 
 @pytest.mark.asyncio
-async def test_tool_result_json_is_parseable(_patch_pipeline, tmp_path):
-    """AnalystCollector parses chunk.data['result'] as JSON — verify the wire shape."""
+async def test_rows_returned_is_canonical_result_chunk(_patch_pipeline, tmp_path):
+    """rows_returned carries the canonical result payload; no duplicate tool_result."""
     config = _FakeConfig(local_storage_root=str(tmp_path))
 
     chunks: list[VendoredChatChunk] = []
@@ -344,12 +350,35 @@ async def test_tool_result_json_is_parseable(_patch_pipeline, tmp_path):
     ):
         chunks.append(chunk)
 
-    tool_results = [c for c in chunks if c.type == "tool_result"]
-    assert len(tool_results) == 1
-    data = tool_results[0].data
+    rows_returned = [c for c in chunks if c.type == "rows_returned"]
+    assert len(rows_returned) == 1
+    data = rows_returned[0].data
     assert data is not None
-    assert data["tool"] == "run_sql"
-    parsed = json.loads(data["result"])
-    assert parsed["columns"] == ["n"]
-    assert parsed["rows"] == [{"n": 1}]
-    assert parsed["row_count"] == 1
+    assert data["columns"] == ["n"]
+    assert data["rows"] == [[1]]
+    assert data["row_count"] == 1
+    # Bug fix 2026-05-01: no synthetic Tier-2 tool_result after rows_returned.
+    assert all(c.type != "tool_result" for c in chunks)
+
+
+def test_analyst_collector_captures_rows_from_rows_returned():
+    """AnalystCollector reads rows from the Tier-3 rows_returned chunk directly,
+    converting positional rows + columns into the dict shape downstream
+    consumers expect (mirrors the legacy tool_result branch's output).
+    """
+    collector = AnalystCollector()
+    chunk = VendoredChatChunk(
+        type="rows_returned",
+        data={
+            "columns": ["a", "b"],
+            "rows": [[1, 2], [3, 4]],
+            "row_count": 2,
+            "execution_time_ms": 5,
+        },
+        conversation_id="c1",
+        timestamp=0.0,
+    )
+
+    collector.process_chunk(chunk)
+
+    assert collector.rows == [{"a": 1, "b": 2}, {"a": 3, "b": 4}]

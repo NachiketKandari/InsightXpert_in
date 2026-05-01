@@ -39,9 +39,11 @@ The adapter therefore:
                        "agent": "analyst"},
                  sql=<sql>, ...)                                # collector log
 
-   After execution, emits the matching tool_result with ``data["result"]`` as a
-   **JSON string** — ``AnalystCollector.process_chunk`` parses this JSON to
-   populate ``analyst_rows`` (see ``agents_core/common.py``).
+   After execution, the Tier-3 ``rows_returned`` chunk is the sole result-of-
+   execution emission. ``AnalystCollector.process_chunk`` reads rows directly
+   from that chunk (see ``vendored/agents_core/common.py``). Earlier revisions
+   also emitted a Tier-2 ``tool_result`` here; that produced a duplicate
+   collapsible table in the FE and was removed on 2026-05-01.
 4. After the answer is synthesised, emits ``ChatChunk(type="answer",
    content=<answer>, ...)`` so the collector can set ``.answer`` — which gates
    orchestrator Phase-2 enrichment evaluation.
@@ -57,7 +59,6 @@ Any keyword args from the vendored call-site that our adapter doesn't need
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import time
 from collections.abc import AsyncGenerator
@@ -136,13 +137,6 @@ def _to_vendored(envelope_chunk: EnvelopeChatChunk) -> ChatChunk:
         conversation_id=envelope_chunk.conversation_id or "",
         timestamp=envelope_chunk.timestamp,
     )
-
-
-def _rows_as_dicts(columns: list[str], rows: list[list[object]]) -> list[dict]:
-    """Convert positional rows to list-of-dicts, matching AnalystCollector's contract."""
-    if not columns:
-        return []
-    return [dict(zip(columns, row, strict=False)) for row in rows]
 
 
 async def analyst_loop(
@@ -305,26 +299,13 @@ async def analyst_loop(
                 # FURTHER retry (iter N+1) would also get a fresh sql/tool_call.
                 buffered_errors.clear()
                 had_error = False
-                # Emit synthetic tool_result AFTER the real rows_returned, using
-                # the JSON-string shape AnalystCollector expects.
-                result_json = json.dumps(
-                    {
-                        "columns": cols,
-                        "rows": _rows_as_dicts(cols, rows),
-                        "row_count": len(rows),
-                    }
-                )
-                yield ChatChunk(
-                    type="tool_result",
-                    data={
-                        "tool": "run_sql",
-                        "result": result_json,
-                        "agent": "analyst",
-                    },
-                    tool_name="run_sql",
-                    conversation_id=cid,
-                    timestamp=time.time(),
-                )
+                # NOTE (2026-05-01): the synthetic Tier-2 tool_result emission that
+                # used to follow this block was deleted. The Tier-3 rows_returned
+                # chunk above is the canonical result-of-execution chunk; the FE's
+                # rows-returned-chunk.tsx renders it. Emitting both produced two
+                # identical collapsible tables in the UI. AnalystCollector now
+                # captures the result via the rows_returned chunk directly (see
+                # vendored/agents_core/common.py:process_chunk).
 
             # If the refiner produces a new sql_generated AFTER an error (i.e.
             # we're still had_error=True because no rows_returned yet), reopen
