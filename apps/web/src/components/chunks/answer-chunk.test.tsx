@@ -48,6 +48,50 @@ describe("AnswerChunk citation footnotes", () => {
     expect(typeof hl!.ts).toBe("number");
   });
 
+  it("expands combined inline markers like [^3, 5, 6] into three separate clickable refs", () => {
+    const md = [
+      "## Direct Answer",
+      "Whitney High consistently scores in the mid-600s [^3, 5, 6].",
+      "",
+      "[^3]: row 3 source {rows=3}",
+      "[^5]: row 5 source {rows=5}",
+      "[^6]: row 6 source {rows=6}",
+    ].join("\n");
+    const { container } = render(
+      <AnswerChunk content={md} messageId="msg-combined" />,
+    );
+
+    // The literal combined form must NOT survive into the DOM.
+    expect(container.textContent).not.toContain("[^3, 5, 6]");
+    expect(container.textContent).not.toContain("[^3,5,6]");
+
+    // remark-gfm renders each inline marker as <sup><a href="#user-content-fn-N">…</a></sup>.
+    const refs = Array.from(
+      container.querySelectorAll(
+        'a[href^="#user-content-fn-"]',
+      ),
+    ) as HTMLAnchorElement[];
+    // We expect three distinct inline refs (one per id) plus their footnote
+    // definitions might also be linked from the references section back-refs;
+    // assert at least the three inline anchors exist by id.
+    const inlineHrefs = refs
+      .map((a) => a.getAttribute("href"))
+      .filter((h): h is string => !!h && /^#user-content-fn-\d+$/.test(h));
+    expect(inlineHrefs).toEqual(
+      expect.arrayContaining([
+        "#user-content-fn-3",
+        "#user-content-fn-5",
+        "#user-content-fn-6",
+      ]),
+    );
+
+    // Each is wrapped in a <sup> by remark-gfm.
+    const supLinks = container.querySelectorAll(
+      'sup a[href^="#user-content-fn-"]',
+    );
+    expect(supLinks.length).toBeGreaterThanOrEqual(3);
+  });
+
   it("does not dispatch when the footnote definition has no rows", () => {
     const md = [
       "## Direct Answer",

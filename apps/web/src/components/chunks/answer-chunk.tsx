@@ -10,6 +10,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import {
+  expandCombinedFootnoteMarkers,
   parseFootnoteRowMap,
   stripRowsDirectives,
 } from "@/lib/footnote-parser";
@@ -295,7 +296,12 @@ function AnswerChunkInner({ content, messageId }: AnswerChunkProps) {
   // visible noise inside the References section.
   const { footnoteRows, displayContent } = useMemo(() => {
     const rows = parseFootnoteRowMap(content);
-    const stripped = stripRowsDirectives(content);
+    // Defense in depth: expand combined inline footnote markers (e.g.
+    // `[^3, 5, 6]`) into adjacent single-id markers (`[^3][^5][^6]`) BEFORE
+    // stripping `{rows=...}` directives, so the prompt's references survive
+    // intact even when the LLM emits an invalid combined form.
+    const expanded = expandCombinedFootnoteMarkers(content);
+    const stripped = stripRowsDirectives(expanded);
     return { footnoteRows: rows, displayContent: stripped };
   }, [content]);
 
