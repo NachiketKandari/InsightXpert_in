@@ -128,8 +128,15 @@ export function InputToolbar({
   const showPhase = isStreaming && !!currentAgentPhase;
   const activeKey = showPhase ? currentAgentPhase! : agentMode;
 
-  // Two-state toggle per spec F1. `deep_think` mode deferred.
+  // Three-state toggle. `auto` is the LLM-routed default. `deep_think` deferred.
   const modeConfig = {
+    auto: {
+      label: "Auto",
+      icon: Sparkles,
+      color: "text-violet-500",
+      bg: "bg-violet-500/10",
+      border: "border-violet-500/30",
+    },
     basic: {
       label: "Basic",
       icon: Sparkles,
@@ -214,6 +221,11 @@ export function InputToolbar({
             <DropdownMenuLabel className="text-xs text-muted-foreground">
               Analysis Mode
             </DropdownMenuLabel>
+            <DropdownMenuItem onSelect={() => setAgentMode("auto")}>
+              <Sparkles className="size-4 text-violet-500" />
+              Auto (recommended)
+              {agentMode === "auto" && <Check className="size-3.5 ml-auto text-emerald-500" />}
+            </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => setAgentMode("basic")}>
               <Sparkles className="size-4" />
               Basic (fast)
@@ -221,7 +233,7 @@ export function InputToolbar({
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => setAgentMode("agentic")}>
               <Zap className="size-4" />
-              Agentic (recommended)
+              Agentic
               {agentMode === "agentic" && <Check className="size-3.5 ml-auto text-emerald-500" />}
             </DropdownMenuItem>
 
@@ -274,6 +286,11 @@ export function InputToolbar({
                 Agent Mode
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={() => setAgentMode("auto")}>
+                <Sparkles className="size-4 text-violet-500" />
+                Auto (recommended)
+                {agentMode === "auto" && <Check className="size-3.5 ml-auto text-emerald-500" />}
+              </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => setAgentMode("basic")}>
                 <Sparkles className="size-4 text-amber-500" />
                 Basic (fast)
@@ -281,7 +298,7 @@ export function InputToolbar({
               </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => setAgentMode("agentic")}>
                 <Zap className="size-4 text-emerald-500" />
-                Agentic (recommended)
+                Agentic
                 {agentMode === "agentic" && <Check className="size-3.5 ml-auto text-emerald-500" />}
               </DropdownMenuItem>
             </DropdownMenuContent>

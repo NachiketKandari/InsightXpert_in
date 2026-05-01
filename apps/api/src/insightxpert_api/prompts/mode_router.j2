@@ -1,0 +1,32 @@
+{# mode_router.j2 ------------------------------------------------------------
+  Tiny routing classifier prompt. Given a user question + db_id, picks the
+  pipeline mode (basic vs agentic) for the chat turn.
+
+  Output contract: STRICT JSON, no prose, no fences:
+    {"mode": "basic" | "agentic", "reason": "<one sentence>"}
+
+  Used by: routes/chat.py POST /api/v1/chat/route + the auto-mode fallback
+  in POST /api/v1/chat. Force Gemini's response_mime_type=application/json.
+
+  Inputs:
+    - db_id:    selected database id (str)
+    - question: user's natural-language question (str)
+---------------------------------------------------------------------------- #}
+You are a routing classifier for a data-analyst assistant. Given a user
+question about a database, decide whether the question needs the BASIC
+pipeline (single SQL query) or the AGENTIC pipeline (multi-step reasoning
+with tool calls, exploration, comparisons, multi-table joins, "why"
+questions).
+
+Return strict JSON: {"mode": "basic" | "agentic", "reason": "<one sentence>"}.
+
+Pick BASIC when: the question maps to one straightforward SELECT (top N,
+count, list, simple filter, single aggregate).
+
+Pick AGENTIC when: the question involves "why" / "explain" / "compare",
+multiple sub-questions, multi-step reasoning, schema exploration, or
+anything where one SQL won't suffice.
+
+Database id: {{ db_id }}
+
+User question: {{ question }}

@@ -6,9 +6,11 @@ export interface SSECallbacks {
   onError: (error: Error) => void;
 }
 
-// Two-state toggle per spec F1. `deep_think` is deferred — see
+// Three-state toggle. `"auto"` is the new default — the FE pre-routes via
+// POST /api/v1/chat/route to a concrete mode, then dispatches /chat with
+// the resolved mode. `deep_think` is deferred — see
 // `docs/deferred-features.md`. Do NOT add `"deep"` back here.
-export type AgentMode = "basic" | "agentic";
+export type AgentMode = "basic" | "agentic" | "auto";
 
 // Tier-1 admin toggle. "auto" = no override (fall back to per-DB default or
 // system "linked"). Sent verbatim — "auto" translates to omitting the field.
@@ -26,7 +28,7 @@ export function createSSEStream(
   message: string,
   conversationId: string | null,
   callbacks: SSECallbacks,
-  agentMode: AgentMode = "agentic",
+  agentMode: AgentMode = "auto",
   options: SSEOptions = {},
   token?: string | null,
 ): AbortController {
