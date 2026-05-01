@@ -20,6 +20,14 @@ export function ChatPanel() {
   const isLoadingConversation = useChatStore((s) => s.isLoadingConversation);
   const selectedDbId = useChatStore((s) => s.selectedDbId);
   const hasMessages = conversation && conversation.messages.length > 0;
+  // While a conversation's messages are being fetched, render the chat shell
+  // (header + input + message-list region) immediately instead of a full-pane
+  // spinner. This makes the conversation switch feel instant — the user sees
+  // the new layout right away, with a subtle inline spinner inside the
+  // message region until the data arrives. Avoids the >1s "blank pane"
+  // perception when the BE round-trip dominates.
+  const isFetchingExisting =
+    isLoadingConversation && !!conversation && conversation.messages.length === 0;
 
   const [shareOpen, setShareOpen] = useState(false);
   const [databases, setDatabases] = useState<DatabaseListItem[]>([]);
@@ -51,10 +59,20 @@ export function ChatPanel() {
 
   return (
     <div className="flex h-full flex-col">
-      {isLoadingConversation ? (
-        <div className="flex flex-1 items-center justify-center">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-border border-t-foreground" />
-        </div>
+      {isFetchingExisting ? (
+        <>
+          <div className="flex items-center justify-end px-2 pt-1">
+            <div className="size-9" />
+          </div>
+          <div className="flex flex-1 items-center justify-center">
+            <div className="h-6 w-6 animate-spin rounded-full border-2 border-border border-t-foreground" />
+          </div>
+          <MessageInput
+            onSend={handleSend}
+            onStop={stopStreaming}
+            isStreaming={isStreaming}
+          />
+        </>
       ) : hasMessages ? (
         <>
           <div className="flex items-center justify-end px-2 pt-1">

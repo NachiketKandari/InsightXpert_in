@@ -12,6 +12,11 @@ function generateId() {
   return Math.random().toString(36).slice(2, 10);
 }
 
+// Module-scope cache for in-flight conversation loads. Dedupes concurrent
+// loads (e.g. hover-prefetch + subsequent click) so we never fire the same
+// GET /api/v1/conversations/{id} twice. Cleared after the load resolves.
+const inflightLoads = new Map<string, Promise<void>>();
+
 interface ChatState {
   conversations: Conversation[];
   activeConversationId: string | null;
@@ -44,6 +49,7 @@ interface ChatState {
   clearActiveConversation: () => void;
   setActiveConversation: (id: string) => void;
   loadConversationMessages: (id: string) => Promise<void>;
+  prefetchConversationMessages: (id: string) => void;
   deleteConversation: (id: string) => void;
   renameConversation: (id: string, title: string) => void;
 
@@ -168,12 +174,34 @@ export const useChatStore = create<ChatState>()(persist((set, get) => ({
       const isRecentlyCreated = Date.now() - conv.createdAt < 5000;
       if (!isRecentlyCreated) {
         set({ isLoadingConversation: true });
+        // Idempotent — if a hover-prefetch is already in flight,
+        // loadConversationMessages will dedupe and reuse the same Promise.
         get().loadConversationMessages(id);
       }
     }
   },
 
+  // Hover/focus prefetch: kick off the load before the user clicks. Idempotent
+  // — if the conversation is already cached or a fetch is in flight, this is
+  // a no-op. Called from ConversationItem onMouseEnter/onFocus.
+  prefetchConversationMessages: (id) => {
+    const conv = get().conversations.find((c) => c.id === id);
+    if (!conv) return;
+    if (conv.messages.length > 0) return; // already cached
+    const isRecentlyCreated = Date.now() - conv.createdAt < 5000;
+    if (isRecentlyCreated) return;
+    if (inflightLoads.has(id)) return;
+    // Fire-and-forget. loadConversationMessages handles its own errors and
+    // populates the in-flight map.
+    void get().loadConversationMessages(id);
+  },
+
   loadConversationMessages: async (id) => {
+    // Dedupe concurrent loads for the same conversation.
+    const existing = inflightLoads.get(id);
+    if (existing) return existing;
+
+    const promise = (async () => {
     try {
       const res = await apiFetch(`/api/v1/conversations/${id}`);
       if (!res.ok) {
@@ -215,6 +243,13 @@ export const useChatStore = create<ChatState>()(persist((set, get) => ({
     } catch (err) {
       console.error("[chat-store] Error loading messages for", id, ":", err);
       set({ isLoadingConversation: false });
+    }
+    })();
+    inflightLoads.set(id, promise);
+    try {
+      await promise;
+    } finally {
+      inflightLoads.delete(id);
     }
   },
 
