@@ -28,6 +28,7 @@ from ..config import Settings, get_settings
 from ..databases import repository as databases_repo
 from ..logging import get_logger
 from ..pipeline import default_pipeline
+from ..pipeline.preflight import prefetch_profile
 from ..pipeline.stage import PipelineContext
 from ..services.conversation_store import ConversationStore, get_conversation_store
 from ..services.database_service import DatabaseService
@@ -197,6 +198,45 @@ async def _resolve_auto_mode(
     return decision
 
 
+async def _preflight_concurrent(
+    body: "ChatRequest",
+    cu: CurrentUser,
+    settings: Settings,
+    convo_store: ConversationStore,
+    emitter: "EventEmitter | None",
+) -> "tuple[Any, Any]":
+    """Fan out the LLM-independent preflight work concurrently.
+
+    Today the route does two non-trivial things before the pipeline (or the
+    orchestrator) actually starts: it (a) classifies the auto-mode if the
+    client sent ``agent_mode="auto"`` (an LLM call against Flash-Lite) and
+    (b) eventually loads the cached ``DatabaseProfile`` inside the first
+    pipeline stage. (a) is independent of the profile, and (b) is
+    independent of the question text — so they can race.
+
+    Returns ``(route_decision, prefetched_profile)``. Both can be ``None``:
+    ``route_decision`` is ``None`` when ``agent_mode != "auto"``;
+    ``prefetched_profile`` is ``None`` on cache miss or load error.
+
+    The profile prefetch is best-effort — on failure ``ProfilerStage`` runs
+    its normal cold-cache path. The auto-mode classifier already has its
+    own fallback (defaults to ``agentic``) so the gather-cancellation
+    semantics here are safe: if the classifier fails the route still
+    proceeds; if the prefetch fails the pipeline still proceeds.
+    """
+    # ``ProfileService`` is cheap to construct; mirrors what
+    # ``_build_pipeline_and_ctx`` does. Building the store on every call
+    # is a few microseconds — keeps this helper standalone.
+    store = build_store(settings)
+    prof_svc = ProfileService(store)
+    profile_task: asyncio.Task[Any] = asyncio.create_task(
+        prefetch_profile(prof_svc, cu.id, body.db_id)
+    )
+    route_decision = await _resolve_auto_mode(body, settings, emitter)
+    profile = await profile_task
+    return route_decision, profile
+
+
 def _resolve_pipeline_mode(body: "ChatRequest", cu: CurrentUser) -> str:
     """Resolve the effective pipeline mode for this turn.
 
@@ -226,6 +266,7 @@ def _build_pipeline_and_ctx(
     emitter: EventEmitter | None,
     conversation_id: str,
     pipeline_mode: str = "linked",
+    prefetched_profile: Any = None,
 ) -> tuple[PipelineContext, Any]:
     """Build a pipeline + context for an already-resolved conversation_id.
 
@@ -254,6 +295,12 @@ def _build_pipeline_and_ctx(
     ctx.state.update(
         db_id=body.db_id, question=body.message, pipeline_mode=pipeline_mode
     )
+    # Hand the route-level pre-fetched profile through to ProfilerStage so
+    # the pipeline's first stage can skip its own (now-redundant) cache
+    # read. ProfilerStage pops the key and emits the standard
+    # ``profile_loaded`` chunk so the SSE timeline is unchanged.
+    if prefetched_profile is not None:
+        ctx.state["__prefetched_profile"] = prefetched_profile
     return ctx, pipeline
 
 
@@ -406,8 +453,14 @@ async def chat_sse(
     # Resolve auto-mode here (defense in depth — even if FE pre-routed via
     # /chat/route, never trust ``"auto"`` reaching the dispatcher). The
     # auto_routed chunk is queued on the emitter so it streams as the very
-    # first chunk before any pipeline activity.
-    await _resolve_auto_mode(body, settings, emitter)
+    # first chunk before any pipeline activity. We race the (LLM) auto-mode
+    # classifier against the profile cache prefetch so the warm profile is
+    # ready by the time the pipeline's ProfilerStage runs — letting the
+    # first real LLM call (schema linking) fire roughly one DB-roundtrip
+    # sooner on the steady-state path.
+    _, prefetched_profile = await _preflight_concurrent(
+        body, cu, settings, convo_store, emitter
+    )
 
     snapshot_rec = {
         "user_id": cu.id,
@@ -422,6 +475,7 @@ async def chat_sse(
                 record_metrics=True,
                 snapshot_record=snapshot_rec,
                 collected_chunks=collected,
+                prefetched_profile=prefetched_profile,
             )
         )
     else:
@@ -429,6 +483,7 @@ async def chat_sse(
             body=body, cu=cu, settings=settings, convo_store=convo_store,
             emitter=emitter, conversation_id=convo.conversation_id,
             pipeline_mode=pipeline_mode,
+            prefetched_profile=prefetched_profile,
         )
         # Fire pipeline on a background task so EventSourceResponse can start streaming
         # the emitter's queue before the pipeline finishes.
@@ -504,6 +559,7 @@ async def _run_orchestrator(
     record_metrics: bool = False,
     snapshot_record: dict[str, Any] | None = None,
     collected_chunks: list[Any] | None = None,
+    prefetched_profile: Any = None,
 ) -> None:
     """Drive the vendored orchestrator_loop with our analyst injected, translate
     each yielded vendored chunk to our envelope, and push through the emitter.
@@ -554,7 +610,12 @@ async def _run_orchestrator(
     # orchestrator falls back to an empty doc string.
     documentation_md: str | None = None
     try:
-        profile = await asyncio.to_thread(prof_svc.load, cu.id, body.db_id)
+        # Reuse the route-level pre-fetched profile when available; the
+        # caller already raced this load against the auto-mode classifier
+        # so we shouldn't pay for the DB round-trip a second time.
+        profile = prefetched_profile
+        if profile is None:
+            profile = await asyncio.to_thread(prof_svc.load, cu.id, body.db_id)
         if profile is not None:
             documentation_md = documentation_from_profile(profile)
     except Exception:  # noqa: BLE001
@@ -713,10 +774,14 @@ async def _collect_chunks_orchestrator(
     convo_store: ConversationStore,
     emitter: EventEmitter,
     conversation_id: str,
+    prefetched_profile: Any = None,
 ) -> list[EnvelopeChatChunk]:
     """Run the orchestrator to completion and drain the emitter's queue."""
     task = asyncio.create_task(
-        _run_orchestrator(body, cu, settings, convo_store, emitter, conversation_id)
+        _run_orchestrator(
+            body, cu, settings, convo_store, emitter, conversation_id,
+            prefetched_profile=prefetched_profile,
+        )
     )
     collected: list[EnvelopeChatChunk] = []
     while True:
@@ -745,16 +810,20 @@ async def chat_poll(
             cu.id, convo.conversation_id, chunk.model_dump(mode="json")
         ),
     )
-    await _resolve_auto_mode(body, settings, emitter)
+    _, prefetched_profile = await _preflight_concurrent(
+        body, cu, settings, convo_store, emitter
+    )
     if body.agent_mode is not None:
         chunks = await _collect_chunks_orchestrator(
-            body, cu, settings, convo_store, emitter, convo.conversation_id
+            body, cu, settings, convo_store, emitter, convo.conversation_id,
+            prefetched_profile=prefetched_profile,
         )
     else:
         ctx, pipeline = _build_pipeline_and_ctx(
             body=body, cu=cu, settings=settings, convo_store=convo_store,
             emitter=emitter, conversation_id=convo.conversation_id,
             pipeline_mode=pipeline_mode,
+            prefetched_profile=prefetched_profile,
         )
         chunks = await _collect_chunks(pipeline, ctx, convo_store, model=settings.gemini_chat_model)
     _schedule_record_turn(
@@ -788,16 +857,20 @@ async def chat_answer(
             cu.id, convo.conversation_id, chunk.model_dump(mode="json")
         ),
     )
-    await _resolve_auto_mode(body, settings, emitter)
+    _, prefetched_profile = await _preflight_concurrent(
+        body, cu, settings, convo_store, emitter
+    )
     if body.agent_mode is not None:
         chunks = await _collect_chunks_orchestrator(
-            body, cu, settings, convo_store, emitter, convo.conversation_id
+            body, cu, settings, convo_store, emitter, convo.conversation_id,
+            prefetched_profile=prefetched_profile,
         )
     else:
         ctx, pipeline = _build_pipeline_and_ctx(
             body=body, cu=cu, settings=settings, convo_store=convo_store,
             emitter=emitter, conversation_id=convo.conversation_id,
             pipeline_mode=pipeline_mode,
+            prefetched_profile=prefetched_profile,
         )
         chunks = await _collect_chunks(pipeline, ctx, convo_store, model=settings.gemini_chat_model)
 
