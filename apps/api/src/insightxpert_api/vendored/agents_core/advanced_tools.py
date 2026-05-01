@@ -587,7 +587,7 @@ class ScoreFraudRiskTool(DataFrameTool):
             "Compute empirical fraud risk lift for multi-dimensional segments. "
             "Lift = segment_fraud_rate / overall_fraud_rate. "
             "High-lift segments are disproportionately fraudulent. "
-            "Requires a binary fraud flag column (0/1 or True/False)."
+            "Requires a binary indicator column (0/1 or True/False) supplied by the caller."
         )
 
     @property
@@ -601,11 +601,11 @@ class ScoreFraudRiskTool(DataFrameTool):
                 "group_columns": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "List of categorical columns to group by (e.g. ['payment_method', 'state']).",
+                    "description": "List of categorical columns to group by.",
                 },
                 "fraud_column": {
                     "type": "string",
-                    "description": "Binary fraud flag column (0/1 or True/False). Default: 'fraud_flag'.",
+                    "description": "Binary indicator column (0/1 or True/False). Caller must specify the exact column name from the schema.",
                 },
                 "min_segment_size": {
                     "type": "integer",
@@ -616,18 +616,22 @@ class ScoreFraudRiskTool(DataFrameTool):
                     "description": "Number of highest-lift segments to return (default 10).",
                 },
             },
-            "required": ["group_columns"],
+            "required": ["group_columns", "fraud_column"],
         }
 
     def _collect_required(self, args: dict) -> list[str]:
         cols: list[str] = list(args.get("group_columns", []))
-        fraud_col = args.get("fraud_column", "fraud_flag")
+        fraud_col = args.get("fraud_column")
+        if not fraud_col:
+            raise ValueError("score_fraud_risk: caller must specify 'fraud_column' (no default)")
         cols.append(fraud_col)
         return cols
 
     async def run(self, df: pd.DataFrame, args: dict) -> str:
         group_cols: list[str] = args["group_columns"]
-        fraud_col: str = args.get("fraud_column", "fraud_flag")
+        fraud_col = args.get("fraud_column")
+        if not fraud_col:
+            raise ValueError("score_fraud_risk: caller must specify 'fraud_column' (no default)")
         min_size: int = int(args.get("min_segment_size", 10))
         top_n: int = int(args.get("top_n", 10))
 
@@ -701,7 +705,9 @@ class DetectAmountAnomaliesTool(DataFrameTool):
 
     def _collect_required(self, args: dict) -> list[str]:
         cols: list[str] = []
-        amount_col = args.get("amount_column", "amount_inr")
+        amount_col = args.get("amount_column")
+        if not amount_col:
+            raise ValueError("detect_amount_anomalies: caller must specify 'amount_column' (no default)")
         cols.append(amount_col)
         group_col = args.get("group_by")
         if group_col:
@@ -714,7 +720,7 @@ class DetectAmountAnomaliesTool(DataFrameTool):
             "properties": {
                 "amount_column": {
                     "type": "string",
-                    "description": "Numeric amount column. Default: 'amount_inr'.",
+                    "description": "Numeric column to scan for anomalies. Caller must specify the exact column name from the schema.",
                 },
                 "group_by": {
                     "type": "string",
@@ -725,6 +731,7 @@ class DetectAmountAnomaliesTool(DataFrameTool):
                     "description": "Modified Z-score threshold for anomaly flag (default 3.5).",
                 },
             },
+            "required": ["amount_column"],
         }
 
     def _mad_z_scores(self, series: pd.Series) -> pd.Series:
@@ -736,7 +743,9 @@ class DetectAmountAnomaliesTool(DataFrameTool):
         return 0.6745 * (series - median) / mad
 
     async def run(self, df: pd.DataFrame, args: dict) -> str:
-        amount_col: str = args.get("amount_column", "amount_inr")
+        amount_col = args.get("amount_column")
+        if not amount_col:
+            raise ValueError("detect_amount_anomalies: caller must specify 'amount_column' (no default)")
         group_col: str | None = args.get("group_by")
         z_thresh: float = float(args.get("z_threshold", 3.5))
 
@@ -813,10 +822,13 @@ class TestTemporalFraudClusteringTool(DataFrameTool):
         return ["time_column", "fraud_column"]
 
     def _collect_required(self, args: dict) -> list[str]:
-        return [
-            args.get("time_column", "hour_of_day"),
-            args.get("fraud_column", "fraud_flag"),
-        ]
+        time_col = args.get("time_column")
+        fraud_col = args.get("fraud_column")
+        if not time_col or not fraud_col:
+            raise ValueError(
+                "test_temporal_fraud_clustering: caller must specify both 'time_column' and 'fraud_column' (no defaults)"
+            )
+        return [time_col, fraud_col]
 
     def get_args_schema(self) -> dict:
         return {
@@ -824,22 +836,27 @@ class TestTemporalFraudClusteringTool(DataFrameTool):
             "properties": {
                 "time_column": {
                     "type": "string",
-                    "description": "Categorical/ordinal time column (e.g. 'hour_of_day'). Default: 'hour_of_day'.",
+                    "description": "Categorical/ordinal time column (e.g. an hour-of-day or day-of-week column). Caller must specify the exact column name.",
                 },
                 "fraud_column": {
                     "type": "string",
-                    "description": "Binary fraud flag column (0/1). Default: 'fraud_flag'.",
+                    "description": "Binary indicator column (0/1). Caller must specify the exact column name from the schema.",
                 },
                 "alpha": {
                     "type": "number",
                     "description": "Significance level (default 0.05).",
                 },
             },
+            "required": ["time_column", "fraud_column"],
         }
 
     async def run(self, df: pd.DataFrame, args: dict) -> str:
-        time_col: str = args.get("time_column", "hour_of_day")
-        fraud_col: str = args.get("fraud_column", "fraud_flag")
+        time_col = args.get("time_column")
+        fraud_col = args.get("fraud_column")
+        if not time_col or not fraud_col:
+            raise ValueError(
+                "test_temporal_fraud_clustering: caller must specify both 'time_column' and 'fraud_column' (no defaults)"
+            )
         alpha: float = float(args.get("alpha", 0.05))
 
         fraud_series = pd.to_numeric(df[fraud_col], errors="coerce").fillna(0)
@@ -917,11 +934,14 @@ class ComputeBankPairRiskTool(DataFrameTool):
         return ["sender_col", "receiver_col", "fraud_col"]
 
     def _collect_required(self, args: dict) -> list[str]:
-        return [
-            args.get("sender_col", "sender_bank"),
-            args.get("receiver_col", "receiver_bank"),
-            args.get("fraud_col", "fraud_flag"),
-        ]
+        sender = args.get("sender_col")
+        receiver = args.get("receiver_col")
+        fraud = args.get("fraud_col")
+        if not sender or not receiver or not fraud:
+            raise ValueError(
+                "compute_bank_pair_risk: caller must specify 'sender_col', 'receiver_col', and 'fraud_col' (no defaults)"
+            )
+        return [sender, receiver, fraud]
 
     def get_args_schema(self) -> dict:
         return {
@@ -929,15 +949,15 @@ class ComputeBankPairRiskTool(DataFrameTool):
             "properties": {
                 "sender_col": {
                     "type": "string",
-                    "description": "Sender bank column. Default: 'sender_bank'.",
+                    "description": "Source/origin categorical column for the pair. Caller must specify the exact column name.",
                 },
                 "receiver_col": {
                     "type": "string",
-                    "description": "Receiver bank column. Default: 'receiver_bank'.",
+                    "description": "Destination categorical column for the pair. Caller must specify the exact column name.",
                 },
                 "fraud_col": {
                     "type": "string",
-                    "description": "Binary fraud flag column. Default: 'fraud_flag'.",
+                    "description": "Binary indicator column. Caller must specify the exact column name from the schema.",
                 },
                 "min_pair_size": {
                     "type": "integer",
@@ -948,12 +968,17 @@ class ComputeBankPairRiskTool(DataFrameTool):
                     "description": "Number of riskiest pairs to return (default 5).",
                 },
             },
+            "required": ["sender_col", "receiver_col", "fraud_col"],
         }
 
     async def run(self, df: pd.DataFrame, args: dict) -> str:
-        sender_col: str = args.get("sender_col", "sender_bank")
-        receiver_col: str = args.get("receiver_col", "receiver_bank")
-        fraud_col: str = args.get("fraud_col", "fraud_flag")
+        sender_col = args.get("sender_col")
+        receiver_col = args.get("receiver_col")
+        fraud_col = args.get("fraud_col")
+        if not sender_col or not receiver_col or not fraud_col:
+            raise ValueError(
+                "compute_bank_pair_risk: caller must specify 'sender_col', 'receiver_col', and 'fraud_col' (no defaults)"
+            )
         min_size: int = int(args.get("min_pair_size", 5))
         top_n: int = int(args.get("top_n", 5))
 
@@ -1208,7 +1233,10 @@ class TestBenfordLawTool(DataFrameTool):
         return ["amount_column"]
 
     def _collect_required(self, args: dict) -> list[str]:
-        return [args.get("amount_column", "amount_inr")]
+        amount_col = args.get("amount_column")
+        if not amount_col:
+            raise ValueError("test_benford_law: caller must specify 'amount_column' (no default)")
+        return [amount_col]
 
     def get_args_schema(self) -> dict:
         return {
@@ -1216,13 +1244,16 @@ class TestBenfordLawTool(DataFrameTool):
             "properties": {
                 "amount_column": {
                     "type": "string",
-                    "description": "Numeric amount column. Default: 'amount_inr'.",
+                    "description": "Numeric column to test. Caller must specify the exact column name from the schema.",
                 },
             },
+            "required": ["amount_column"],
         }
 
     async def run(self, df: pd.DataFrame, args: dict) -> str:
-        amount_col: str = args.get("amount_column", "amount_inr")
+        amount_col = args.get("amount_column")
+        if not amount_col:
+            raise ValueError("test_benford_law: caller must specify 'amount_column' (no default)")
 
         amounts = pd.to_numeric(df[amount_col], errors="coerce")
         valid = amounts[amounts > 0].dropna()
