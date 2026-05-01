@@ -35,6 +35,11 @@ import type { EnrichmentTrace, TraceStep } from "@/types/chat";
 
 SyntaxHighlighter.registerLanguage("sql", sqlLang);
 
+// Re-export so existing call-sites (and the unit test) can keep importing
+// from this module if they prefer; canonical home is `@/lib/chunk-labels`.
+export { CHUNK_TYPE_LABELS, getChunkTypeLabel } from "@/lib/chunk-labels";
+import { getChunkTypeLabel } from "@/lib/chunk-labels";
+
 interface TraceModalProps {
   trace: EnrichmentTrace | null;
   open: boolean;
@@ -142,11 +147,12 @@ const stepIcon = (type: string) => {
 };
 
 const stepLabel = (type: string) => {
+  // A handful of types have trace-modal-specific labels that differ from the
+  // chunk-renderer / SSE-timeline label map (e.g. "Query Results" reads
+  // better than "Tool result" in the trace timeline). Everything else falls
+  // through to the shared CHUNK_TYPE_LABELS map (with snake_case → Title
+  // Case as a final fallback for unknown types).
   switch (type) {
-    case "status":
-      return "Processing";
-    case "tool_call":
-      return "Tool Call";
     case "sql":
       return "SQL Query";
     case "tool_result":
@@ -158,7 +164,7 @@ const stepLabel = (type: string) => {
     case "error":
       return "Error";
     default:
-      return type;
+      return getChunkTypeLabel(type);
   }
 };
 
