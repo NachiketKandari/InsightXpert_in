@@ -41,15 +41,15 @@ Returns:
 """
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 
 from jinja2 import Template
 
 from ..llm import LLMProvider
+from ..logging import get_logger
 from .stage import PipelineContext
 
-log = logging.getLogger("insightxpert_api.pipeline.synthesizer")
+log = get_logger("pipeline.synthesizer_stage")
 
 
 class AnswerSynthesizerStage:
@@ -93,8 +93,9 @@ class AnswerSynthesizerStage:
                 raise ValueError("empty response from LLM")
         except Exception as exc:  # noqa: BLE001 — never abort the turn on synthesis failure
             log.warning(
-                "answer_synthesis_failed; falling back to template",
-                extra={"error": str(exc), "error_type": type(exc).__name__},
+                "answer_synthesis_failed",
+                error=str(exc),
+                error_type=type(exc).__name__,
             )
             answer = f"Query returned {row_count} rows."
 
