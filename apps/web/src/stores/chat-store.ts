@@ -75,6 +75,21 @@ interface ChatState {
   setSkipClarificationNext: (skip: boolean) => void;
   setCurrentAgentPhase: (phase: string | null) => void;
   setSelectedDbId: (dbId: string | null) => void;
+
+  // ---------------------------------------------------------------------
+  // In-answer citation highlights (clickable [^N] footnotes → row flash).
+  // Set when an answer-chunk footnote is clicked; cleared after the
+  // data-table flashes the cited rows. `ts` is updated on every set so a
+  // re-click of the same footnote re-triggers the framer-motion animation.
+  // ---------------------------------------------------------------------
+  messageHighlight: {
+    messageId: string;
+    rowIndices: number[];
+    ts: number;
+  } | null;
+  setMessageHighlight: (
+    h: { messageId: string; rowIndices: number[] } | null,
+  ) => void;
 }
 
 export const useChatStore = create<ChatState>()(persist((set, get) => ({
@@ -498,6 +513,24 @@ export const useChatStore = create<ChatState>()(persist((set, get) => ({
 
   setSelectedDbId: (dbId) => {
     set({ selectedDbId: dbId });
+  },
+
+  // ---------------------------------------------------------------------
+  // Citation highlight slice — see ChatState above for rationale.
+  // ---------------------------------------------------------------------
+  messageHighlight: null,
+  setMessageHighlight: (h) => {
+    if (h === null) {
+      set({ messageHighlight: null });
+      return;
+    }
+    set({
+      messageHighlight: {
+        messageId: h.messageId,
+        rowIndices: h.rowIndices,
+        ts: Date.now(),
+      },
+    });
   },
 }), {
   name: "insightxpert-chat",
