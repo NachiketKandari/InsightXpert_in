@@ -1,47 +1,122 @@
-"""Business context, column descriptions, and domain rules."""
+"""Business context for the analyst's system prompt.
 
-DOCUMENTATION = """
-## Dataset Overview
+Originally upstream this module hard-coded a 60+ line description of an
+Indian-UPI payments dataset (the upstream pilot domain). insightxpert.ai is
+multi-domain — every connected database has a different schema — so the
+hardcoded constant would silently inject UPI/fraud_flag/sender_state context
+into the LLM's system prompt regardless of which database the user selected.
 
-The `transactions` table contains 250,000 Indian UPI digital payment
-transactions spanning the full calendar year 2024, with 17 columns.
-Transaction statuses are SUCCESS or FAILED. Amounts are in Indian Rupees (₹).
+This file is intentionally diverged from upstream:
 
-## Column Descriptions
+* ``DOCUMENTATION`` is now an empty fallback used only when no profile-derived
+  business context is available.
+* ``documentation_from_profile`` builds a short markdown overview from a live
+  ``DatabaseProfile`` so the prompt automatically describes the user's
+  actual schema instead of someone else's pilot data.
+"""
 
-| Column               | Type    | Description |
-|----------------------|---------|-------------|
-| transaction_id       | TEXT    | Unique identifier for each transaction (format: TXN0000000001). |
-| timestamp            | TEXT    | Timestamp of the transaction (format: YYYY-MM-DD HH:MM:SS). |
-| transaction_type     | TEXT    | One of: P2P, P2M, Bill Payment, Recharge. |
-| merchant_category    | TEXT    | Merchant vertical.  Values: Food, Grocery, Fuel, Entertainment, Shopping, Healthcare, Education, Transport, Utilities, Other. |
-| amount_inr           | REAL    | Transaction amount in Indian Rupees (range: 10 to ~42,000). |
-| transaction_status   | TEXT    | One of: SUCCESS, FAILED. |
-| sender_age_group     | TEXT    | Age bracket of the sender: 18-25, 26-35, 36-45, 46-55, 56+. |
-| receiver_age_group   | TEXT    | Age bracket of the receiver.  Same buckets as sender_age_group. |
-| sender_state         | TEXT    | Indian state of the sender.  Values: Maharashtra, Uttar Pradesh, Karnataka, Tamil Nadu, Gujarat, Rajasthan, West Bengal, Telangana, Delhi, Andhra Pradesh. |
-| sender_bank          | TEXT    | Sender's bank: SBI, HDFC, ICICI, Axis, PNB, Kotak, IndusInd, Yes Bank. |
-| receiver_bank        | TEXT    | Receiver's bank.  Same set of banks. |
-| device_type          | TEXT    | Device used: Android, iOS, Web. |
-| network_type         | TEXT    | Network at time of transaction: 4G, 5G, WiFi, 3G. |
-| fraud_flag           | INTEGER | 0 = not flagged, 1 = **flagged for review** (not confirmed fraud). |
-| hour_of_day          | INTEGER | Hour extracted from timestamp (0-23). |
-| day_of_week          | TEXT    | Day name: Monday, Tuesday, ... Sunday. |
-| is_weekend           | INTEGER | 0 = weekday, 1 = weekend (Saturday or Sunday). |
+from __future__ import annotations
 
-## Domain Rules & Guardrails
+from typing import TYPE_CHECKING
 
-- **fraud_flag** means "flagged for review", **not** confirmed fraud.  Always
-  use language like "flagged for review" in responses.
-- **Correlation != causation.**  Surface patterns and associations but never
-  assert causal relationships.
-- **No user-level tracking.**  There is no `user_id` column, so repeat-behaviour
-  analysis or cohort tracking is not possible.
-- **Derived temporal fields** (`hour_of_day`, `day_of_week`, `is_weekend`) are
-  pre-computed from `timestamp` and can be used directly.
-- When sample sizes are small, flag this explicitly (e.g., "Note: based on
-  320 records -- may not be representative").
-- There are only 10 sender states in the dataset. Do not assume all Indian
-  states/UTs are present.
-- Transaction statuses are only SUCCESS or FAILED.
-""".strip()
+if TYPE_CHECKING:
+    from insightxpert_api.vendored.pipeline_core.models.profile import DatabaseProfile
+
+# Empty fallback. Used only when the chat dispatcher couldn't load a profile
+# (e.g. profiling hasn't run yet, or the route forgot to pass an override).
+DOCUMENTATION = ""
+
+# Hard cap for builder output. The system prompt also carries DDL + few-shots,
+# so business context needs to stay tight.
+_MAX_LENGTH = 1200
+_MAX_TABLES_LISTED = 10
+_MAX_NOTABLE_COLS = 4
+
+
+def documentation_from_profile(profile: "DatabaseProfile | None") -> str:
+    """Render a short markdown business-context doc from a profile.
+
+    The output describes the active database in domain-neutral terms — table
+    names, row counts, primary keys, and a few notable columns per table —
+    so the analyst's system prompt has *some* context for the user's actual
+    schema instead of the previous hardcoded UPI block.
+
+    Pure function. Returns an empty string for ``None`` and a minimal valid
+    markdown stub for an empty profile (``db_id`` set, no tables) so the
+    caller never has to special-case missing data.
+    """
+    if profile is None:
+        return ""
+
+    tables = list(profile.tables or [])
+    db_id = profile.db_id or "unknown"
+
+    if not tables:
+        return f"## Database Overview\n\nDatabase `{db_id}` has no profiled tables yet."
+
+    lines: list[str] = ["## Database Overview", ""]
+
+    listed = tables[:_MAX_TABLES_LISTED]
+    listed_names = ", ".join(f"`{t.name}`" for t in listed)
+    overflow = len(tables) - len(listed)
+    if overflow > 0:
+        lines.append(
+            f"Database `{db_id}` contains {len(tables)} tables: "
+            f"{listed_names}, and {overflow} more."
+        )
+    else:
+        lines.append(
+            f"Database `{db_id}` contains {len(tables)} "
+            f"table{'s' if len(tables) != 1 else ''}: {listed_names}."
+        )
+
+    lines.append("")
+    lines.append("## Tables")
+    lines.append("")
+
+    for tp in listed:
+        col_count = len(tp.columns)
+
+        # Pick a stable, useful subset of columns: the first column with the
+        # highest distinct_count (proxy for likely PK / identifier) plus a few
+        # additional columns from the head of the column list.
+        notable: list[str] = []
+        seen: set[str] = set()
+
+        if tp.columns:
+            try:
+                pk_like = max(
+                    tp.columns,
+                    key=lambda c: getattr(c.stats, "distinct_count", 0) or 0,
+                )
+                notable.append(f"`{pk_like.name}` ({pk_like.type})")
+                seen.add(pk_like.name)
+            except ValueError:
+                pass
+
+        for col in tp.columns:
+            if len(notable) >= _MAX_NOTABLE_COLS:
+                break
+            if col.name in seen:
+                continue
+            notable.append(f"`{col.name}` ({col.type})")
+            seen.add(col.name)
+
+        notable_str = ", ".join(notable) if notable else "(no columns profiled)"
+        lines.append(
+            f"- **`{tp.name}`** — {tp.row_count} rows, {col_count} "
+            f"column{'s' if col_count != 1 else ''}. Notable columns: {notable_str}."
+        )
+
+    result = "\n".join(lines).rstrip()
+
+    # Hard cap. Truncate at a line boundary to avoid leaving a half-rendered
+    # markdown bullet, and mark the truncation so downstream readers know.
+    if len(result) > _MAX_LENGTH:
+        truncated = result[:_MAX_LENGTH]
+        cut = truncated.rfind("\n")
+        if cut > 0:
+            truncated = truncated[:cut]
+        result = truncated.rstrip() + "\n\n_…overview truncated._"
+
+    return result
