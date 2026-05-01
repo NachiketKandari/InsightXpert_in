@@ -84,3 +84,13 @@ export interface RowsReturnedData {
 export interface AnswerGeneratedData {
   text: string;
 }
+
+/**
+ * Streaming delta emitted by AnswerSynthesizerStage while the LLM is still
+ * producing tokens. The FE appends `text` onto the assistant message's
+ * content; the terminal `answer_generated` chunk replaces it with the
+ * canonical full text.
+ */
+export interface AnswerDeltaData {
+  text: string;
+}

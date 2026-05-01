@@ -19,6 +19,7 @@ export type ChunkType =
   | "sql_executing"
   | "rows_returned"
   | "answer_generated"
+  | "answer_delta"
   // Tier-4 — orchestration
   | "stats_context"
   | "insight"
