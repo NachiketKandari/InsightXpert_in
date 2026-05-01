@@ -168,9 +168,22 @@ class ProfilerStage:
 
     async def run(self, ctx: PipelineContext, _: object) -> DatabaseProfile:
         db_id = ctx.state["db_id"]
+
+        # Preflight prefetch hand-off: the chat route may have kicked off
+        # ``prof_svc.load`` concurrently with other pre-LLM work (e.g. the
+        # auto-mode classifier) and stashed the awaited result on the
+        # context. If present, we still re-resolve the db ref (cheap, sync)
+        # so a deleted/renamed db_id surfaces the same ValueError as the
+        # cold-cache path, and we still emit the ``profile_loaded`` chunk
+        # so the UI timeline is unchanged.
+        prefetched = ctx.state.pop("__prefetched_profile", None)
         ref = self._db.resolve(ctx.session_id, db_id)
         if ref is None:
             raise ValueError(f"database not found: {db_id}")
+        if prefetched is not None:
+            ctx.state["profile"] = prefetched
+            await self._emit(ctx, db_id, prefetched, from_cache=True)
+            return prefetched
 
         cached = self._prof.load(ctx.session_id, db_id)
         if cached is not None:
