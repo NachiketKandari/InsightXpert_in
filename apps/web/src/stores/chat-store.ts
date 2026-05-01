@@ -319,24 +319,44 @@ export const useChatStore = create<ChatState>()(persist((set, get) => ({
 
         // Metrics chunk: update observability fields, don't add to chunks array
         if (chunk.type === "metrics" && chunk.data) {
-          const d = chunk.data as { input_tokens?: number; output_tokens?: number; generation_time_ms?: number };
+          // Wire shape: MetricsPayload at apps/api/.../sse/chunks.py uses
+          // prompt_tokens (not input_tokens — the BE docstring keeps that name
+          // for backward compatibility). latency_ms is the duration; we surface
+          // it as generationTimeMs on the message.
+          const d = chunk.data as {
+            prompt_tokens?: number;
+            output_tokens?: number;
+            latency_ms?: number;
+          };
           const updated: Message = {
             ...lastMsg,
-            inputTokens: d.input_tokens ?? lastMsg.inputTokens,
+            inputTokens: d.prompt_tokens ?? lastMsg.inputTokens,
             outputTokens: d.output_tokens ?? lastMsg.outputTokens,
-            generationTimeMs: d.generation_time_ms ?? lastMsg.generationTimeMs,
+            generationTimeMs: d.latency_ms ?? lastMsg.generationTimeMs,
           };
           messages[messages.length - 1] = updated;
           return { ...c, messages };
         }
 
+        // Pull the natural-language answer text into message.content so that
+        // downstream consumers (MessageActions visibility gate, conversation
+        // persistence) work uniformly. The Tier-3 answer_generated chunk
+        // carries the text inside data.text; Tier-2 answer/insight chunks use
+        // the legacy top-level chunk.content field.
+        const answerGeneratedText =
+          chunk.type === "answer_generated" &&
+          typeof (chunk.data as { text?: unknown } | null)?.text === "string"
+            ? (chunk.data as { text: string }).text
+            : null;
+        const legacyContent =
+          (chunk.type === "answer" || chunk.type === "insight") && chunk.content
+            ? chunk.content
+            : null;
+
         const updated: Message = {
           ...lastMsg,
           chunks: [...lastMsg.chunks, chunk],
-          content:
-            (chunk.type === "answer" || chunk.type === "insight") && chunk.content
-              ? chunk.content
-              : lastMsg.content,
+          content: answerGeneratedText ?? legacyContent ?? lastMsg.content,
         };
         messages[messages.length - 1] = updated;
 
