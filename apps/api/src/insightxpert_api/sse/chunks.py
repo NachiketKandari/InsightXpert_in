@@ -57,6 +57,7 @@ class ChunkType(str, Enum):
     sql_executing = "sql_executing"
     rows_returned = "rows_returned"
     answer_generated = "answer_generated"
+    answer_delta = "answer_delta"
 
     # --- Profiling-upgrade (standalone profile route) --------------------
     profile_stage_started = "profile_stage_started"
@@ -97,6 +98,7 @@ class ChunkType(str, Enum):
     SQL_EXECUTING = "sql_executing"
     ROWS_RETURNED = "rows_returned"
     ANSWER_GENERATED = "answer_generated"
+    ANSWER_DELTA = "answer_delta"
     PROFILE_STAGE_STARTED = "profile_stage_started"
     PROFILE_STAGE_COMPLETED = "profile_stage_completed"
     PROFILE_PROGRESS = "profile_progress"
@@ -235,6 +237,18 @@ class RowsReturnedPayload(BaseModel):
 
 class AnswerGeneratedPayload(BaseModel):
     """Final synthesized answer. ``text`` is the complete string (not a delta)."""
+
+    text: str
+
+
+class AnswerDeltaPayload(BaseModel):
+    """Incremental answer-text chunk emitted while the synthesizer streams.
+
+    Multiple ``answer_delta`` chunks may arrive per turn; the FE concatenates
+    them into ``message.content``. The terminal ``answer_generated`` chunk
+    still carries the full canonical text and replaces (not appends) so that
+    transient stream errors / retries cannot leave the message truncated.
+    """
 
     text: str
 
@@ -396,6 +410,7 @@ ChunkPayload = Union[
     SQLExecutingPayload,
     RowsReturnedPayload,
     AnswerGeneratedPayload,
+    AnswerDeltaPayload,
     # Profiling-upgrade
     ProfileStageStartedPayload,
     ProfileStageCompletedPayload,

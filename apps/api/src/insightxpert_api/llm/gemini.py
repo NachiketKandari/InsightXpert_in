@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from collections.abc import AsyncIterator
 
 from google import genai
 
@@ -150,6 +151,40 @@ class GeminiLLM:
             )
         self._record_usage(resp)
         return resp.text or ""
+
+    async def async_generate_stream(
+        self,
+        prompt: str,
+        *,
+        temperature: float = 0.0,
+        max_tokens: int = 4096,
+    ) -> AsyncIterator[str]:
+        """Stream text from Gemini, yielding incremental deltas as they arrive.
+
+        Mirrors ``async_generate``'s config (temperature, max_tokens) but
+        invokes the SDK's ``aio.models.generate_content_stream`` endpoint and
+        yields each chunk's text payload (skipping empty chunks). On stream
+        completion, the final chunk's ``usage_metadata`` is folded into this
+        adapter's running token totals — same accounting as the one-shot path.
+
+        The semaphore is held for the entire stream lifetime so that the
+        global LLM concurrency cap reflects in-flight streams, not just
+        one-shot calls.
+        """
+        async with _llm_semaphore():
+            stream = await self._client.aio.models.generate_content_stream(
+                model=self._model,
+                contents=prompt,
+                config={"temperature": temperature, "max_output_tokens": max_tokens},
+            )
+            last_chunk: object | None = None
+            async for chunk in stream:
+                last_chunk = chunk
+                text = getattr(chunk, "text", None)
+                if text:
+                    yield text
+            if last_chunk is not None:
+                self._record_usage(last_chunk)
 
     def embed(self, text: str) -> list[float]:
         resp = self._client.models.embed_content(model=self._embed_model, contents=text)
