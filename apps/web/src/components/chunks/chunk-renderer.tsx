@@ -31,6 +31,7 @@ import { SqlGeneratedChunk } from "./sql-generated-chunk";
 import { SqlExecutingChunk } from "./sql-executing-chunk";
 import { RowsReturnedChunk } from "./rows-returned-chunk";
 import { AnswerGeneratedChunk } from "./answer-generated-chunk";
+import { AutoRoutedChunk } from "./auto-routed-chunk";
 import type {
   ProfileLoadedData,
   SchemaLinkingStartedData,
@@ -322,6 +323,17 @@ function ChunkRendererInner({ chunk, isComplete, isStreaming, enrichmentTraces, 
     // Tier-1: metrics is consumed upstream for stats; no renderer here.
     case "metrics":
       return null;
+
+    case "auto_routed": {
+      const mode = chunk.data?.mode as "basic" | "agentic" | undefined;
+      const reason = (chunk.data?.reason as string | undefined) ?? "";
+      if (!mode) {
+        content = null;
+        break;
+      }
+      content = <AutoRoutedChunk data={{ mode, reason }} />;
+      break;
+    }
 
     default:
       content = null;

@@ -4,6 +4,7 @@ import { useCallback, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useChatStore } from "@/stores/chat-store";
 import { createSSEStream, type AgentMode } from "@/lib/sse-client";
+import { apiFetch } from "@/lib/api";
 import { parseChunk } from "@/lib/chunk-parser";
 import { useInsightStore } from "@/stores/insight-store";
 import { useSettingsStore } from "@/stores/settings-store";
@@ -38,7 +39,7 @@ export function useSSEChat() {
   const isActiveStreaming = isStreaming && streamingConversationId === activeConversationId;
 
   const sendMessage = useCallback(
-    (message: string, agentMode: AgentMode = "agentic") => {
+    (message: string, agentMode: AgentMode = "auto") => {
       if (isActiveStreaming) return;
 
       let convId = activeConversationId;
@@ -74,8 +75,10 @@ export function useSSEChat() {
       // Clear any pending clarification state
       useChatStore.getState().setPendingClarification(null);
 
-      const controller = createSSEStream(message, convId, {
-        onChunk: (raw) => {
+      // Build the SSE callback object once — used both for the auto-routed
+      // synthetic chunk dispatch and the real stream's chunk handling.
+      const sseCallbacks = {
+        onChunk: (raw: string) => {
           const chunk = parseChunk(raw);
           if (!chunk) return;
 
@@ -281,7 +284,7 @@ export function useSSEChat() {
             setTimeout(() => useInsightStore.getState().fetchCount(), 3000);
           }
         },
-        onError: (error) => {
+        onError: (error: Error) => {
           // Mark any running step as done before reporting the error.
           markLastRunningDone();
           appendChunk({
@@ -292,14 +295,76 @@ export function useSSEChat() {
           });
           finishStreaming(convId!);
         },
-      }, agentMode, {
-        skipClarification,
-        dbId: useChatStore.getState().selectedDbId,
-        // Tier-1: pipeline_mode override (admin only — the server enforces).
-        pipelineMode: useSettingsStore.getState().pipelineMode,
-      });
+      };
 
-      abortRef.current = controller;
+      const dbId = useChatStore.getState().selectedDbId;
+      const pipelineMode = useSettingsStore.getState().pipelineMode;
+
+      const launchStream = (resolvedMode: AgentMode) => {
+        const controller = createSSEStream(
+          message,
+          convId,
+          sseCallbacks,
+          resolvedMode,
+          {
+            skipClarification,
+            dbId,
+            // Tier-1: pipeline_mode override (admin only — the server enforces).
+            pipelineMode,
+          },
+        );
+        abortRef.current = controller;
+      };
+
+      if (agentMode === "auto") {
+        // Pre-flight: ask the server to classify the question. The server
+        // also re-classifies if a client sends `auto` to /chat directly, but
+        // routing client-side first lets us (a) show the routed mode + reason
+        // immediately as a synthetic chunk and (b) pass the resolved mode to
+        // /chat so the auto_routed chunk doesn't show up twice.
+        const stepId = generateStepId();
+        addAgentStep({
+          id: stepId,
+          label: "Choosing mode...",
+          status: "running",
+          timestamp: Date.now() / 1000,
+        });
+        lastRunningStepId = stepId;
+
+        (async () => {
+          let resolvedMode: AgentMode = "agentic"; // safe default
+          try {
+            const res = await apiFetch("/api/v1/chat/route", {
+              method: "POST",
+              body: JSON.stringify({ question: message, db_id: dbId }),
+            });
+            if (res.ok) {
+              const decision = (await res.json()) as {
+                mode: "basic" | "agentic";
+                reason: string;
+              };
+              resolvedMode = decision.mode;
+              // Inject the routing decision as a synthetic chunk so the
+              // ChunkRenderer pill renders at the top of the assistant
+              // message. Mirrors the server-side `auto_routed` payload shape.
+              appendChunk({
+                type: "auto_routed",
+                data: { mode: decision.mode, reason: decision.reason },
+                conversation_id: convId!,
+                timestamp: Date.now() / 1000,
+              });
+            }
+          } catch {
+            // Network error — fall back to agentic and let the server-side
+            // safety net handle the rest. No synthetic chunk emitted.
+          }
+          // Drop the "Choosing mode..." step now that we have a decision.
+          markLastRunningDone();
+          launchStream(resolvedMode);
+        })();
+      } else {
+        launchStream(agentMode);
+      }
     },
     [
       isActiveStreaming,

@@ -27,8 +27,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   currentModel: "gemini-2.5-flash",
   providers: [],
   loading: false,
-  // Default to agentic per spec F1 (B2 mode toggle).
-  agentMode: "agentic" as AgentMode,
+  // Default to "auto" — the FE pre-routes via POST /api/v1/chat/route.
+  // The classifier picks basic vs. agentic per question. Users can override
+  // via the dropdown.
+  agentMode: "auto" as AgentMode,
   pipelineMode: "auto" as PipelineMode,
 
   fetchConfig: async () => {

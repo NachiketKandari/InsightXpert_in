@@ -29,7 +29,9 @@ export type ChunkType =
   | "sql"
   | "answer"
   // Sample questions side-channel
-  | "sample_questions.ready";
+  | "sample_questions.ready"
+  // Auto-mode router decision (synthetic, emitted before pipeline activity)
+  | "auto_routed";
 
 export interface ChatChunk {
   type: ChunkType;
