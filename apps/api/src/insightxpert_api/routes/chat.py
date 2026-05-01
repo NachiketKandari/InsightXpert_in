@@ -410,28 +410,23 @@ def _vendored_to_envelope(vendored: VendoredChatChunk) -> EnvelopeChatChunk | No
     compatibility. Those are internal to the vendored orchestrator's bookkeeping
     and shouldn't surface on the wire.
 
-    Unknown type strings fall through with ``data`` set to the vendored's ``data``
-    dict — keeps forward-compat with orchestrator chunks we haven't modelled yet
-    (orchestrator_plan, agent_trace, enrichment_trace, insight, clarification).
+    Unknown type strings are dropped (return ``None``) rather than coerced into
+    a ``status`` envelope — coercion produced raw ``[type_name]`` labels in the
+    UI trace. Forward-compat chunks must be added to ``ChunkType`` explicitly
+    before they reach the wire.
     """
     t = vendored.type
     # Drop internal-duplicate chunks.
     if t in ("sql", "answer"):
         return None
 
-    # Try to map the type string to our ChunkType enum. If the string isn't a
-    # known value, we still emit the chunk with the raw type (FE can treat it
-    # as opaque) — but our Pydantic envelope requires a ChunkType value, so we
-    # fall back to ``status`` with the original string preserved in data.
+    # Try to map the type string to our ChunkType enum. Unknown types are
+    # dropped — same shape as the sql/answer drop a few lines above, rather
+    # than synthesising a placeholder status envelope.
     try:
         ct = ChunkType(t)
     except ValueError:
-        return EnvelopeChatChunk(
-            type=ChunkType.status,
-            data={"message": f"[{t}]", **(vendored.data or {})},
-            conversation_id=vendored.conversation_id or None,
-            timestamp=vendored.timestamp,
-        )
+        return None
 
     # For chunks the orchestrator emits with flat top-level fields, lift into data.
     data: dict = dict(vendored.data or {})

@@ -87,17 +87,26 @@ export function useSSEChat() {
           // The "sql" chunk is a detail update on the current step, so it
           // must NOT mark the previous step done.
           if (chunk.type === "status") {
-            markLastRunningDone();
-            // Track agent phase for the input toolbar chip
+            // Track agent phase for the input toolbar chip even when the
+            // status carries no user-visible message.
             const agentPhase = chunk.data?.agent as string | undefined;
             if (agentPhase) {
               useChatStore.getState().setCurrentAgentPhase(agentPhase);
             }
+            const messageFromData = chunk.data?.message as string | undefined;
+            const label = (messageFromData ?? chunk.content ?? "").trim();
+            // Skip adding a timeline step entirely for content-less status
+            // chunks: they previously produced a stack of "Processing..."
+            // entries (one per phase tick) with nothing the user can read.
+            if (label === "") {
+              return;
+            }
+            markLastRunningDone();
             const stepId = generateStepId();
             const ragContext = chunk.data?.rag_context as string[] | undefined;
             const step: AgentStep = {
               id: stepId,
-              label: chunk.content || "Processing...",
+              label,
               status: "running",
               ragContext: ragContext?.length ? ragContext : undefined,
               timestamp: chunk.timestamp,
