@@ -3,7 +3,10 @@
 Emits fine-grained SSE events so the UI can render the "which signals pulled
 which columns" transparency required by the design spec. The composition mirrors
 the vendored ``SinglePromptLinker.link`` but keeps the stage's external contract
-minimal (no BIRD metadata, no join-graph, no few-shot retrieval in v1).
+minimal (no BIRD metadata, no join-graph). Few-shot retrieval is handled in
+the route's preflight (see ``services/few_shot_service.py``); the chosen
+example sits at ``ctx.state["few_shot_example"]`` and is consumed by
+``SqlGeneratorStage`` rather than this stage.
 
 Steps (each emits its own SSE chunk):
   1. ``schema_linking_started``

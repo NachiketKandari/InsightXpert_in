@@ -73,6 +73,9 @@ class ChunkType(str, Enum):
     # --- Auto-mode router (synthetic chunk emitted before pipeline starts) -
     auto_routed = "auto_routed"
 
+    # --- Few-shot retrieval (preflight transparency, before schema linking) --
+    few_shot_retrieved = "few_shot_retrieved"
+
     # --- Tier-4: orchestration transparency ------------------------------
     stats_context = "stats_context"
     orchestrator_plan = "orchestrator_plan"
@@ -374,6 +377,21 @@ class SampleQuestionsReadyPayload(BaseModel):
     sample_questions: "SampleQuestions"  # forward-ref to sample_questions.types
 
 
+class FewShotRetrievedPayload(BaseModel):
+    """A single BIRD-train QA pair selected by per-DB question similarity.
+
+    Emitted from the route's preflight (concurrent with profile prefetch) so
+    the trace UI can show "we pulled this similar example before generating
+    SQL" before any LLM activity. The same example is later threaded into
+    the SQL-gen prompt's ``{% if few_shot_example %}`` block.
+    """
+
+    question: str
+    gold_sql: str
+    similarity: float
+    source_db_id: str
+
+
 class AutoRoutedPayload(BaseModel):
     """Routing decision emitted as the first chunk when ``agent_mode="auto"``.
 
@@ -429,6 +447,8 @@ ChunkPayload = Union[
     SampleQuestionsReadyPayload,
     # Auto-mode routing
     AutoRoutedPayload,
+    # Few-shot retrieval
+    FewShotRetrievedPayload,
 ]
 
 

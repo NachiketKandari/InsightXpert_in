@@ -23,9 +23,14 @@ class SqlGeneratorStage:
         self._tpl = Template(Path(prompt_path).read_text())
 
     async def run(self, ctx: PipelineContext, _: object) -> str:
+        # Preflight may have stashed a per-DB similar BIRD-train example here;
+        # the prompt's ``{% if few_shot_example %}`` block consumes ``.question``
+        # and ``.gold_sql`` and is otherwise a no-op when None.
+        few_shot_example = ctx.state.get("few_shot_example")
         prompt = self._tpl.render(
             question=ctx.state["question"],
             schema_text=ctx.state["schema_text"],
+            few_shot_example=few_shot_example,
         )
         resp = await self._llm.async_generate(prompt)
         m = _FENCED_SQL.search(resp)

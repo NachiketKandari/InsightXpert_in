@@ -29,6 +29,11 @@ from ..databases import repository as databases_repo
 from ..logging import get_logger
 from ..pipeline import default_pipeline
 from ..pipeline.preflight import prefetch_profile
+from ..services.few_shot_service import (
+    FewShotExample,
+    get_few_shot_service,
+    prefetch_few_shot_example,
+)
 from ..pipeline.stage import PipelineContext
 from ..services.conversation_store import ConversationStore, get_conversation_store
 from ..services.database_service import DatabaseService
@@ -40,6 +45,7 @@ from ..sse.chunks import (
     ChatChunk as EnvelopeChatChunk,
     ChunkType,
     ErrorPayload,
+    FewShotRetrievedPayload,
     MetricsPayload,
 )
 from ..sse.emitter import EventEmitter
@@ -204,7 +210,7 @@ async def _preflight_concurrent(
     settings: Settings,
     convo_store: ConversationStore,
     emitter: "EventEmitter | None",
-) -> "tuple[Any, Any]":
+) -> "tuple[Any, Any, FewShotExample | None]":
     """Fan out the LLM-independent preflight work concurrently.
 
     Today the route does two non-trivial things before the pipeline (or the
@@ -232,9 +238,50 @@ async def _preflight_concurrent(
     profile_task: asyncio.Task[Any] = asyncio.create_task(
         prefetch_profile(prof_svc, cu.id, body.db_id)
     )
+    # Few-shot retrieval races alongside the profile prefetch and the
+    # auto-mode classifier. It uses the user's question + the active
+    # ``db_id`` to pick the most-similar BIRD-train QA pair, which the SQL
+    # generator stage later threads into its prompt as a "similar example"
+    # hint. The retriever itself is already swallow-on-error, but we wrap
+    # it again here so a single bad turn cannot interrupt the route.
+    from ..llm.gemini import GeminiLLM
+
+    few_shot_svc = get_few_shot_service()
+    few_shot_task: asyncio.Task[FewShotExample | None] | None = None
+    few_shot_llm: GeminiLLM | None = None
+    if few_shot_svc.is_active and body.db_id in few_shot_svc.db_ids:
+        # Dedicated lightweight LLM for the embedding call — separate from
+        # the per-turn pipeline LLM so we don't perturb its token totals
+        # (those drive the terminal ``metrics`` chunk's billing fields).
+        few_shot_llm = GeminiLLM(
+            api_key=settings.gemini_api_key,
+            model=settings.gemini_chat_model,
+            embed_model=settings.gemini_embed_model,
+        )
+        few_shot_task = asyncio.create_task(
+            prefetch_few_shot_example(
+                few_shot_svc, few_shot_llm, body.message, body.db_id
+            )
+        )
     route_decision = await _resolve_auto_mode(body, settings, emitter)
     profile = await profile_task
-    return route_decision, profile
+    few_shot: FewShotExample | None = None
+    if few_shot_task is not None:
+        try:
+            few_shot = await few_shot_task
+        except Exception:  # noqa: BLE001 — preflight is best-effort
+            few_shot = None
+    if few_shot is not None and emitter is not None:
+        await emitter.emit(
+            ChunkType.few_shot_retrieved,
+            FewShotRetrievedPayload(
+                question=few_shot.question,
+                gold_sql=few_shot.gold_sql,
+                similarity=few_shot.similarity,
+                source_db_id=few_shot.db_id,
+            ),
+        )
+    return route_decision, profile, few_shot
 
 
 def _resolve_pipeline_mode(body: "ChatRequest", cu: CurrentUser) -> str:
@@ -267,6 +314,7 @@ def _build_pipeline_and_ctx(
     conversation_id: str,
     pipeline_mode: str = "linked",
     prefetched_profile: Any = None,
+    prefetched_few_shot: FewShotExample | None = None,
 ) -> tuple[PipelineContext, Any]:
     """Build a pipeline + context for an already-resolved conversation_id.
 
@@ -301,6 +349,13 @@ def _build_pipeline_and_ctx(
     # ``profile_loaded`` chunk so the SSE timeline is unchanged.
     if prefetched_profile is not None:
         ctx.state["__prefetched_profile"] = prefetched_profile
+    # Stash the route-level few-shot pick on the context so SqlGeneratorStage
+    # picks it up and the prompt's ``{% if few_shot_example %}`` block fires.
+    # Stored as the FewShotExample model directly — Jinja resolves ``.question``
+    # / ``.gold_sql`` via attribute access on Pydantic models without extra
+    # plumbing.
+    if prefetched_few_shot is not None:
+        ctx.state["few_shot_example"] = prefetched_few_shot
     return ctx, pipeline
 
 
@@ -458,7 +513,7 @@ async def chat_sse(
     # ready by the time the pipeline's ProfilerStage runs — letting the
     # first real LLM call (schema linking) fire roughly one DB-roundtrip
     # sooner on the steady-state path.
-    _, prefetched_profile = await _preflight_concurrent(
+    _, prefetched_profile, prefetched_few_shot = await _preflight_concurrent(
         body, cu, settings, convo_store, emitter
     )
 
@@ -484,6 +539,7 @@ async def chat_sse(
             emitter=emitter, conversation_id=convo.conversation_id,
             pipeline_mode=pipeline_mode,
             prefetched_profile=prefetched_profile,
+            prefetched_few_shot=prefetched_few_shot,
         )
         # Fire pipeline on a background task so EventSourceResponse can start streaming
         # the emitter's queue before the pipeline finishes.
@@ -810,7 +866,7 @@ async def chat_poll(
             cu.id, convo.conversation_id, chunk.model_dump(mode="json")
         ),
     )
-    _, prefetched_profile = await _preflight_concurrent(
+    _, prefetched_profile, prefetched_few_shot = await _preflight_concurrent(
         body, cu, settings, convo_store, emitter
     )
     if body.agent_mode is not None:
@@ -824,6 +880,7 @@ async def chat_poll(
             emitter=emitter, conversation_id=convo.conversation_id,
             pipeline_mode=pipeline_mode,
             prefetched_profile=prefetched_profile,
+            prefetched_few_shot=prefetched_few_shot,
         )
         chunks = await _collect_chunks(pipeline, ctx, convo_store, model=settings.gemini_chat_model)
     _schedule_record_turn(
@@ -857,7 +914,7 @@ async def chat_answer(
             cu.id, convo.conversation_id, chunk.model_dump(mode="json")
         ),
     )
-    _, prefetched_profile = await _preflight_concurrent(
+    _, prefetched_profile, prefetched_few_shot = await _preflight_concurrent(
         body, cu, settings, convo_store, emitter
     )
     if body.agent_mode is not None:
@@ -871,6 +928,7 @@ async def chat_answer(
             emitter=emitter, conversation_id=convo.conversation_id,
             pipeline_mode=pipeline_mode,
             prefetched_profile=prefetched_profile,
+            prefetched_few_shot=prefetched_few_shot,
         )
         chunks = await _collect_chunks(pipeline, ctx, convo_store, model=settings.gemini_chat_model)
 
