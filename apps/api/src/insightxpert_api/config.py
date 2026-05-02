@@ -36,13 +36,28 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./app.db"
 
     # --- database connection pool ------------------------------------------
+    # Two engines, two pools. The request engine serves HTTP route handlers;
+    # the background engine serves the automations scheduler / runner. Sizing
+    # them separately means a hung background tick cannot starve user
+    # requests by exhausting the pool.
+    #
     # SQLAlchemy silently ignores pool_size / max_overflow / pool_timeout for
     # SQLite (which uses StaticPool / NullPool). These only take effect when
     # DATABASE_URL points at a Postgres (or other RDBMS) backend.
-    db_pool_size: int = 5
+    db_pool_size: int = 15
     db_max_overflow: int = 10
-    db_pool_timeout: int = 30
-    db_pool_pre_ping: bool = True
+    db_pool_timeout: int = 10
+    db_pool_pre_ping: bool = False  # transaction pooler handles dead conns
+    db_pool_recycle: int = 1800
+
+    db_background_pool_size: int = 2
+    db_background_max_overflow: int = 0
+    db_background_pool_timeout: int = 30
+
+    # Optional direct (non-pooler) URL — used by Alembic migrations and any
+    # ops script that needs session-level features. Falls back to
+    # database_url when unset.
+    database_direct_url: str = ""
 
     # --- auth --------------------------------------------------------------
     session_secret: str
