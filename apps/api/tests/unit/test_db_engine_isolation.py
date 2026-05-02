@@ -52,3 +52,34 @@ def test_sqlite_url_does_not_apply_pool_settings(monkeypatch, tmp_path):
     req = engine_mod.get_request_engine()
     bg = engine_mod.get_background_engine()
     assert req is not bg
+
+
+def test_claim_due_automations_uses_background_engine(monkeypatch):
+    """Scheduler hot path must not draw from the request pool."""
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///:memory:")
+    from insightxpert_api import config as cfg
+    cfg.get_settings.cache_clear()  # type: ignore[attr-defined]
+
+    from insightxpert_api.automations import repository as repo
+    from insightxpert_api.db import engine as engine_mod
+
+    captured: list[object] = []
+
+    real_bg = engine_mod.get_background_engine
+
+    def spy_bg():
+        e = real_bg()
+        captured.append(e)
+        return e
+
+    monkeypatch.setattr(engine_mod, "get_background_engine", spy_bg)
+    monkeypatch.setattr(repo, "get_background_engine", spy_bg)
+
+    # Empty schema is fine — the function returns [] when the table is
+    # missing or empty. We only care that it asked for the bg engine.
+    try:
+        repo.claim_due_automations(now_ts=0, batch_size=1)
+    except Exception:
+        pass  # OK — schema may not exist; the engine call already happened.
+
+    assert captured, "claim_due_automations did not call get_background_engine()"

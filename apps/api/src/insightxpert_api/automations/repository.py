@@ -15,7 +15,7 @@ from typing import Any
 
 from sqlalchemy import and_, delete, desc, func, insert, select, text, update
 
-from ..db.engine import get_engine
+from ..db.engine import get_background_engine, get_engine
 from .table import (
     automation_runs,
     automation_triggers,
@@ -184,7 +184,7 @@ def claim_due_automations(
     (single-process tests, local dev) falls back to read-then-update with
     the same public contract.
     """
-    engine = get_engine()
+    engine = get_background_engine()
     dialect = engine.dialect.name
 
     with engine.begin() as conn:
