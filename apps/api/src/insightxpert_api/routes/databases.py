@@ -45,6 +45,7 @@ from ..databases import service as visibility_service
 from ..db.schema import ddl as schema_ddl
 from ..logging import get_logger
 from ..profiling import repository as profiles_repo
+from ..profiling.cache import get_process_profile_cache
 from ..profiling.runner import (
     ProfileFlags,
     count_columns,
@@ -668,6 +669,7 @@ async def set_db_visibility(
         )
     except visibility_service.InvalidVisibilityError:
         raise HTTPException(status_code=400, detail="invalid_visibility") from None
+    get_process_profile_cache().invalidate(db_id, "base")
     return {"status": "ok"}
 
 
@@ -692,6 +694,7 @@ async def regenerate_sample_questions(
         )
     )
     existing = sq_repo.get_sample_questions(db_id)
+    get_process_profile_cache().invalidate(db_id, "base")
     return {"status": existing.status.value if existing else "pending"}
 
 

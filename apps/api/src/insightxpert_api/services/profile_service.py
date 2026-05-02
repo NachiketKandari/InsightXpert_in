@@ -10,11 +10,16 @@ The public API still takes ``session_id`` as the first arg for backwards
 compatibility with every existing caller. In this codebase ``session_id``
 is identical to the user id (sessions are 1:1 with users post-B1), so we
 record it as ``owner_user_id`` / ``generated_by``.
+
+Reads go through a process-level cache (``ProfileCache``) — repeated loads
+for the same ``(db_id, profile_kind)`` skip the DB round-trip. Writes
+invalidate the cache before returning so the next read sees fresh bytes.
 """
 
 from __future__ import annotations
 
 from ..profiling import repository as profiles_repo
+from ..profiling.cache import get_process_profile_cache
 from ..vendored.pipeline_core.models.profile import DatabaseProfile
 
 
@@ -25,7 +30,7 @@ class ProfileService:
         # `store` argument retained for backwards compatibility with the
         # earlier ObjectStore-backed implementation; ignored as of Phase 4b.
         # Drop the argument from callers when convenient.
-        pass
+        self._cache = get_process_profile_cache()
 
     def save(
         self,
@@ -42,6 +47,7 @@ class ProfileService:
             generated_by=session_id,
             profile_json=profile.model_dump_json(),
         )
+        self._cache.invalidate(db_id, profile_kind)
 
     def load(
         self,
@@ -50,10 +56,13 @@ class ProfileService:
         *,
         profile_kind: str = "base",
     ) -> DatabaseProfile | None:
-        row = profiles_repo.get(db_id, profile_kind)
-        if row is None:
-            return None
-        return DatabaseProfile.model_validate_json(row["profile_json"])
+        def _loader(db_id_: str, kind_: str) -> DatabaseProfile | None:
+            row = profiles_repo.get(db_id_, kind_)
+            if row is None:
+                return None
+            return DatabaseProfile.model_validate_json(row["profile_json"])
+
+        return self._cache.get(db_id, profile_kind, _loader)
 
     def exists(
         self,
@@ -62,4 +71,4 @@ class ProfileService:
         *,
         profile_kind: str = "base",
     ) -> bool:
-        return profiles_repo.exists(db_id, profile_kind)
+        return self.load(session_id, db_id, profile_kind=profile_kind) is not None
