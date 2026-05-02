@@ -21,11 +21,14 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
+# Alembic and any session-feature ops must hit the direct connection
+# (port 5432). The runtime DATABASE_URL may point at Supabase's
+# transaction pooler (:6543), which doesn't support all session features.
+_settings = get_settings()
+_alembic_url = _settings.database_direct_url or _settings.database_url
 # configparser interprets `%` as interpolation; escape so URL-encoded chars
 # (e.g. `%40` for `@` in passwords) survive into the SQLAlchemy URL.
-config.set_main_option(
-    "sqlalchemy.url", get_settings().database_url.replace("%", "%%")
-)
+config.set_main_option("sqlalchemy.url", _alembic_url.replace("%", "%%"))
 
 target_metadata = metadata
 
