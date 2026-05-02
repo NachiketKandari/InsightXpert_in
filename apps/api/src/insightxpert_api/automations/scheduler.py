@@ -57,6 +57,8 @@ class EmbeddedScheduler:
             id="automations_tick",
             replace_existing=True,
             misfire_grace_time=self._tick,
+            max_instances=1,
+            coalesce=True,
         )
         self._scheduler.start()
         self._started = True

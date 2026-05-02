@@ -46,6 +46,21 @@ async def test_external_scheduler_noop():
     sched.refresh_jobs()  # just doesn't raise
 
 
+@pytest.mark.asyncio
+async def test_scheduler_job_coalesces_missed_ticks():
+    from fastapi import FastAPI
+
+    app = FastAPI()
+    sched = EmbeddedScheduler(app, tick_seconds=30)
+    await sched.start()
+    try:
+        job = sched._scheduler.get_job("automations_tick")
+        assert job.coalesce is True
+        assert job.max_instances == 1
+    finally:
+        await sched.stop()
+
+
 def test_build_scheduler_selects_mode():
     app = _FakeApp()
     assert isinstance(build_scheduler(app, mode="external", tick_seconds=30), ExternalScheduler)
