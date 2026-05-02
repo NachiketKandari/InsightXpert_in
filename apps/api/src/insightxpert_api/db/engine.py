@@ -46,6 +46,17 @@ def _build_engine(*, pool_size: int, max_overflow: int, pool_timeout: int) -> En
         engine = create_engine(url, future=True)
         event.listen(engine, "connect", _apply_sqlite_pragmas)
         return engine
+
+    # `prepare_threshold` is a psycopg3-only connect kwarg. Setting it to
+    # None disables server-side prepared statements, which is required for
+    # pgbouncer transaction-mode pooling. Only pass it when the URL
+    # explicitly selects the psycopg3 driver — psycopg2 and other drivers
+    # would reject the kwarg.
+    driver = url.split("://")[0]
+    connect_args: dict[str, object] = {}
+    if "+psycopg" in driver and "+psycopg2" not in driver:
+        connect_args["prepare_threshold"] = None
+
     return create_engine(
         url,
         future=True,
@@ -54,7 +65,7 @@ def _build_engine(*, pool_size: int, max_overflow: int, pool_timeout: int) -> En
         pool_timeout=pool_timeout,
         pool_pre_ping=settings.db_pool_pre_ping,
         pool_recycle=settings.db_pool_recycle,
-        connect_args={"prepare_threshold": None},
+        connect_args=connect_args,
     )
 
 
