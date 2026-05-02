@@ -211,66 +211,83 @@ async def _preflight_concurrent(
     convo_store: ConversationStore,
     emitter: "EventEmitter | None",
 ) -> "tuple[Any, Any, FewShotExample | None]":
-    """Fan out the LLM-independent preflight work concurrently.
+    """Race all LLM-independent preflight ops via asyncio.TaskGroup.
 
-    Today the route does two non-trivial things before the pipeline (or the
-    orchestrator) actually starts: it (a) classifies the auto-mode if the
-    client sent ``agent_mode="auto"`` (an LLM call against Flash-Lite) and
-    (b) eventually loads the cached ``DatabaseProfile`` inside the first
-    pipeline stage. (a) is independent of the profile, and (b) is
-    independent of the question text — so they can race.
+    Three operations run concurrently:
+      * profile prefetch (cached ``DatabaseProfile`` load)
+      * auto-mode classification (Flash-Lite LLM call)
+      * few-shot retrieval (per-DB BIRD-train QA-pair lookup, gated)
 
-    Returns ``(route_decision, prefetched_profile)``. Both can be ``None``:
-    ``route_decision`` is ``None`` when ``agent_mode != "auto"``;
-    ``prefetched_profile`` is ``None`` on cache miss or load error.
+    Each is wrapped in its own try/except so a single failure does not
+    cancel the others — preflight is best-effort. Total wall time becomes
+    ``max(profile, classify, few_shot)`` instead of the sum.
 
-    The profile prefetch is best-effort — on failure ``ProfilerStage`` runs
-    its normal cold-cache path. The auto-mode classifier already has its
-    own fallback (defaults to ``agentic``) so the gather-cancellation
-    semantics here are safe: if the classifier fails the route still
-    proceeds; if the prefetch fails the pipeline still proceeds.
+    Returns ``(route_decision, prefetched_profile, few_shot_example)``.
+    Any element can be ``None`` on per-task failure or skip.
     """
-    # ``ProfileService`` is cheap to construct; mirrors what
-    # ``_build_pipeline_and_ctx`` does. Building the store on every call
-    # is a few microseconds — keeps this helper standalone.
     store = build_store(settings)
     prof_svc = ProfileService(store)
-    profile_task: asyncio.Task[Any] = asyncio.create_task(
-        prefetch_profile(prof_svc, cu.id, body.db_id)
-    )
-    # Few-shot retrieval races alongside the profile prefetch and the
-    # auto-mode classifier. It uses the user's question + the active
-    # ``db_id`` to pick the most-similar BIRD-train QA pair, which the SQL
-    # generator stage later threads into its prompt as a "similar example"
-    # hint. The retriever itself is already swallow-on-error, but we wrap
-    # it again here so a single bad turn cannot interrupt the route.
-    from ..llm.gemini import GeminiLLM
-
     few_shot_svc = get_few_shot_service()
-    few_shot_task: asyncio.Task[FewShotExample | None] | None = None
-    few_shot_llm: GeminiLLM | None = None
-    if few_shot_svc.is_active and body.db_id in few_shot_svc.db_ids:
-        # Dedicated lightweight LLM for the embedding call — separate from
-        # the per-turn pipeline LLM so we don't perturb its token totals
-        # (those drive the terminal ``metrics`` chunk's billing fields).
+    few_shot_active = (
+        few_shot_svc.is_active and body.db_id in few_shot_svc.db_ids
+    )
+
+    async def _safe_profile() -> Any:
+        try:
+            return await prefetch_profile(prof_svc, cu.id, body.db_id)
+        except Exception as exc:  # noqa: BLE001 — preflight is best-effort
+            log.warning(
+                "preflight.profile_failed",
+                db_id=body.db_id,
+                error=str(exc),
+                error_type=type(exc).__name__,
+            )
+            return None
+
+    async def _safe_classify() -> Any:
+        try:
+            return await _resolve_auto_mode(body, settings, emitter)
+        except Exception as exc:  # noqa: BLE001 — preflight is best-effort
+            log.warning(
+                "preflight.classify_failed",
+                error=str(exc),
+                error_type=type(exc).__name__,
+            )
+            return None
+
+    async def _safe_fewshot() -> "FewShotExample | None":
+        if not few_shot_active:
+            return None
+        # Local import keeps the GeminiLLM construction off the cold-path
+        # of routes that never touch few-shot (e.g., uploaded BYO DBs).
+        from ..llm.gemini import GeminiLLM
         few_shot_llm = GeminiLLM(
             api_key=settings.gemini_api_key,
             model=settings.gemini_chat_model,
             embed_model=settings.gemini_embed_model,
         )
-        few_shot_task = asyncio.create_task(
-            prefetch_few_shot_example(
+        try:
+            return await prefetch_few_shot_example(
                 few_shot_svc, few_shot_llm, body.message, body.db_id
             )
-        )
-    route_decision = await _resolve_auto_mode(body, settings, emitter)
-    profile = await profile_task
-    few_shot: FewShotExample | None = None
-    if few_shot_task is not None:
-        try:
-            few_shot = await few_shot_task
-        except Exception:  # noqa: BLE001 — preflight is best-effort
-            few_shot = None
+        except Exception as exc:  # noqa: BLE001 — preflight is best-effort
+            log.warning(
+                "preflight.fewshot_failed",
+                db_id=body.db_id,
+                error=str(exc),
+                error_type=type(exc).__name__,
+            )
+            return None
+
+    async with asyncio.TaskGroup() as tg:
+        decision_t = tg.create_task(_safe_classify())
+        profile_t = tg.create_task(_safe_profile())
+        fewshot_t = tg.create_task(_safe_fewshot())
+
+    route_decision = decision_t.result()
+    profile = profile_t.result()
+    few_shot = fewshot_t.result()
+
     if few_shot is not None and emitter is not None:
         await emitter.emit(
             ChunkType.few_shot_retrieved,
