@@ -3,6 +3,7 @@
 import React, { useState, useMemo, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkGfmFootnotes from "@/lib/remark-gfm-footnotes";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import {
   Collapsible,
@@ -14,6 +15,7 @@ import {
   parseFootnoteRowMap,
   stripRowsDirectives,
 } from "@/lib/footnote-parser";
+import { stripAnsiEscapes, convertBracketCitationsToFootnotes, fixDanglingFootnotes } from "@/lib/citation-utils";
 import { useChatStore } from "@/stores/chat-store";
 
 interface AnswerChunkProps {
@@ -130,7 +132,7 @@ function AnalystMarkdown({
 }) {
   return (
     <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
+      remarkPlugins={[remarkGfm, remarkGfmFootnotes]}
       components={{
         h1: ({ children }) => (
           <h1 className="text-lg font-bold text-foreground mt-4 mb-2">
@@ -290,18 +292,27 @@ function CollapsibleSection({
 }
 
 function AnswerChunkInner({ content, messageId }: AnswerChunkProps) {
-  // Parse the {rows=...} footnote directives BEFORE we strip them, so we can
-  // wire each [^N] click to the right rows in the data-table above. Then
-  // strip the directives from the markdown source so they don't render as
-  // visible noise inside the References section.
+  // Pre-process the LLM text before markdown rendering:
+  // 1. Strip ANSI escape sequences (bold codes, etc.) leaked by some models.
+  // 2. Convert [[N]] bracket citations into [^src-N] footnotes so they render
+  //    as clickable superscripts instead of raw literal text.
+  // 3. Expand combined inline footnote markers (e.g. [^3,5,6] → [^3][^5][^6]).
+  //    Must happen BEFORE fixing dangling footnotes so individual [^N] IDs
+  //    are cleanly separated before we check for missing definitions.
+  // 4. Fix dangling [^N] inline markers — when the LLM emits [^1] in the body
+  //    but forgets the [^1]: definition, append a synthetic one so remark-gfm
+  //    still renders it as a clickable superscript.
+  // 5. Parse the {rows=...} footnote directives from the answer_synthesizer
+  //    prompt's References section to wire [^N] clicks to data-table rows.
+  // 6. Strip {rows=...} directives from displayed text.
   const { footnoteRows, displayContent } = useMemo(() => {
-    const rows = parseFootnoteRowMap(content);
-    // Defense in depth: expand combined inline footnote markers (e.g.
-    // `[^3, 5, 6]`) into adjacent single-id markers (`[^3][^5][^6]`) BEFORE
-    // stripping `{rows=...}` directives, so the prompt's references survive
-    // intact even when the LLM emits an invalid combined form.
-    const expanded = expandCombinedFootnoteMarkers(content);
-    const stripped = stripRowsDirectives(expanded);
+    const sanitized = stripAnsiEscapes(content);
+    const { processed: bracketFixed } =
+      convertBracketCitationsToFootnotes(sanitized);
+    const expanded = expandCombinedFootnoteMarkers(bracketFixed);
+    const withBackfilledFootnotes = fixDanglingFootnotes(expanded);
+    const rows = parseFootnoteRowMap(withBackfilledFootnotes);
+    const stripped = stripRowsDirectives(withBackfilledFootnotes);
     return { footnoteRows: rows, displayContent: stripped };
   }, [content]);
 

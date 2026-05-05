@@ -3,6 +3,7 @@
 import React, { useState, useMemo, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkGfmFootnotes from "@/lib/remark-gfm-footnotes";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import {
   Collapsible,
@@ -172,7 +173,7 @@ function InsightMarkdown({
 }) {
   return (
     <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
+      remarkPlugins={[remarkGfm, remarkGfmFootnotes]}
       components={{
         h1: ({ children }) => (
           <h1 className="text-lg font-bold text-foreground mt-4 mb-2">{children}</h1>
