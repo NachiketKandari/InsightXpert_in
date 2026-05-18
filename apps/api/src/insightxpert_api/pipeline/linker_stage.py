@@ -254,32 +254,6 @@ class SchemaLinkerStage:
             )
         return DatabaseSchema(db_id=profile.db_id, tables=tables)
 
-def _load_lsh(path: str | None) -> Any:
-    if not path:
-        return None
-    p = Path(path)
-    if not p.exists():
-        return None
-    try:
-        with open(p, "rb") as f:
-            return pickle.load(f)
-    except Exception:
-        return None
-
-
-def _load_vector_index(npz_path: str | None) -> Any:
-    if not npz_path:
-        return None
-    p = Path(npz_path)
-    if not p.exists():
-        return None
-    try:
-        from ..vendored.pipeline_core.profiler.vector_builder import VectorIndex
-        cols_path = p.parent / "vector_columns.json"
-        return VectorIndex.load(p, cols_path)
-    except Exception:
-            return None
-
     @staticmethod
     def _render_linked(
         schema: DatabaseSchema,
@@ -309,3 +283,30 @@ def _load_vector_index(npz_path: str | None) -> Any:
         if ctx.emitter is None:
             return
         await ctx.emitter.emit(chunk_type, payload)
+
+
+def _load_lsh(path: str | None) -> Any:
+    if not path:
+        return None
+    p = Path(path)
+    if not p.exists():
+        return None
+    try:
+        with open(p, "rb") as f:
+            return pickle.load(f)
+    except Exception:
+        return None
+
+
+def _load_vector_index(npz_path: str | None) -> Any:
+    if not npz_path:
+        return None
+    p = Path(npz_path)
+    if not p.exists():
+        return None
+    try:
+        from ..vendored.pipeline_core.profiler.vector_builder import VectorIndex
+        cols_path = p.parent / "vector_columns.json"
+        return VectorIndex.load(p, cols_path)
+    except Exception:
+        return None
