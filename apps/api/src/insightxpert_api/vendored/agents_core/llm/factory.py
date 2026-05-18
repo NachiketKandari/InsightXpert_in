@@ -16,6 +16,9 @@ def create_llm(provider: str, settings: Settings) -> LLMProvider:
     if provider == "gemini":
         from insightxpert_api.vendored.agents_core.llm.gemini import GeminiProvider
         return GeminiProvider(api_key=settings.gemini_api_key, model=settings.gemini_model)
+    elif provider == "deepseek":
+        from insightxpert_api.vendored.agents_core.llm.deepseek import DeepSeekProvider
+        return DeepSeekProvider(api_key=settings.deepseek_api_key, model=settings.deepseek_model)
     elif provider == "ollama":
         from insightxpert_api.vendored.agents_core.llm.ollama import OllamaProvider
         return OllamaProvider(model=settings.ollama_model, base_url=settings.ollama_base_url)
@@ -27,4 +30,7 @@ def create_llm(provider: str, settings: Settings) -> LLMProvider:
             model=settings.vertex_ai_model,
         )
     else:
-        raise ValueError(f"Unknown LLM provider: {provider!r}. Supported: gemini, ollama, vertex_ai")
+        raise ValueError(
+            f"Unknown LLM provider: {provider!r}. "
+            f"Supported: gemini, deepseek, ollama, vertex_ai"
+        )

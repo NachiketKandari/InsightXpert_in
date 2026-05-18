@@ -46,8 +46,9 @@ _TEMPLATE = Template(_PROMPT_PATH.read_text())
 # this regardless of ``settings.gemini_chat_model`` because the router runs on
 # the critical-path before any pipeline activity is visible to the user, and
 # spending the user's chosen-model latency budget here would defeat the point.
-_ROUTER_MODEL = "gemini-3.1-flash-lite-preview"
-
+# When the provider is DeepSeek, we use deepseek-v4-flash with JSON mode instead.
+_ROUTER_MODEL_GEMINI = "gemini-3.1-flash-lite-preview"
+_ROUTER_MODEL_DEEPSEEK = "deepseek-v4-flash"
 
 class RouteDecision(BaseModel):
     mode: Mode
@@ -64,6 +65,39 @@ def _fallback(reason: str = "fallback (router error)") -> RouteDecision:
     return RouteDecision(mode="agentic", reason=reason)
 
 
+async def _classify_via_deepseek(prompt: str, settings: Settings) -> str:
+    """Classify using DeepSeek V4 Flash with JSON mode."""
+    from openai import AsyncOpenAI
+    client = AsyncOpenAI(
+        api_key=settings.deepseek_api_key,
+        base_url="https://api.deepseek.com",
+    )
+    resp = await client.chat.completions.create(
+        model=_ROUTER_MODEL_DEEPSEEK,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.0,
+        max_tokens=128,
+        response_format={"type": "json_object"},
+    )
+    return resp.choices[0].message.content or ""
+
+
+async def _classify_via_gemini(prompt: str, settings: Settings) -> str:
+    """Classify using Gemini Flash-Lite with native JSON mode."""
+    client = genai.Client(api_key=settings.gemini_api_key)
+    config = types.GenerateContentConfig(
+        response_mime_type="application/json",
+        temperature=0.0,
+        max_output_tokens=128,
+    )
+    resp = await client.aio.models.generate_content(
+        model=_ROUTER_MODEL_GEMINI,
+        contents=prompt,
+        config=config,
+    )
+    return (resp.text or "").strip()
+
+
 async def classify_mode(
     *,
     question: str,
@@ -74,23 +108,20 @@ async def classify_mode(
 
     Always returns a ``RouteDecision`` — never raises. Errors are logged and
     fall back to ``agentic``.
+
+    Uses the configured ``llm_provider`` for the classification call:
+      - ``"deepseek"`` → deepseek-v4-flash with JSON mode
+      - ``"gemini"`` or anything else → gemini-3.1-flash-lite-preview
     """
     prompt = _TEMPLATE.render(question=question, db_id=db_id)
 
     start = time.monotonic()
     try:
-        client = genai.Client(api_key=settings.gemini_api_key)
-        config = types.GenerateContentConfig(
-            response_mime_type="application/json",
-            temperature=0.0,
-            max_output_tokens=128,
-        )
-        resp = await client.aio.models.generate_content(
-            model=_ROUTER_MODEL,
-            contents=prompt,
-            config=config,
-        )
-        text = (resp.text or "").strip()
+        if settings.llm_provider == "deepseek":
+            text = await _classify_via_deepseek(prompt, settings)
+        else:
+            text = await _classify_via_gemini(prompt, settings)
+        text = text.strip()
     except Exception as exc:  # noqa: BLE001 — defense in depth
         log.warning("mode_router api_error error=%s", exc)
         return _fallback()

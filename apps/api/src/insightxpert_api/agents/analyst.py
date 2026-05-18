@@ -210,7 +210,7 @@ async def analyst_loop(
             db_svc = DatabaseService(bundled_dir=config.bundled_dbs_dir, store=store)
         if prof_svc is None:
             prof_svc = ProfileService(store)
-    pipeline = default_pipeline(config, db_svc, prof_svc)
+    pipeline = default_pipeline(config, db_svc, prof_svc, llm=llm)
 
     emitter = EventEmitter(cid)
     ctx = PipelineContext(

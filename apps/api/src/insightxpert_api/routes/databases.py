@@ -621,13 +621,9 @@ async def run_profile(
         llm = getattr(request.app.state, "llm", None)
         if llm is None:
             try:
-                from ..llm.gemini import GeminiLLM
+                from ..llm import create_chat_llm
 
-                llm = GeminiLLM(
-                    api_key=settings.gemini_api_key,
-                    model=settings.gemini_chat_model,
-                    embed_model=settings.gemini_embed_model,
-                )
+                llm = create_chat_llm(settings)
             except Exception as exc:
                 log.warning("profile.llm_construct_failed", error=str(exc))
                 llm = None
@@ -684,12 +680,15 @@ async def regenerate_sample_questions(
     if prof.load(cu.id, db_id) is None:
         raise HTTPException(status_code=404, detail="profile_not_found")
     # fire-and-forget; idempotent inside the job
-    from ..llm.gemini import GeminiLLM
-    llm = GeminiLLM(api_key=settings.gemini_api_key, model=settings.gemini_chat_model) \
-        if settings.gemini_api_key else None
+    from ..llm import create_chat_llm
+    from ..routes.chat import _chat_model
+    llm = create_chat_llm(settings) if (
+        (settings.llm_provider == "deepseek" and settings.deepseek_api_key)
+        or settings.gemini_api_key
+    ) else None
     _spawn_background_task(
         run_sample_questions_job(
-            db_id=db_id, llm=llm, model_name=settings.gemini_chat_model,
+            db_id=db_id, llm=llm, model_name=_chat_model(settings),
             emitter=None, session_id=cu.id,
         )
     )

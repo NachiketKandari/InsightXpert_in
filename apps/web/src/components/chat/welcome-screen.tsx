@@ -192,6 +192,18 @@ export function WelcomeScreen({ onSendMessage, onStop, isStreaming }: WelcomeScr
         <Shuffle className="size-3" />
         Shuffle suggestions
       </motion.button>
+
+      {allQuestions.length > 3 && (
+        <motion.button
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.4, delay: 0.6 }}
+          onClick={() => useChatStore.getState().setSampleQuestionsOpen(true)}
+          className="mt-2 text-xs text-primary/70 hover:text-primary transition-colors cursor-pointer"
+        >
+          View all sample questions →
+        </motion.button>
+      )}
     </div>
   );
 }

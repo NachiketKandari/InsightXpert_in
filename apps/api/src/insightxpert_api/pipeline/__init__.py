@@ -44,6 +44,7 @@ def default_pipeline(
     prof_svc: "ProfileService",
     *,
     pipeline_mode: PipelineMode = "linked",
+    llm: Any = None,
 ) -> Pipeline:
     """Compose the 6-stage v1 text-to-SQL pipeline.
 
@@ -53,8 +54,12 @@ def default_pipeline(
       * ``"full_schema"`` — ``FullSchemaStage``. Bypasses the linker and
         hands the SQL generator the full ``SchemaFormatter`` render with
         FK tags and per-table ``Foreign Keys:`` blocks.
+
+    When ``llm`` is provided it is reused directly; otherwise a fresh instance
+    is created via ``create_chat_llm(settings)`` so the provider (Gemini or
+    DeepSeek) matches ``settings.llm_provider``.
     """
-    from ..llm.gemini import GeminiLLM
+    from ..llm import create_chat_llm
     from .executor_stage import SqlExecutorStage
     from .full_schema_stage import FullSchemaStage
     from .generator_stage import SqlGeneratorStage
@@ -64,11 +69,8 @@ def default_pipeline(
     from .synthesizer_stage import AnswerSynthesizerStage
     from .validator_stage import SqlValidatorStage
 
-    llm = GeminiLLM(
-        api_key=settings.gemini_api_key,
-        model=settings.gemini_chat_model,
-        embed_model=settings.gemini_embed_model,
-    )
+    if llm is None:
+        llm = create_chat_llm(settings)
     schema_stage: Any
     if pipeline_mode == "full_schema":
         schema_stage = FullSchemaStage(db_svc=db_svc)

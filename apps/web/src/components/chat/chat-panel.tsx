@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Share2 } from "lucide-react";
+import { ListChecks, Share2 } from "lucide-react";
 import { useSSEChat } from "@/hooks/use-sse-chat";
 import { useChatStore } from "@/stores/chat-store";
 import { useSettingsStore } from "@/stores/settings-store";
@@ -38,6 +38,7 @@ export function ChatPanel() {
     });
   }, []);
 
+  const setSampleQuestionsOpen = useChatStore((s) => s.setSampleQuestionsOpen);
   const conversationId = conversation?.id ?? null;
 
   const currentDb = databases.find((d) => d.db_id === selectedDbId);
@@ -75,7 +76,17 @@ export function ChatPanel() {
         </>
       ) : hasMessages ? (
         <>
-          <div className="flex items-center justify-end px-2 pt-1">
+          <div className="flex items-center justify-end gap-1 px-2 pt-1">
+            {selectedDbId && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setSampleQuestionsOpen(true)}
+                aria-label="View sample questions"
+              >
+                <ListChecks className="h-4 w-4" />
+              </Button>
+            )}
             {conversationId ? (
               <>
                 <Button

@@ -51,6 +51,13 @@ PRICING: dict[str, ModelPricing] = {
     ),
     # Embeddings — input only. Output is a vector, not billable tokens.
     "gemini-embedding-001": ModelPricing(input_per_1m=0.15, output_per_1m=0.0),
+    # DeepSeek V4 Flash — $0.14/$0.28 per 1M input/output (cache miss).
+    # Cache hits are $0.0028/1M — using miss pricing as conservative default.
+    # Source: https://api-docs.deepseek.com/quick_start/pricing (2026-05-18).
+    "deepseek-v4-flash": ModelPricing(input_per_1m=0.14, output_per_1m=0.28),
+    # DeepSeek V4 Pro — ~3× more expensive than Flash. Currently 75% off until
+    # 2026-05-31 via a limited-time discount.
+    "deepseek-v4-pro": ModelPricing(input_per_1m=0.42, output_per_1m=0.84),
 }
 
 # Fallback when a model isn't in the registry — keeps cost tracking from

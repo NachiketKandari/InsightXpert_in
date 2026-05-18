@@ -77,6 +77,9 @@ class Settings(BaseSettings):
     gemini_chat_model: str = "gemini-2.5-flash"
     gemini_embed_model: str = "gemini-embedding-001"
 
+    deepseek_api_key: str = ""
+    deepseek_chat_model: str = "deepseek-v4-flash"
+
     # --- voice / speech-to-text -------------------------------------------
     # Deepgram Nova-3 streaming. Empty → /api/transcribe closes with 4002.
     deepgram_api_key: str = ""
@@ -96,7 +99,7 @@ class Settings(BaseSettings):
     enable_stats_context: bool = False  # off by default in v1; no StatsResolver wired yet
     max_orchestrator_tasks: int = 10
     clarification_enabled: bool = False
-    llm_provider: str = "gemini"
+    llm_provider: str = "deepseek"
 
     # --- paths -------------------------------------------------------------
     bundled_dbs_dir: str = "./Databases"

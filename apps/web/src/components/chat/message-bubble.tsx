@@ -1,6 +1,8 @@
 "use client";
 
 import React, { useCallback, useMemo } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { motion } from "framer-motion";
 import { Loader2, Zap } from "lucide-react";
 import { ChunkRenderer } from "@/components/chunks/chunk-renderer";
@@ -229,11 +231,17 @@ function MessageBubbleInner({
               <Loader2 className="h-4 w-4 animate-spin text-cyan-accent" />
               <span>Thinking&hellip;</span>
             </div>
+          ) : message.content ? (
+            <div className="prose prose-sm dark:prose-invert max-w-none">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {message.content}
+              </ReactMarkdown>
+            </div>
           ) : null}
         </div>
       )}
 
-      {!isUser && !isStreaming && <MessageMetrics message={message} />}
+      {!isUser && <MessageMetrics message={message} />}
 
       {message.content && !readOnly && (
         <MessageActions

@@ -39,6 +39,7 @@ interface ChatState {
   selectedDbId: string | null;
 
   isLoadingConversation: boolean;
+  isLoadingConversations: boolean;
 
   // Derived
   activeConversation: () => Conversation | null;
@@ -109,6 +110,7 @@ export const useChatStore = create<ChatState>()(persist((set, get) => ({
   currentAgentPhase: null,
   selectedDbId: null,
   isLoadingConversation: false,
+  isLoadingConversations: false,
 
   activeConversation: () => {
     const { conversations, activeConversationId } = get();
@@ -116,10 +118,12 @@ export const useChatStore = create<ChatState>()(persist((set, get) => ({
   },
 
   initFromStorage: async () => {
+    set({ isLoadingConversations: true });
     try {
       const res = await apiFetch("/api/v1/conversations");
       if (!res.ok) {
         console.error("[chat-store] Failed to load conversations:", res.status, res.statusText);
+        set({ isLoadingConversations: false });
         return;
       }
       const data = await res.json();
@@ -147,6 +151,7 @@ export const useChatStore = create<ChatState>()(persist((set, get) => ({
         const activeStillExists = merged.some((c) => c.id === state.activeConversationId);
         return {
           conversations: merged,
+          isLoadingConversations: false,
           ...(state.activeConversationId && !activeStillExists
             ? { activeConversationId: null }
             : {}),
@@ -154,6 +159,7 @@ export const useChatStore = create<ChatState>()(persist((set, get) => ({
       });
     } catch (err) {
       console.error("[chat-store] Error loading conversations:", err);
+      set({ isLoadingConversations: false });
     }
   },
 
