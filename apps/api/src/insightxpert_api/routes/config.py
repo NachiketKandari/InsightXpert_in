@@ -1,11 +1,9 @@
 """Runtime model-config route — what the chat input toolbar reads.
 
 The FE settings store hits these endpoints to render the model picker and
-optimistically switch the active chat model. Provider switching is a v1
-non-goal (only Gemini is wired up), so `provider` is validated as a single
-allowed value and `/switch` mutates `settings.gemini_chat_model` in-process
-only — there is no persistent override. A process restart returns to the
-env-pinned default.
+optimistically switch the active chat model. ``/switch`` mutates the in-process
+``Settings`` singleton — there is no persistent override. A process restart
+returns to the env-pinned default.
 """
 
 from __future__ import annotations
@@ -19,14 +17,27 @@ from ..metrics.pricing import PRICING
 
 router = APIRouter(prefix="/api/v1/config", tags=["config"])
 
+# Chat-capable models by provider. Embeddings models are excluded — they're
+# not valid chat models and would 400 if selected from the picker.
+_CHAT_MODELS: dict[str, list[str]] = {}
+for _name in sorted(PRICING):
+    if "embedding" in _name:
+        continue
+    # Group by provider prefix: gemini-* or deepseek-*
+    if _name.startswith("gemini"):
+        _CHAT_MODELS.setdefault("gemini", []).append(_name)
+    elif _name.startswith("deepseek"):
+        _CHAT_MODELS.setdefault("deepseek", []).append(_name)
+# Ensure both providers have at least an empty list so the picker doesn't 500.
+_CHAT_MODELS.setdefault("gemini", [])
+_CHAT_MODELS.setdefault("deepseek", [])
 
-_ALLOWED_PROVIDER = "gemini"
 
-# Chat-capable Gemini models. Embeddings model is excluded — it's not a
-# valid chat model and would 400 if selected from the picker.
-_CHAT_MODELS: list[str] = sorted(
-    name for name in PRICING if not name.endswith("-embedding-001")
-)
+def _current_model(settings: Settings) -> str:
+    """Active chat model for the configured provider."""
+    if settings.llm_provider == "deepseek":
+        return settings.deepseek_chat_model
+    return settings.gemini_chat_model
 
 
 class ProviderModels(BaseModel):
@@ -52,8 +63,11 @@ async def get_config(
 ) -> ConfigResponse:
     return ConfigResponse(
         current_provider=settings.llm_provider,
-        current_model=settings.gemini_chat_model,
-        providers=[ProviderModels(provider=_ALLOWED_PROVIDER, models=_CHAT_MODELS)],
+        current_model=_current_model(settings),
+        providers=[
+            ProviderModels(provider=p, models=m)
+            for p, m in sorted(_CHAT_MODELS.items())
+        ],
     )
 
 
@@ -63,25 +77,33 @@ async def switch_model(
     _user: object = Depends(get_current_user),
     settings: Settings = Depends(get_settings),
 ) -> ConfigResponse:
-    if body.provider != _ALLOWED_PROVIDER:
+    allowed = _CHAT_MODELS.get(body.provider)
+    if allowed is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unsupported provider '{body.provider}'. Only '{_ALLOWED_PROVIDER}' is wired up.",
+            detail=f"Unsupported provider '{body.provider}'. Allowed: {', '.join(sorted(_CHAT_MODELS))}.",
         )
-    if body.model not in _CHAT_MODELS:
+    if body.model not in allowed:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unknown model '{body.model}'. Allowed: {', '.join(_CHAT_MODELS)}.",
+            detail=f"Unknown model '{body.model}' for provider '{body.provider}'. Allowed: {', '.join(sorted(allowed))}.",
         )
 
     # In-process override only — Settings is the cached singleton from
     # get_settings(); mutating the field here flips every site that reads
-    # settings.gemini_chat_model on next access. Lost on restart by design.
-    settings.gemini_chat_model = body.model
+    # settings.{gemini,deepseek}_chat_model on next access. Lost on restart
+    # by design.
+    if body.provider == "deepseek":
+        settings.deepseek_chat_model = body.model
+    else:
+        settings.gemini_chat_model = body.model
     settings.llm_provider = body.provider
 
     return ConfigResponse(
         current_provider=settings.llm_provider,
-        current_model=settings.gemini_chat_model,
-        providers=[ProviderModels(provider=_ALLOWED_PROVIDER, models=_CHAT_MODELS)],
+        current_model=_current_model(settings),
+        providers=[
+            ProviderModels(provider=p, models=m)
+            for p, m in sorted(_CHAT_MODELS.items())
+        ],
     )

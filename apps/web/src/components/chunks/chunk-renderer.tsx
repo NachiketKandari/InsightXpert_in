@@ -346,6 +346,35 @@ function ChunkRendererInner({ chunk, isComplete, isStreaming, enrichmentTraces, 
     case "answer_delta":
       return null;
 
+    // Profile stage chunks — emitted during database profiling. Their
+    // primary consumer is the profile SSE stream on the databases page
+    // (useProfileRun → ProfileStepper). When they appear in the chat
+    // stream we render a compact progress indicator.
+    case "profile_stage_started":
+      content = (
+        <ProgressStep
+          label={`Profiling: ${(chunk.data?.stage as string) ?? "…"}`}
+          isComplete={false}
+        />
+      );
+      break;
+    case "profile_stage_completed":
+      content = (
+        <ProgressStep
+          label={`Profiling: ${(chunk.data?.stage as string) ?? "…"}`}
+          isComplete
+        />
+      );
+      break;
+    case "profile_progress":
+      content = null; // batch progress is too noisy for chat timeline
+      break;
+    case "profile_done":
+      content = isComplete ? (
+        <ProgressStep label="Database profiling complete" isComplete />
+      ) : null;
+      break;
+
     case "few_shot_retrieved":
       content = (
         <FewShotRetrievedChunk

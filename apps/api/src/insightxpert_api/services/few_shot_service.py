@@ -35,7 +35,7 @@ from pydantic import BaseModel
 from ..logging import get_logger
 
 if TYPE_CHECKING:
-    from ..llm.gemini import GeminiLLM
+    from ..llm import DeepSeekLLM, GeminiLLM
 
 
 log = get_logger("services.few_shot")
@@ -145,7 +145,7 @@ class FewShotService:
         return sorted(self._normed.keys())
 
     async def retrieve(
-        self, question: str, db_id: str, *, llm: "_Embedder | GeminiLLM"
+        self, question: str, db_id: str, *, llm: "_Embedder | GeminiLLM | DeepSeekLLM"
     ) -> FewShotExample | None:
         """Return the most-similar BIRD-train QA pair for ``db_id`` (cosine top-1).
 
@@ -228,7 +228,7 @@ def set_few_shot_service(svc: FewShotService | None) -> None:
 
 async def prefetch_few_shot_example(
     svc: FewShotService,
-    llm: "_Embedder | GeminiLLM",
+    llm: "_Embedder | GeminiLLM | DeepSeekLLM",
     question: str,
     db_id: str,
 ) -> FewShotExample | None:

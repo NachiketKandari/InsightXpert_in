@@ -60,6 +60,11 @@ router = APIRouter(prefix="/api/v1", tags=["chat"])
 log = get_logger("chat")
 
 
+def _chat_model(settings: Settings) -> str:
+    """Active chat model for the current provider."""
+    return settings.deepseek_chat_model if settings.llm_provider == "deepseek" else settings.gemini_chat_model
+
+
 def _extract_metrics_from_chunks(chunks: list[Any]) -> dict[str, Any]:
     """Pull the bits we need for query_metrics out of a collected chunk list.
 
@@ -110,6 +115,7 @@ def _schedule_record_turn(
     body: "ChatRequest",
     chunks: list[Any],
     model: str | None = None,
+    provider: str = "gemini",
 ) -> None:
     extracted = _extract_metrics_from_chunks(chunks)
     background_tasks.add_task(
@@ -124,7 +130,7 @@ def _schedule_record_turn(
         tokens_out=extracted["tokens_out"],
         duration_ms=extracted["duration_ms"],
         source="chat",
-        provider="gemini",
+        provider=provider,
         model=model,
     )
     chunk_dicts = [c.model_dump(mode="json") for c in chunks]
@@ -258,14 +264,10 @@ async def _preflight_concurrent(
     async def _safe_fewshot() -> "FewShotExample | None":
         if not few_shot_active:
             return None
-        # Local import keeps the GeminiLLM construction off the cold-path
+        # Local import keeps the LLM construction off the cold-path
         # of routes that never touch few-shot (e.g., uploaded BYO DBs).
-        from ..llm.gemini import GeminiLLM
-        few_shot_llm = GeminiLLM(
-            api_key=settings.gemini_api_key,
-            model=settings.gemini_chat_model,
-            embed_model=settings.gemini_embed_model,
-        )
+        from ..llm import create_chat_llm
+        few_shot_llm = create_chat_llm(settings)
         try:
             return await prefetch_few_shot_example(
                 few_shot_svc, few_shot_llm, body.message, body.db_id
@@ -396,6 +398,7 @@ async def _run_pipeline(
     ctx: PipelineContext,
     convo_store: ConversationStore,
     model: str | None = None,
+    provider: str = "gemini",
     metrics_record: dict[str, Any] | None = None,
     snapshot_record: dict[str, Any] | None = None,
     collected_chunks: list[Any] | None = None,
@@ -475,7 +478,7 @@ async def _run_pipeline(
                     tokens_out=tokens_out or None,
                     duration_ms=latency_ms,
                     source="chat",
-                    provider="gemini",
+                    provider=provider,
                     model=model,
                 )
             except Exception:  # noqa: BLE001
@@ -563,7 +566,8 @@ async def chat_sse(
         asyncio.create_task(
             _run_pipeline(
                 pipeline, ctx, convo_store,
-                model=settings.gemini_chat_model,
+                model=_chat_model(settings),
+                provider=settings.llm_provider,
                 metrics_record={
                     "user_id": cu.id,
                     "conversation_id": convo.conversation_id,
@@ -642,66 +646,49 @@ async def _run_orchestrator(
     the final assistant answer (drawn from the translated ``answer_generated``
     chunk if present) and a metrics chunk, then close the emitter.
     """
-    from ..llm import GeminiLLM
+    from ..llm import create_chat_llm
 
     start = time.monotonic()
 
-    convo_store.append_message(
-        cu.id, conversation_id, role="user", content=body.message
-    )
-
-    # Build services once so our analyst re-uses them (no double build_store).
-    store = build_store(settings)
-    db_svc = DatabaseService(bundled_dir=settings.bundled_dbs_dir, store=store)
-    prof_svc = ProfileService(store)
-
-    llm = GeminiLLM(
-        api_key=settings.gemini_api_key,
-        model=settings.gemini_chat_model,
-        embed_model=settings.gemini_embed_model,
-    )
-
-    # Our analyst is dispatched via the vendored orchestrator's analyst_impl
-    # kwarg (see vendored_patches/0003-inject-analyst-impl.patch). Capture
-    # route-level context (db_id, session_id, service DI) via functools.partial
-    # so the orchestrator's call-site — which doesn't know about our shapes —
-    # passes only the vendored-standard kwargs.
-    from functools import partial
-
-    analyst_impl = partial(
-        _our_analyst_loop,
-        db_id=body.db_id,
-        session_id=cu.id,
-        db_svc=db_svc,
-        prof_svc=prof_svc,
-    )
-
-    # Build profile-driven business context for the active database. This
-    # replaces the previous hardcoded UPI ``DOCUMENTATION`` block that was
-    # being injected into the analyst's system prompt regardless of which
-    # database the user had selected. Failure to load is non-fatal — the
-    # orchestrator falls back to an empty doc string.
-    documentation_md: str | None = None
-    try:
-        # Reuse the route-level pre-fetched profile when available; the
-        # caller already raced this load against the auto-mode classifier
-        # so we shouldn't pay for the DB round-trip a second time.
-        profile = prefetched_profile
-        if profile is None:
-            profile = await asyncio.to_thread(prof_svc.load, cu.id, body.db_id)
-        if profile is not None:
-            documentation_md = documentation_from_profile(profile)
-    except Exception:  # noqa: BLE001
-        log.warning(
-            "chat.documentation_build_failed",
-            session_id=cu.id,
-            db_id=body.db_id,
-            exc_info=True,
-        )
-
     answer_text = ""
     final_sql_seen: str | None = None
+    llm = None
     try:
+        convo_store.append_message(
+            cu.id, conversation_id, role="user", content=body.message
+        )
+
+        store = build_store(settings)
+        db_svc = DatabaseService(bundled_dir=settings.bundled_dbs_dir, store=store)
+        prof_svc = ProfileService(store)
+
+        llm = create_chat_llm(settings)
+
+        from functools import partial
+
+        analyst_impl = partial(
+            _our_analyst_loop,
+            db_id=body.db_id,
+            session_id=cu.id,
+            db_svc=db_svc,
+            prof_svc=prof_svc,
+        )
+
+        documentation_md: str | None = None
+        try:
+            profile = prefetched_profile
+            if profile is None:
+                profile = await asyncio.to_thread(prof_svc.load, cu.id, body.db_id)
+            if profile is not None:
+                documentation_md = documentation_from_profile(profile)
+        except Exception:  # noqa: BLE001
+            log.warning(
+                "chat.documentation_build_failed",
+                session_id=cu.id,
+                db_id=body.db_id,
+                exc_info=True,
+            )
+
         async for vchunk in orchestrator_loop(
             question=body.message,
             llm=llm,
@@ -766,7 +753,7 @@ async def _run_orchestrator(
         # through the pipeline via ``llm.async_generate``. Both paths feed
         # the same per-turn GeminiLLM instance, so one read on the adapter
         # yields the aggregate.
-        tokens_in, tokens_out = _llm_token_totals(llm)
+        tokens_in, tokens_out = _llm_token_totals(llm) if llm is not None else (0, 0)
         total_tokens = (tokens_in + tokens_out) if (tokens_in or tokens_out) else None
         await emitter.emit(
             ChunkType.METRICS,
@@ -775,7 +762,7 @@ async def _run_orchestrator(
                 prompt_tokens=tokens_in or None,
                 output_tokens=tokens_out or None,
                 total_tokens=total_tokens,
-                model=settings.gemini_chat_model,
+                model=_chat_model(settings),
             ),
         )
         await emitter.close()
@@ -793,8 +780,8 @@ async def _run_orchestrator(
                     tokens_out=tokens_out or None,
                     duration_ms=latency_ms,
                     source="chat",
-                    provider="gemini",
-                    model=settings.gemini_chat_model,
+                    provider=settings.llm_provider,
+                    model=_chat_model(settings),
                 )
             except Exception:  # noqa: BLE001
                 pass
@@ -823,12 +810,13 @@ async def _collect_chunks(
     ctx: PipelineContext,
     convo_store: ConversationStore,
     model: str | None = None,
+    provider: str = "gemini",
 ) -> list[Any]:
     """Run the pipeline to completion, draining the emitter into a list of ChatChunks."""
     emitter = ctx.emitter
     assert emitter is not None
 
-    task = asyncio.create_task(_run_pipeline(pipeline, ctx, convo_store, model=model))
+    task = asyncio.create_task(_run_pipeline(pipeline, ctx, convo_store, model=model, provider=provider))
     collected: list[Any] = []
     # Drain the queue until the sentinel (None) is pushed by emitter.close().
     while True:
@@ -899,14 +887,15 @@ async def chat_poll(
             prefetched_profile=prefetched_profile,
             prefetched_few_shot=prefetched_few_shot,
         )
-        chunks = await _collect_chunks(pipeline, ctx, convo_store, model=settings.gemini_chat_model)
+        chunks = await _collect_chunks(pipeline, ctx, convo_store, model=_chat_model(settings), provider=settings.llm_provider)
     _schedule_record_turn(
         background_tasks,
         cu=cu,
         conversation_id=convo.conversation_id,
         body=body,
         chunks=chunks,
-        model=settings.gemini_chat_model,
+        model=_chat_model(settings),
+        provider=settings.llm_provider,
     )
     return ChatPollResponse(
         conversation_id=convo.conversation_id,
@@ -947,7 +936,7 @@ async def chat_answer(
             prefetched_profile=prefetched_profile,
             prefetched_few_shot=prefetched_few_shot,
         )
-        chunks = await _collect_chunks(pipeline, ctx, convo_store, model=settings.gemini_chat_model)
+        chunks = await _collect_chunks(pipeline, ctx, convo_store, model=_chat_model(settings), provider=settings.llm_provider)
 
     answer = ""
     sqls: list[str] = []
@@ -974,7 +963,8 @@ async def chat_answer(
         conversation_id=convo.conversation_id,
         body=body,
         chunks=chunks,
-        model=settings.gemini_chat_model,
+        model=_chat_model(settings),
+        provider=settings.llm_provider,
     )
     return ChatAnswerResponse(
         conversation_id=convo.conversation_id,

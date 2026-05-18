@@ -58,19 +58,15 @@ def _is_admin(user: CurrentUser) -> bool:
 
 def _resolve_llm(request: Request):
     """Return an LLM instance. Uses app.state.llm if set (tests inject there),
-    otherwise constructs a GeminiLLM from settings."""
+    otherwise constructs the correct adapter from settings."""
     llm = getattr(request.app.state, "llm", None)
     if llm is not None:
         return llm
     from ..config import get_settings
-    from ..llm import GeminiLLM
+    from ..llm import create_chat_llm
 
     settings = get_settings()
-    return GeminiLLM(
-        api_key=settings.gemini_api_key,
-        model=settings.gemini_chat_model,
-        embed_model=settings.gemini_embed_model,
-    )
+    return create_chat_llm(settings)
 
 
 def _validate_db_id(db_id: str) -> None:

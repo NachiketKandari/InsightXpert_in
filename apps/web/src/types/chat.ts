@@ -9,6 +9,10 @@ export type ChunkType =
   | "clarification"
   // Tier-3 — pipeline transparency
   | "profile_loaded"
+  | "profile_stage_started"
+  | "profile_stage_completed"
+  | "profile_progress"
+  | "profile_done"
   | "schema_linking_started"
   | "candidate_sqls_generated"
   | "literals_extracted"

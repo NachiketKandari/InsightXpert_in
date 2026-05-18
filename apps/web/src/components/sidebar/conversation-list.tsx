@@ -40,8 +40,24 @@ function groupConversationsByDate(conversations: Conversation[]): ConversationGr
 export function ConversationList() {
   const conversations = useChatStore((s) => s.conversations);
   const activeConversationId = useChatStore((s) => s.activeConversationId);
+  const isLoadingConversations = useChatStore((s) => s.isLoadingConversations);
 
   const groups = useMemo(() => groupConversationsByDate(conversations), [conversations]);
+
+  if (isLoadingConversations) {
+    return (
+      <div className="flex flex-col gap-0.5 p-2">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} className="px-3 py-3">
+            <div
+              className="h-4 animate-pulse rounded bg-muted/60"
+              style={{ width: `${60 + Math.sin(i * 1.7) * 30}%` }}
+            />
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   if (conversations.length === 0) {
     return (

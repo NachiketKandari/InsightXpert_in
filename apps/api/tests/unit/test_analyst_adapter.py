@@ -100,7 +100,7 @@ def _patch_pipeline(monkeypatch):
 
     stub = _StubPipeline()
 
-    def _fake_default_pipeline(_settings, _db_svc, _prof_svc):
+    def _fake_default_pipeline(_settings, _db_svc, _prof_svc, **_kwargs):
         return stub
 
     monkeypatch.setattr(analyst_module, "default_pipeline", _fake_default_pipeline)
