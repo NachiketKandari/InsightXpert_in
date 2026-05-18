@@ -261,22 +261,15 @@ class SchemaLinkerStage:
         tables: set[str],
         columns: set[tuple[str, str]],
     ) -> str:
-        """Minimal renderer: linked tables + their linked columns + types."""
-        col_types: dict[tuple[str, str], str] = {}
-        for t in schema.tables:
-            for c in t.columns:
-                col_types[(t.name, c.name)] = c.type
-        lines: list[str] = []
-        for tname in sorted(tables):
-            cols = sorted(c for t, c in columns if t == tname)
-            if not cols:
-                continue
-            lines.append(f'Table: "{tname}"')
-            lines.append("  Columns:")
-            for cname in cols:
-                ctype = col_types.get((tname, cname), "TEXT")
-                lines.append(f'    - "{cname}" ({ctype})')
-        return "\n".join(lines)
+        """Render linked tables/columns with summaries, quirks, and FK tags.
+
+        Delegates to the vendored render_pruned_schema which fuses
+        short_summary + semantic_hint, shows enum labels, aliases,
+        sample values, and type-mismatch warnings — the same enriched
+        schema text the research pipeline feeds the SQL generator.
+        """
+        from ..vendored.pipeline_core.linker.linking_utils import render_pruned_schema
+        return render_pruned_schema(tables, columns, schema, profile, use_quirks=True)
 
     @staticmethod
     async def _emit(ctx: PipelineContext, chunk_type: ChunkType, payload: Any) -> None:

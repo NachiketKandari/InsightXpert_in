@@ -49,6 +49,7 @@ class SchemaFormatter:
         # Build per-column description and stats lookups
         profile_summaries: dict[str, dict[str, str]] = {}
         profile_stats: dict[str, dict[str, ColumnStats]] = {}
+        profile_quirks: dict[str, dict[str, object]] = {}
         if use_profile and profile:
             for tp in profile.tables:
                 profile_summaries[tp.name] = {
@@ -56,6 +57,7 @@ class SchemaFormatter:
                     for cp in tp.columns
                 }
                 profile_stats[tp.name] = {cp.name: cp.stats for cp in tp.columns}
+                profile_quirks[tp.name] = {cp.name: cp.quirks for cp in tp.columns}
 
         if seed is not None:
             rng = random.Random(seed)
@@ -86,15 +88,43 @@ class SchemaFormatter:
 
                 desc_parts: list[str] = []
                 if use_profile:
+                    quirks = profile_quirks.get(table.name, {}).get(col.name)
                     s = profile_summaries.get(table.name, {}).get(col.name, "")
-                    if s:
+                    hint = quirks.semantic_hint if quirks and hasattr(quirks, "semantic_hint") else ""
+                    # Fuse short_summary + semantic_hint into one description.
+                    if s and hint and hint not in s:
+                        desc_parts.append(f"{s} {hint}")
+                    elif s:
                         desc_parts.append(s)
+                    elif hint:
+                        desc_parts.append(hint)
                     # For low-cardinality columns, append actual values so the
                     # model knows what literals to use in WHERE clauses.
                     stats = profile_stats.get(table.name, {}).get(col.name)
                     if stats and stats.sample_values and stats.distinct_count <= 20:
                         vals = ", ".join(repr(v) for v in stats.sample_values)
                         desc_parts.append(f"Values: [{vals}]")
+                    # Quirk enum labels (decode coded values).
+                    if quirks and hasattr(quirks, "enum_labels") and quirks.enum_labels:
+                        enum_str = ", ".join(
+                            f"{k!r}→{v}" for k, v in quirks.enum_labels.items()
+                            if v and v != "unknown"
+                        )
+                        if enum_str:
+                            desc_parts.append(f"Labels: {{{enum_str}}}")
+                    # Quirk aliases (alternative user-facing names).
+                    if quirks and hasattr(quirks, "aliases") and quirks.aliases:
+                        col_lower = col.name.lower()
+                        col_spaced = col_lower.replace("_", " ")
+                        useful = [
+                            a for a in quirks.aliases
+                            if a.lower() != col_lower and a.lower() != col_spaced
+                        ]
+                        if useful:
+                            desc_parts.append(f"Aliases: {', '.join(useful)}")
+                    # Quirk type mismatch warnings.
+                    if quirks and hasattr(quirks, "type_mismatch") and quirks.type_mismatch:
+                        desc_parts.append(f"Note: {quirks.type_mismatch}")
                 if use_bird:
                     b = bird_meta.get(table.name, col.name)
                     if b and b not in desc_parts:
