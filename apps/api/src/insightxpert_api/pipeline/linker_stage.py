@@ -61,21 +61,31 @@ class SchemaLinkerStage:
         self,
         llm: LLMProvider,
         prompt_path: str,
-        vector_index_path: str | None = None,
-        lsh_index_path: str | None = None,
-        join_graph_path: str | None = None,
+        indices_dir: str = "",
     ) -> None:
         self._llm = llm
         self._tpl = Template(Path(prompt_path).read_text())
-        self._vector_index_path = vector_index_path
-        self._lsh_index_path = lsh_index_path
-        self._join_graph_path = join_graph_path
+        self._indices_dir = indices_dir
 
     async def run(self, ctx: PipelineContext, _: object) -> dict[str, Any]:
         question: str = ctx.state["question"]
         profile: DatabaseProfile = ctx.state["profile"]
         db_id: str = ctx.state.get("db_id", profile.db_id)
         schema: DatabaseSchema = ctx.state.get("schema") or self._extract_schema(ctx)
+
+        # Resolve index paths at runtime from indices_dir + db_id.
+        lsh_path: str | None = None
+        vector_path: str | None = None
+        join_graph_path: str | None = None
+        if self._indices_dir:
+            base = Path(self._indices_dir) / db_id
+            lsh_path = str(base / "lsh_index.pkl")
+            npz = base / "vector.npz"
+            if npz.exists():
+                vector_path = str(npz)
+            jg = base / "join_graph.json"
+            if jg.exists():
+                join_graph_path = str(jg)
 
         await self._emit(
             ctx,
@@ -108,7 +118,7 @@ class SchemaLinkerStage:
 
         # 2. LSH literal matching (best-effort).
         literal_matches: dict[str, list[str]] = {}
-        lsh_index = self._load_lsh()
+        lsh_index = _load_lsh(lsh_path)
         if lsh_index is not None and all_literals:
             matcher = LiteralMatcher(lsh_index)
             matched, _unmatched, literal_to_cols = matcher.match_detailed(all_literals)
@@ -127,7 +137,7 @@ class SchemaLinkerStage:
 
         # 3. Semantic top-k from vector index.
         semantic: list[SemanticMatchPayload] = []
-        vec_index = self._load_vector_index()
+        vec_index = _load_vector_index(vector_path)
         if vec_index is not None:
             try:
                 q_emb = self._llm.embed(question) if hasattr(self._llm, "embed") else None
@@ -150,9 +160,24 @@ class SchemaLinkerStage:
             SemanticMatchesPayload(matches=semantic),
         )
 
-        # 4. Add declared-FK join paths.
+        # 4. Add FK join paths. When a precomputed JoinGraph is available,
+        # enable bridge discovery + MST pruning (same stack as the research
+        # single-prompt linker).
+        join_graph = None
+        if join_graph_path:
+            try:
+                from ..vendored.pipeline_core.models.join_graph import JoinGraph
+                join_graph = JoinGraph.model_validate_json(
+                    Path(join_graph_path).read_text()
+                )
+            except Exception:
+                pass
         pre_cols = set(columns)
-        tables, columns = add_join_paths(tables, columns, schema, use_bridge=False)
+        tables, columns = add_join_paths(
+            tables, columns, schema,
+            use_bridge=join_graph is not None,
+            join_graph=join_graph,
+        )
         edges: list[JoinEdgePayload] = []
         for t, c in columns - pre_cols:
             column_sources[(t, c)].add("join_path")
@@ -229,29 +254,30 @@ class SchemaLinkerStage:
             )
         return DatabaseSchema(db_id=profile.db_id, tables=tables)
 
-    def _load_lsh(self):
-        if not self._lsh_index_path:
-            return None
-        p = Path(self._lsh_index_path)
-        if not p.exists():
-            return None
-        try:
-            with open(p, "rb") as f:
-                return pickle.load(f)
-        except Exception:
-            return None
+def _load_lsh(path: str | None) -> Any:
+    if not path:
+        return None
+    p = Path(path)
+    if not p.exists():
+        return None
+    try:
+        with open(p, "rb") as f:
+            return pickle.load(f)
+    except Exception:
+        return None
 
-    def _load_vector_index(self):
-        if not self._vector_index_path:
-            return None
-        p = Path(self._vector_index_path)
-        if not p.exists():
-            return None
-        try:
-            from ..vendored.pipeline_core.profiler.vector_builder import VectorIndex
-            cols_path = p.parent / "vector_columns.json"
-            return VectorIndex.load(p, cols_path)
-        except Exception:
+
+def _load_vector_index(npz_path: str | None) -> Any:
+    if not npz_path:
+        return None
+    p = Path(npz_path)
+    if not p.exists():
+        return None
+    try:
+        from ..vendored.pipeline_core.profiler.vector_builder import VectorIndex
+        cols_path = p.parent / "vector_columns.json"
+        return VectorIndex.load(p, cols_path)
+    except Exception:
             return None
 
     @staticmethod

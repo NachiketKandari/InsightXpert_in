@@ -223,6 +223,7 @@ async def run_profile_stream(
     batch_size: int,
     max_columns_for_llm: int,
     batch_disabled: bool = False,
+    indices_dir: str = "",
     # Phase 1.2 + 1.4 — when provided, the runner emits a usage record for
     # every profile run (summaries + quirks LLM batches) tagged with this
     # user. The runner also honours a module-level profile semaphore to cap
@@ -267,6 +268,14 @@ async def run_profile_stream(
             await _emit_stage_completed(
                 emitter, "schema", db_id, duration_ms=schema_ms
             )
+
+            # Build and save join graph (declared + implicit FKs).
+            if indices_dir:
+                from ..vendored.pipeline_core.profiler.join_graph_builder import build_join_graph
+                jg = build_join_graph(schema, db)
+                jg_dir = Path(indices_dir) / db_id
+                jg_dir.mkdir(parents=True, exist_ok=True)
+                jg_dir.joinpath("join_graph.json").write_text(jg.model_dump_json(indent=2))
 
             all_columns = sum(len(t.columns) for t in schema.tables)
 
@@ -321,6 +330,7 @@ async def run_profile_stream(
                 schema=schema,
                 db=db,
                 run=effective.with_lsh,
+                indices_dir=indices_dir,
             )
 
             # --- stage: vectors ----------------------------------------
@@ -330,6 +340,7 @@ async def run_profile_stream(
                 profile=profile,
                 run=effective.with_vectors,
                 llm=llm,
+                indices_dir=indices_dir,
             )
 
             # --- final done -------------------------------------------
@@ -501,6 +512,7 @@ async def _maybe_run_lsh(
     schema: DatabaseSchema,
     db: SQLiteDatabase,
     run: bool,
+    indices_dir: str = "",
 ) -> None:
     import time as _time
 
@@ -515,7 +527,11 @@ async def _maybe_run_lsh(
     from ..vendored.pipeline_core.profiler.lsh_builder import LSHBuilder
 
     # LSHBuilder is CPU-bound; running inline is fine for v1.
-    LSHBuilder().build(db, schema)
+    lsh_index = LSHBuilder().build(db, schema)
+    if indices_dir:
+        p = Path(indices_dir) / db_id
+        p.mkdir(parents=True, exist_ok=True)
+        lsh_index.save(p / "lsh_index.pkl")
     await _emit_stage_completed(
         emitter,
         "lsh",
@@ -531,6 +547,7 @@ async def _maybe_run_vectors(
     profile: DatabaseProfile,
     run: bool,
     llm: object | None,
+    indices_dir: str = "",
 ) -> None:
     import time as _time
 
@@ -544,7 +561,11 @@ async def _maybe_run_vectors(
     await _emit_stage_started(emitter, "vectors", db_id)
     from ..vendored.pipeline_core.profiler.vector_builder import VectorBuilder
 
-    await VectorBuilder().async_build(profile, llm)  # type: ignore[arg-type]
+    vec_index = await VectorBuilder().async_build(profile, llm)  # type: ignore[arg-type]
+    if indices_dir:
+        p = Path(indices_dir) / db_id
+        p.mkdir(parents=True, exist_ok=True)
+        vec_index.save(p / "vector.npz", p / "vector_columns.json")
     await _emit_stage_completed(
         emitter,
         "vectors",

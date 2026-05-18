@@ -487,6 +487,7 @@ async def _run_profile_v2(
             batch_size=settings.profiling_batch_size,
             max_columns_for_llm=settings.profiling_max_columns_for_llm,
             batch_disabled=settings.profiling_batch_disabled,
+            indices_dir=settings.indices_dir,
             user_id=user_id,
             provider="gemini",
             model=settings.gemini_chat_model,

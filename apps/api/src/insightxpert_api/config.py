@@ -103,6 +103,9 @@ class Settings(BaseSettings):
 
     # --- paths -------------------------------------------------------------
     bundled_dbs_dir: str = "./Databases"
+    # Per-DB profiling artifacts (LSH, vector, join graph). Built during
+    # profiling and loaded at query time by SchemaLinkerStage.
+    indices_dir: str = "./indices"
 
     # --- profiling ---------------------------------------------------------
     # Columns per LLM call in the batched summary / quirk generators. One

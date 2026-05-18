@@ -78,9 +78,11 @@ def default_pipeline(
         schema_stage = SchemaLinkerStage(
             llm=llm,
             prompt_path=_vendored_prompt("prompts", "single_prompt_linking_clean.j2"),
+            indices_dir=settings.indices_dir,
         )
     pipeline = Pipeline([
-        ProfilerStage(db_svc=db_svc, prof_svc=prof_svc, llm=llm),
+        ProfilerStage(db_svc=db_svc, prof_svc=prof_svc, llm=llm,
+                      indices_dir=settings.indices_dir),
         schema_stage,
         SqlGeneratorStage(
             llm=llm,

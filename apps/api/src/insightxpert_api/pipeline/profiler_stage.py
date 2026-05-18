@@ -47,6 +47,7 @@ async def build_profile(
     batch_size: int = 20,
     batch_disabled: bool = False,
     max_columns_for_llm: int = 500,
+    indices_dir: str = "",
 ) -> DatabaseProfile:
     """Run the profiler against a local SQLite file.
 
@@ -65,6 +66,14 @@ async def build_profile(
     with db:
         schema = SchemaExtractor().extract(db)
         all_columns = sum(len(t.columns) for t in schema.tables)
+
+        # Save join graph when indices_dir is configured.
+        if indices_dir:
+            from ..vendored.pipeline_core.profiler.join_graph_builder import build_join_graph
+            jg = build_join_graph(schema, db)
+            jg_dir = Path(indices_dir) / db_id
+            jg_dir.mkdir(parents=True, exist_ok=True)
+            jg_dir.joinpath("join_graph.json").write_text(jg.model_dump_json(indent=2))
 
         # --- auto-disable guard -----------------------------------------
         any_flag = with_summaries or with_quirks or with_lsh or with_vectors
@@ -91,9 +100,9 @@ async def build_profile(
                 schema, profile, llm, batch_size, batch_disabled
             )
         if with_lsh:
-            _run_lsh(db, schema)
+            _run_lsh(db, schema, indices_dir, db_id)
         if with_vectors and llm is not None:
-            await _run_vectors(profile, llm)
+            await _run_vectors(profile, llm, indices_dir, db_id)
 
     return profile
 
@@ -139,16 +148,26 @@ async def _run_quirks(
     ).async_enrich(profile, schema)
 
 
-def _run_lsh(db: SQLiteDatabase, schema: DatabaseSchema) -> None:
+def _run_lsh(db: SQLiteDatabase, schema: DatabaseSchema,
+             indices_dir: str = "", db_id: str = "") -> None:
     from ..vendored.pipeline_core.profiler.lsh_builder import LSHBuilder
 
-    LSHBuilder().build(db, schema)
+    lsh_index = LSHBuilder().build(db, schema)
+    if indices_dir:
+        p = Path(indices_dir) / db_id
+        p.mkdir(parents=True, exist_ok=True)
+        lsh_index.save(p / "lsh_index.pkl")
 
 
-async def _run_vectors(profile: DatabaseProfile, llm: object) -> None:
+async def _run_vectors(profile: DatabaseProfile, llm: object,
+                       indices_dir: str = "", db_id: str = "") -> None:
     from ..vendored.pipeline_core.profiler.vector_builder import VectorBuilder
 
-    await VectorBuilder().async_build(profile, llm)  # type: ignore[arg-type]
+    vec_index = await VectorBuilder().async_build(profile, llm)  # type: ignore[arg-type]
+    if indices_dir:
+        p = Path(indices_dir) / db_id
+        p.mkdir(parents=True, exist_ok=True)
+        vec_index.save(p / "vector.npz", p / "vector_columns.json")
 
 
 class ProfilerStage:
@@ -161,10 +180,12 @@ class ProfilerStage:
         db_svc: DatabaseService,
         prof_svc: ProfileService,
         llm: LLMProvider | None = None,
+        indices_dir: str = "",
     ) -> None:
         self._db = db_svc
         self._prof = prof_svc
         self._llm = llm
+        self._indices_dir = indices_dir
 
     async def run(self, ctx: PipelineContext, _: object) -> DatabaseProfile:
         db_id = ctx.state["db_id"]
@@ -180,6 +201,19 @@ class ProfilerStage:
         ref = self._db.resolve(ctx.session_id, db_id)
         if ref is None:
             raise ValueError(f"database not found: {db_id}")
+
+        # Stash FK-aware schema on ctx.state so SchemaLinkerStage can use
+        # real foreign keys from PRAGMA foreign_key_list.
+        if ctx.state.get("schema") is None and ref.local_path:
+            try:
+                path = Path(ref.local_path)
+                db = SQLiteDatabase(path)
+                db.db_id = db_id
+                with db:
+                    ctx.state["schema"] = SchemaExtractor().extract(db)
+            except Exception:
+                pass  # best-effort; linker falls back to _extract_schema()
+
         if prefetched is not None:
             ctx.state["profile"] = prefetched
             await self._emit(ctx, db_id, prefetched, from_cache=True)
@@ -191,7 +225,9 @@ class ProfilerStage:
             await self._emit(ctx, db_id, cached, from_cache=True)
             return cached
 
-        profile = await build_profile(db_id, ref.local_path, llm=self._llm)
+        profile = await build_profile(
+            db_id, ref.local_path, llm=self._llm, indices_dir=self._indices_dir,
+        )
         self._prof.save(ctx.session_id, db_id, profile)
         ctx.state["profile"] = profile
         await self._emit(ctx, db_id, profile, from_cache=False)
