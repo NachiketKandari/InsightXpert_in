@@ -14,9 +14,9 @@
 //   for a full poll cycle.
 
 import { useQuery } from "@tanstack/react-query";
+import { SSE_BASE_URL } from "@/lib/constants";
 
-const SSE_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
-const HEALTH_URL = `${SSE_BASE_URL}/api/v1/health`;
+const HEALTH_URL = `${SSE_BASE_URL || "http://localhost:8080"}/api/v1/health`;
 const FETCH_TIMEOUT_MS = 2_000;
 const HEALTHY_POLL_MS = 30_000;
 const UNHEALTHY_POLL_MS = 15_000;

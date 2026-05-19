@@ -141,7 +141,7 @@ async def _execute_one(
                     "error_message": "no sql queries configured",
                 }, _engine=_bg)
                 persisted_run_id = _err_run["id"]
-                AutomationService().mark_run_completed(automation_id, int(time.time()))
+                AutomationService().mark_run_completed(automation_id, int(time.time()), _engine=_bg)
                 log.error(
                     "automation.run_error",
                     automation_id=automation_id,
@@ -176,7 +176,7 @@ async def _execute_one(
                     "error_message": f"db not found: {auto['db_id']}",
                 }, _engine=_bg)
                 persisted_run_id = _err_run["id"]
-                AutomationService().mark_run_completed(automation_id, int(time.time()))
+                AutomationService().mark_run_completed(automation_id, int(time.time()), _engine=_bg)
                 log.error(
                     "automation.run_error",
                     automation_id=automation_id,
@@ -204,7 +204,7 @@ async def _execute_one(
                     "execution_time_ms": execution_ms,
                 }, _engine=_bg)
                 persisted_run_id = _err_run["id"]
-                AutomationService().mark_run_completed(automation_id, int(time.time()))
+                AutomationService().mark_run_completed(automation_id, int(time.time()), _engine=_bg)
                 log.error(
                     "automation.run_error",
                     automation_id=automation_id,
@@ -264,7 +264,7 @@ async def _execute_one(
                     "execution_time_ms": execution_ms,
                 }, _engine=_bg)
                 persisted_run_id = run["id"]
-                AutomationService().mark_run_completed(automation_id, int(time.time()))
+                AutomationService().mark_run_completed(automation_id, int(time.time()), _engine=_bg)
                 log.info(
                     "automation.run_completed",
                     automation_id=automation_id,
@@ -304,7 +304,7 @@ async def _execute_one(
                 "triggers_fired_json": json.dumps(trigger_results),
             }, _engine=_bg)
             persisted_run_id = run["id"]
-            AutomationService().mark_run_completed(automation_id, int(time.time()))
+            AutomationService().mark_run_completed(automation_id, int(time.time()), _engine=_bg)
 
             triggers_fired_count = sum(1 for t in trigger_results if t.get("fired"))
             log.info(
@@ -326,6 +326,7 @@ async def _execute_one(
                     title=f"Alert: {auto['name']}",
                     message="\n".join(fired_msgs),
                     severity="warning",
+                    _engine=_bg,
                 )
                 if app is not None:
                     try:

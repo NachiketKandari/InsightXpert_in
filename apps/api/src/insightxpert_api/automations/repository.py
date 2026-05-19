@@ -137,11 +137,12 @@ def count_for_user(user_id: str) -> int:
     return int(result or 0)
 
 
-def update_automation(automation_id: str, values: dict[str, Any]) -> None:
+def update_automation(automation_id: str, values: dict[str, Any], *, _engine: Engine | None = None) -> None:
     if not values:
         return
     values = {**values, "updated_at": _now()}
-    with get_engine().begin() as conn:
+    engine = _engine or get_engine()
+    with engine.begin() as conn:
         conn.execute(
             update(automations)
             .where(automations.c.id == automation_id)
@@ -405,14 +406,15 @@ def delete_template(template_id: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def insert_notification(values: dict[str, Any]) -> dict[str, Any]:
+def insert_notification(values: dict[str, Any], *, _engine: Engine | None = None) -> dict[str, Any]:
     values = {
         "id": _uuid(),
         "is_read": False,
         "created_at": _now(),
         **values,
     }
-    with get_engine().begin() as conn:
+    engine = _engine or get_engine()
+    with engine.begin() as conn:
         conn.execute(insert(notifications).values(**values))
     return values
 

@@ -173,9 +173,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         from .db.engine import _request_engine, _background_engine
 
         if _request_engine is not None:
-            _request_engine.dispose()
+            try:
+                _request_engine.dispose()
+            except Exception:  # noqa: BLE001
+                pass
         if _background_engine is not None:
-            _background_engine.dispose()
+            try:
+                _background_engine.dispose()
+            except Exception:  # noqa: BLE001
+                pass
 
         log.info("api.stopping")
 

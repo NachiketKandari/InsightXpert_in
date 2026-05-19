@@ -14,6 +14,7 @@ import uuid
 from typing import Any
 
 from croniter import croniter
+from sqlalchemy import Engine
 
 from . import repository
 from .models import (
@@ -296,9 +297,9 @@ class AutomationService:
         return self._hydrate(row)
 
     def mark_run_completed(
-        self, automation_id: str, last_run_at: int
+        self, automation_id: str, last_run_at: int, *, _engine: Engine | None = None
     ) -> None:
-        existing = repository.get_automation(automation_id)
+        existing = repository.get_automation(automation_id, _engine=_engine)
         if existing is None:
             return
         repository.update_automation(
@@ -309,6 +310,7 @@ class AutomationService:
                     existing["cron_expression"], last_run_at
                 ),
             },
+            _engine=_engine,
         )
 
     # ---- runs ------------------------------------------------------------

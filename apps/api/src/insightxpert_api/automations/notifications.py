@@ -17,6 +17,7 @@ import logging
 from typing import Any
 
 from fastapi import FastAPI
+from sqlalchemy import Engine
 
 from ..sse.chunks import ChatChunk, ChunkType
 from ..sse.emitter import EventEmitter
@@ -33,6 +34,7 @@ def create(
     severity: str = "info",
     automation_id: str | None = None,
     run_id: str | None = None,
+    _engine: Engine | None = None,
 ) -> dict[str, Any]:
     """Persist a notification row and return the hydrated dict."""
     row = repository.insert_notification(
@@ -43,7 +45,8 @@ def create(
             "title": title,
             "message": message,
             "severity": severity,
-        }
+        },
+        _engine=_engine,
     )
     return {
         "id": row["id"],
