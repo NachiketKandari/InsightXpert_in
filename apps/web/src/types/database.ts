@@ -89,11 +89,13 @@ export interface ProfileFlags {
 
 export interface ProfileRunRequest extends ProfileFlags {
   confirmed: boolean;
+  user_hints?: string;
 }
 
 export type ProfileStage =
   | "schema"
   | "stats"
+  | "join_graph"
   | "summaries"
   | "quirks"
   | "lsh"
@@ -102,6 +104,7 @@ export type ProfileStage =
 export const PROFILE_STAGE_ORDER: readonly ProfileStage[] = [
   "schema",
   "stats",
+  "join_graph",
   "summaries",
   "quirks",
   "lsh",
@@ -132,6 +135,8 @@ export interface ProfileCostEstimatePayload {
   batch_size: number;
   total_llm_calls: number;
   estimated_seconds: number;
+  provider?: string | null;
+  model?: string | null;
 }
 
 export interface ProfileDonePayload {
@@ -159,3 +164,43 @@ export type ProfileChunk =
  * constant; surfaced in the auto-disable warning copy.
  */
 export const PROFILING_MAX_COLUMNS_FOR_LLM = 500;
+
+// --- Join graph types --------------------------------------------------------
+
+export interface JoinEdge {
+  src_table: string;
+  src_col: string;
+  dst_table: string;
+  dst_col: string;
+  kind: "declared" | "value_verified" | "rejected";
+  containment: number;
+  reason: string | null;
+}
+
+export interface JoinGraph {
+  db_id: string;
+  canonical: Record<string, string>;
+  edges: JoinEdge[];
+}
+
+// --- Profile editing ---------------------------------------------------------
+
+export interface ProfileHintsRequest {
+  hints: string;
+}
+
+export interface ColumnProfileUpdateRequest {
+  field_path: string;
+  value: unknown;
+}
+
+export interface ProfileOverride {
+  id: string;
+  db_id: string;
+  table_name: string;
+  column_name: string;
+  field_path: string;
+  value_json: string;
+  edited_by: string;
+  edited_at: number;
+}

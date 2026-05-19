@@ -96,6 +96,7 @@ function flagForStage(flags: ProfileFlags, stage: ProfileStage): boolean {
       return flags.with_vectors;
     case "schema":
     case "stats":
+    case "join_graph":
       return true; // always runs
   }
 }

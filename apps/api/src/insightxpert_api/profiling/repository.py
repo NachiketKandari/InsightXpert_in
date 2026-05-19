@@ -1,6 +1,6 @@
-"""Persistence layer for ``database_profiles``.
+"""Persistence layer for ``database_profiles`` and ``profile_overrides``.
 
-Thin repo on top of the SQLAlchemy table. Caller serializes the
+Thin repo on top of SQLAlchemy tables. Caller serializes the
 ``DatabaseProfile`` to JSON; this module never imports the model.
 """
 
@@ -13,7 +13,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from ..db.engine import get_engine
-from .table import database_profiles
+from .table import database_profiles, profile_overrides
 
 
 def upsert(
@@ -128,6 +128,174 @@ def list_summaries(profile_kind: str = "base") -> dict[str, dict[str, int]]:
             "row_count": row_count,
         }
     return out
+
+
+def set_join_graph(
+    db_id: str,
+    join_graph_json: str,
+    profile_kind: str = "base",
+) -> None:
+    """Persist a join graph for a database profile."""
+    engine = get_engine()
+    stmt = (
+        database_profiles.update()
+        .where(
+            database_profiles.c.db_id == db_id,
+            database_profiles.c.profile_kind == profile_kind,
+        )
+        .values(join_graph_json=join_graph_json)
+    )
+    with engine.begin() as conn:
+        conn.execute(stmt)
+
+
+def get_join_graph(db_id: str, profile_kind: str = "base") -> str | None:
+    """Fetch the join graph JSON for a database profile, or None."""
+    with get_engine().connect() as conn:
+        row = conn.execute(
+            select(database_profiles.c.join_graph_json).where(
+                database_profiles.c.db_id == db_id,
+                database_profiles.c.profile_kind == profile_kind,
+            )
+        ).first()
+    return row[0] if row and row[0] else None
+
+
+def set_user_hints(
+    db_id: str,
+    user_hints: str,
+    profile_kind: str = "base",
+) -> None:
+    """Persist user hints for a database profile.
+
+    Upserts a row even when no profile exists yet — users can set hints
+    before running profiling.
+    """
+    now = int(time.time())
+    engine = get_engine()
+    is_pg = engine.dialect.name == "postgresql"
+    insert = pg_insert if is_pg else sqlite_insert
+
+    stmt = insert(database_profiles).values(
+        db_id=db_id,
+        profile_kind=profile_kind,
+        user_hints=user_hints,
+        generated_at=now,
+    )
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["db_id", "profile_kind"],
+        set_={"user_hints": stmt.excluded.user_hints},
+    )
+    with engine.begin() as conn:
+        conn.execute(stmt)
+
+
+def get_user_hints(db_id: str, profile_kind: str = "base") -> str | None:
+    """Fetch user hints for a database profile, or None."""
+    with get_engine().connect() as conn:
+        row = conn.execute(
+            select(database_profiles.c.user_hints).where(
+                database_profiles.c.db_id == db_id,
+                database_profiles.c.profile_kind == profile_kind,
+            )
+        ).first()
+    return row[0] if row and row[0] else None
+
+
+# ---------------------------------------------------------------------------
+# Profile overrides — user edits to individual column fields
+# ---------------------------------------------------------------------------
+
+
+def upsert_override(
+    *,
+    db_id: str,
+    table_name: str,
+    column_name: str,
+    field_path: str,
+    value_json: str,
+    edited_by: str,
+) -> None:
+    """Insert or update a single field override."""
+    import uuid as _uuid
+
+    now = int(time.time())
+    engine = get_engine()
+    is_pg = engine.dialect.name == "postgresql"
+    insert = pg_insert if is_pg else sqlite_insert
+
+    # Read current row to get or keep the id
+    existing = _get_override_row(db_id, table_name, column_name, field_path)
+    row_id = existing["id"] if existing else str(_uuid.uuid4())
+
+    stmt = insert(profile_overrides).values(
+        id=row_id,
+        db_id=db_id,
+        table_name=table_name,
+        column_name=column_name,
+        field_path=field_path,
+        value_json=value_json,
+        edited_by=edited_by,
+        edited_at=now,
+    )
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["db_id", "table_name", "column_name", "field_path"],
+        set_={
+            "value_json": stmt.excluded.value_json,
+            "edited_by": stmt.excluded.edited_by,
+            "edited_at": stmt.excluded.edited_at,
+        },
+    )
+    with engine.begin() as conn:
+        conn.execute(stmt)
+
+
+def get_overrides(db_id: str) -> list[dict]:
+    """Return all overrides for a db_id."""
+    with get_engine().connect() as conn:
+        rows = conn.execute(
+            select(profile_overrides).where(
+                profile_overrides.c.db_id == db_id,
+            )
+        ).mappings().all()
+    return [dict(r) for r in rows]
+
+
+def delete_override(
+    db_id: str,
+    table_name: str,
+    column_name: str,
+    field_path: str,
+) -> int:
+    """Delete a single override. Returns rowcount."""
+    with get_engine().begin() as conn:
+        result = conn.execute(
+            delete(profile_overrides).where(
+                profile_overrides.c.db_id == db_id,
+                profile_overrides.c.table_name == table_name,
+                profile_overrides.c.column_name == column_name,
+                profile_overrides.c.field_path == field_path,
+            )
+        )
+    return result.rowcount or 0
+
+
+def _get_override_row(
+    db_id: str,
+    table_name: str,
+    column_name: str,
+    field_path: str,
+) -> dict | None:
+    with get_engine().connect() as conn:
+        row = conn.execute(
+            select(profile_overrides).where(
+                profile_overrides.c.db_id == db_id,
+                profile_overrides.c.table_name == table_name,
+                profile_overrides.c.column_name == column_name,
+                profile_overrides.c.field_path == field_path,
+            )
+        ).mappings().first()
+    return dict(row) if row else None
 
 
 def delete_for_db(db_id: str) -> int:

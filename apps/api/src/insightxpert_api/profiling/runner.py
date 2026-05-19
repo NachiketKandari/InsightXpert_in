@@ -1,6 +1,6 @@
 """SSE-streaming profile runner.
 
-Drives the 6 profiling stages (schema, stats, summaries, quirks, lsh, vectors)
+Drives the 7 profiling stages (schema, stats, join_graph, summaries, quirks, lsh, vectors)
 and emits ``profile_stage_started`` / ``profile_stage_completed`` chunks on
 the standard ``EventEmitter`` so the FE can render stepped progress.
 
@@ -45,6 +45,7 @@ from ..sse.chunks import (
 from ..sse.emitter import EventEmitter
 from ..vendored.pipeline_core.db import SQLiteDatabase
 from ..vendored.pipeline_core.models.profile import DatabaseProfile
+from ..vendored.pipeline_core.profiler.join_graph_builder import build_join_graph
 from ..vendored.pipeline_core.profiler.schema_extractor import SchemaExtractor
 from ..vendored.pipeline_core.profiler.stats_collector import StatsCollector
 
@@ -83,6 +84,7 @@ def _reset_profile_semaphore(n: int) -> None:
 STAGE_ORDER: tuple[str, ...] = (
     "schema",
     "stats",
+    "join_graph",
     "summaries",
     "quirks",
     "lsh",
@@ -119,12 +121,17 @@ class CostEstimate:
     batch_size: int
     total_llm_calls: int
     estimated_seconds: int
+    provider: str = ""
+    model: str = ""
 
 
 def estimate_cost(
     columns: int,
     flags: ProfileFlags,
     batch_size: int,
+    *,
+    provider: str = "",
+    model: str = "",
 ) -> CostEstimate:
     """Pure function — used by the cost-gate and the estimate route."""
     bs = max(1, batch_size)
@@ -138,6 +145,8 @@ def estimate_cost(
         batch_size=bs,
         total_llm_calls=total,
         estimated_seconds=seconds,
+        provider=provider,
+        model=model,
     )
 
 
@@ -213,6 +222,83 @@ async def _emit_progress(
     )
 
 
+async def _run_stats_stage(
+    emitter: EventEmitter,
+    db_id: str,
+    db: SQLiteDatabase,
+    schema: "DatabaseSchema",
+) -> "DatabaseProfile":
+    """Run the stats stage with SSE emission. Returns the populated profile."""
+    import time as _time
+
+    t0 = _time.perf_counter()
+    await _emit_stage_started(emitter, "stats", db_id)
+    profile = StatsCollector(fast=False).collect(db, schema)
+    stats_ms = int((_time.perf_counter() - t0) * 1000)
+    await _emit_stage_completed(
+        emitter, "stats", db_id, duration_ms=stats_ms
+    )
+    return profile
+
+
+async def _run_join_graph_stage(
+    emitter: EventEmitter,
+    db_id: str,
+    schema: "DatabaseSchema",
+    db: SQLiteDatabase,
+    indices_dir: str = "",
+) -> None:
+    """Run the join graph stage with SSE emission.
+
+    Discovers declared + implicit FKs with value verification.
+    Saves ``join_graph.json`` to disk when ``indices_dir`` is provided.
+    The route persists it to the database after the run.
+    """
+    import time as _time
+
+    t0 = _time.perf_counter()
+    await _emit_stage_started(emitter, "join_graph", db_id)
+    jg = build_join_graph(schema, db)
+    if indices_dir:
+        jg_dir = Path(indices_dir) / db_id
+        jg_dir.mkdir(parents=True, exist_ok=True)
+        jg_dir.joinpath("join_graph.json").write_text(jg.model_dump_json(indent=2))
+    elapsed_ms = int((_time.perf_counter() - t0) * 1000)
+    edge_count = len(jg.edges)
+    declared = sum(1 for e in jg.edges if e.kind == "declared")
+    verified = sum(1 for e in jg.edges if e.kind == "value_verified")
+    note = f"{edge_count} edges ({declared} declared, {verified} value-verified)"
+    await _emit_stage_completed(
+        emitter, "join_graph", db_id, duration_ms=elapsed_ms, note=note
+    )
+
+
+def _unwrap_profile(
+    result: object,
+    db_id: str,
+    stage: str,
+    *,
+    fallback: "DatabaseProfile | None" = None,
+) -> "DatabaseProfile | None":
+    """Unpack an ``asyncio.gather`` result for a profile-returning stage.
+
+    On success, returns the ``DatabaseProfile``. On failure, logs a warning
+    and returns *fallback* so downstream stages can continue.
+    """
+    if isinstance(result, BaseException):
+        log.warning(
+            "profiling.stage_failed",
+            stage=stage,
+            db_id=db_id,
+            error=str(result),
+            error_type=type(result).__name__,
+        )
+        return fallback
+    if isinstance(result, DatabaseProfile):
+        return result
+    return fallback
+
+
 async def run_profile_stream(
     emitter: EventEmitter,
     db_id: str,
@@ -231,6 +317,7 @@ async def run_profile_stream(
     user_id: str | None = None,
     provider: str = "gemini",
     model: str | None = None,
+    user_hints: str = "",
 ) -> DatabaseProfile | None:
     """Run the full profile pipeline with per-stage SSE emissions.
 
@@ -260,7 +347,7 @@ async def run_profile_stream(
         db = SQLiteDatabase(path)
         db.db_id = db_id
         with db:
-            # --- stage: schema -----------------------------------------
+            # --- Phase 1: schema (sequential prerequisite) ---------------
             t0 = _time.perf_counter()
             await _emit_stage_started(emitter, "schema", db_id)
             schema = SchemaExtractor().extract(db)
@@ -268,14 +355,6 @@ async def run_profile_stream(
             await _emit_stage_completed(
                 emitter, "schema", db_id, duration_ms=schema_ms
             )
-
-            # Build and save join graph (declared + implicit FKs).
-            if indices_dir:
-                from ..vendored.pipeline_core.profiler.join_graph_builder import build_join_graph
-                jg = build_join_graph(schema, db)
-                jg_dir = Path(indices_dir) / db_id
-                jg_dir.mkdir(parents=True, exist_ok=True)
-                jg_dir.joinpath("join_graph.json").write_text(jg.model_dump_json(indent=2))
 
             all_columns = sum(len(t.columns) for t in schema.tables)
 
@@ -290,50 +369,47 @@ async def run_profile_stream(
                 )
                 effective = ProfileFlags()  # all off
 
-            # --- stage: stats ------------------------------------------
-            t0 = _time.perf_counter()
-            await _emit_stage_started(emitter, "stats", db_id)
-            profile = StatsCollector(fast=False).collect(db, schema)
-            stats_ms = int((_time.perf_counter() - t0) * 1000)
-            await _emit_stage_completed(
-                emitter, "stats", db_id, duration_ms=stats_ms
+            # --- Phase 2: stats + join_graph (parallel) -------------------
+            # Both only need schema + db — fully independent.
+            phase2_tasks = [
+                _run_stats_stage(emitter, db_id, db, schema),
+                _run_join_graph_stage(emitter, db_id, schema, db, indices_dir),
+            ]
+            phase2_results = await asyncio.gather(
+                *phase2_tasks, return_exceptions=True
             )
+            profile = _unwrap_profile(phase2_results[0], db_id, "stats")
 
-            # --- stage: summaries --------------------------------------
-            profile = await _maybe_run_summaries(
-                emitter=emitter,
-                db_id=db_id,
-                schema=schema,
-                profile=profile,
-                run=effective.with_summaries,
-                llm=llm,
-                batch_size=batch_size,
-                batch_disabled=batch_disabled,
+            # --- Phase 3: summaries + quirks + lsh (parallel) -------------
+            # summaries and quirks both need the profile (with stats populated).
+            # lsh only needs schema + db, so it can run alongside the LLM stages.
+            phase3_tasks = [
+                _maybe_run_summaries(
+                    emitter=emitter, db_id=db_id, schema=schema,
+                    profile=profile, run=effective.with_summaries,
+                    llm=llm, batch_size=batch_size,
+                    batch_disabled=batch_disabled,
+                    user_hints=user_hints,
+                ),
+                _maybe_run_quirks(
+                    emitter=emitter, db_id=db_id, schema=schema,
+                    profile=profile, run=effective.with_quirks,
+                    llm=llm, batch_size=batch_size,
+                    batch_disabled=batch_disabled,
+                    user_hints=user_hints,
+                ),
+                _maybe_run_lsh(
+                    emitter=emitter, db_id=db_id, schema=schema,
+                    db=db, run=effective.with_lsh, indices_dir=indices_dir,
+                ),
+            ]
+            phase3_results = await asyncio.gather(
+                *phase3_tasks, return_exceptions=True
             )
+            profile = _unwrap_profile(phase3_results[0], db_id, "summaries", fallback=profile)
+            profile = _unwrap_profile(phase3_results[1], db_id, "quirks", fallback=profile)
 
-            # --- stage: quirks -----------------------------------------
-            profile = await _maybe_run_quirks(
-                emitter=emitter,
-                db_id=db_id,
-                schema=schema,
-                profile=profile,
-                run=effective.with_quirks,
-                llm=llm,
-                batch_size=batch_size,
-                batch_disabled=batch_disabled,
-            )
-
-            # --- stage: lsh --------------------------------------------
-            await _maybe_run_lsh(
-                emitter=emitter,
-                db_id=db_id,
-                schema=schema,
-                db=db,
-                run=effective.with_lsh,
-                indices_dir=indices_dir,
-            )
-
-            # --- stage: vectors ----------------------------------------
+            # --- Phase 4: vectors (depends on summaries for embed text) ---
             await _maybe_run_vectors(
                 emitter=emitter,
                 db_id=db_id,
@@ -343,7 +419,7 @@ async def run_profile_stream(
                 indices_dir=indices_dir,
             )
 
-            # --- final done -------------------------------------------
+            # --- final done ----------------------------------------------
             await emitter.emit(
                 ChunkType.profile_done,
                 ProfileDonePayload(
@@ -431,6 +507,7 @@ async def _maybe_run_summaries(
     llm: object | None,
     batch_size: int,
     batch_disabled: bool,
+    user_hints: str = "",
 ) -> DatabaseProfile:
     import time as _time
 
@@ -448,13 +525,15 @@ async def _maybe_run_summaries(
             SummaryGenerator,
         )
 
-        profile = await SummaryGenerator(llm).async_generate(schema, profile)
+        profile = await SummaryGenerator(llm).async_generate(
+            schema, profile, unified_evidence=user_hints
+        )
     else:
         from .batched_summary import BatchedSummaryGenerator
 
         profile = await BatchedSummaryGenerator(
             llm, batch_size=batch_size
-        ).async_generate(schema, profile)
+        ).async_generate(schema, profile, unified_evidence=user_hints)
     await _emit_stage_completed(
         emitter,
         "summaries",
@@ -474,6 +553,7 @@ async def _maybe_run_quirks(
     llm: object | None,
     batch_size: int,
     batch_disabled: bool,
+    user_hints: str = "",
 ) -> DatabaseProfile:
     import time as _time
 
@@ -495,7 +575,7 @@ async def _maybe_run_quirks(
 
         profile = await BatchedQuirkDetector(
             llm, batch_size=batch_size
-        ).async_enrich(profile, schema)
+        ).async_enrich(profile, schema, unified_evidence=user_hints)
     await _emit_stage_completed(
         emitter,
         "quirks",

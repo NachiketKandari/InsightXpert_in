@@ -464,6 +464,7 @@ class ProfileRunRequest(BaseModel):
     with_lsh: bool = False
     with_vectors: bool = False
     confirmed: bool = False
+    user_hints: str = ""
 
 
 async def _run_profile_v2(
@@ -476,6 +477,7 @@ async def _run_profile_v2(
     settings: Settings,
     llm: object | None,
     user_id: str | None = None,
+    user_hints: str = "",
 ) -> None:
     try:
         profile = await run_profile_stream(
@@ -489,15 +491,23 @@ async def _run_profile_v2(
             batch_disabled=settings.profiling_batch_disabled,
             indices_dir=settings.indices_dir,
             user_id=user_id,
-            provider="gemini",
-            model=settings.gemini_chat_model,
+            provider=settings.llm_provider,
+            model=llm.model if llm and hasattr(llm, "model") else settings.gemini_chat_model,
+            user_hints=user_hints,
         )
         if profile is not None:
             prof_svc.save(session_id, db_id, profile)
-            # NEW: kick off sample-questions generation asynchronously
+            # Persist join graph from disk to DB so the schema linker can load it.
+            if settings.indices_dir:
+                jg_path = Path(settings.indices_dir) / db_id / "join_graph.json"
+                if jg_path.exists():
+                    prof_svc.save_join_graph(
+                        session_id, db_id, jg_path.read_text()
+                    )
+            # kick off sample-questions generation asynchronously
             _spawn_background_task(
                 run_sample_questions_job(
-                    db_id=db_id, llm=llm, model_name=settings.gemini_chat_model,
+                    db_id=db_id, llm=llm, model_name=llm.model if llm and hasattr(llm, "model") else settings.gemini_chat_model,
                     emitter=emitter, session_id=session_id,
                 )
             )
@@ -524,6 +534,8 @@ async def run_profile(
     convo_store: ConversationStore = Depends(get_conversation_store),
 ) -> EventSourceResponse:
     """Run profiling with stepped SSE progress + cost-gate handshake."""
+    from ..routes.chat import _chat_model
+
     db_svc = _db_svc(settings)
     prof_svc = _prof_svc(settings)
     ref = db_svc.resolve(cu.id, db_id)
@@ -566,13 +578,17 @@ async def run_profile(
     if flags.any and not req.confirmed:
         _, column_count = count_columns(ref.local_path, db_id)
         estimate = estimate_cost(
-            column_count, flags, settings.profiling_batch_size
+            column_count, flags, settings.profiling_batch_size,
+            provider=settings.llm_provider,
+            model=_chat_model(settings),
         )
         payload = ProfileCostEstimatePayload(
             columns=estimate.columns,
             batch_size=estimate.batch_size,
             total_llm_calls=estimate.total_llm_calls,
             estimated_seconds=estimate.estimated_seconds,
+            provider=estimate.provider,
+            model=estimate.model,
         )
         asyncio.create_task(_emit_cost_estimate_and_close(emitter, payload))
         return EventSourceResponse(emitter.stream())
@@ -640,6 +656,7 @@ async def run_profile(
             settings=settings,
             llm=llm,
             user_id=cu.id,
+            user_hints=req.user_hints if req else "",
         )
     )
     return EventSourceResponse(emitter.stream())
@@ -743,6 +760,100 @@ async def ensure_sample_questions(
     )
     get_process_profile_cache().invalidate(db_id, "base")
     return {"status": "pending", "message": "Generation started"}
+
+
+class ProfileHintsRequest(BaseModel):
+    hints: str
+
+
+@router.put("/{db_id}/profile-hints")
+async def set_profile_hints(
+    db_id: str,
+    body: ProfileHintsRequest,
+    cu: CurrentUser = Depends(get_current_user),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, str]:
+    """Store pre-profiling domain hints for this database.
+
+    These hints are threaded into the LLM prompts during profiling
+    to improve column descriptions and quirk detection.
+    """
+    prof_svc = _prof_svc(settings)
+    prof_svc.set_user_hints(cu.id, db_id, body.hints)
+    get_process_profile_cache().invalidate(db_id, "base")
+    return {"status": "ok"}
+
+
+@router.get("/{db_id}/profile-hints")
+async def get_profile_hints(
+    db_id: str,
+    settings: Settings = Depends(get_settings),
+) -> dict[str, str | None]:
+    """Get stored pre-profiling domain hints for this database."""
+    prof_svc = _prof_svc(settings)
+    hints = prof_svc.get_user_hints("", db_id)
+    return {"hints": hints}
+
+
+class ColumnProfileUpdateRequest(BaseModel):
+    field_path: str  # e.g. "short_summary", "long_summary", "quirks.semantic_hint", "quirks.aliases"
+    value: object    # new value (JSON-encodable)
+
+
+@router.patch("/{db_id}/profile/columns/{table_name}/{column_name}")
+async def update_column_profile(
+    db_id: str,
+    table_name: str,
+    column_name: str,
+    body: ColumnProfileUpdateRequest,
+    cu: CurrentUser = Depends(get_current_user),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, str]:
+    """Update a single field of a column profile.
+
+    Supported field paths: ``short_summary``, ``long_summary``,
+    ``quirks.semantic_hint``, ``quirks.aliases``, ``quirks.enum_labels``.
+    Overrides are stored separately and applied on every profile read.
+    """
+    import json as _json
+
+    prof_svc = _prof_svc(settings)
+    value_json = _json.dumps(body.value)
+    prof_svc.save_override(
+        edited_by=cu.id,
+        db_id=db_id,
+        table_name=table_name,
+        column_name=column_name,
+        field_path=body.field_path,
+        value_json=value_json,
+    )
+    return {"status": "ok"}
+
+
+@router.delete("/{db_id}/profile/columns/{table_name}/{column_name}/overrides/{field_path}")
+async def delete_column_override(
+    db_id: str,
+    table_name: str,
+    column_name: str,
+    field_path: str,
+    settings: Settings = Depends(get_settings),
+) -> dict[str, str]:
+    """Revert a column profile field to its generated value."""
+    prof_svc = _prof_svc(settings)
+    count = prof_svc.delete_override(db_id, table_name, column_name, field_path)
+    if not count:
+        raise HTTPException(status_code=404, detail="override_not_found")
+    return {"status": "ok"}
+
+
+@router.get("/{db_id}/profile/overrides")
+async def get_profile_overrides(
+    db_id: str,
+    settings: Settings = Depends(get_settings),
+) -> list[dict]:
+    """Return all field overrides for a database profile."""
+    prof_svc = _prof_svc(settings)
+    return prof_svc.get_overrides(db_id)
 
 
 # Fallback when trailing slash variant is hit (FastAPI defaults redirect; this keeps

@@ -13,6 +13,7 @@ import type { ProfileStep } from "@/hooks/useProfileRun";
 const STAGE_LABELS: Record<ProfileStep["stage"], string> = {
   schema: "Schema extraction",
   stats: "Column statistics",
+  join_graph: "FK & join discovery",
   summaries: "LLM summaries",
   quirks: "LLM quirk detection",
   lsh: "LSH index",

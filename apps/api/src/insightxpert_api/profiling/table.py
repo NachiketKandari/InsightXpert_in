@@ -1,8 +1,4 @@
-"""SQLAlchemy table declaration for ``database_profiles``.
-
-Persistence backing for ``services.profile_service.ProfileService``. One row
-per ``(db_id, profile_kind)`` — re-running a kind overwrites.
-"""
+"""SQLAlchemy table declarations for profiling persistence."""
 
 from __future__ import annotations
 
@@ -29,7 +25,27 @@ database_profiles = sa.Table(
     sa.Column("input_tokens", sa.Integer(), nullable=True),
     sa.Column("output_tokens", sa.Integer(), nullable=True),
     sa.Column("cost_usd", sa.Float(), nullable=True),
+    sa.Column("join_graph_json", sa.Text(), nullable=True),
+    sa.Column("user_hints", sa.Text(), nullable=True),
     sa.Column("sample_questions", JSONB().with_variant(sa.JSON(), "sqlite"), nullable=True),
     sa.PrimaryKeyConstraint("db_id", "profile_kind"),
     sa.Index("ix_database_profiles_owner_user_id", "owner_user_id"),
+)
+
+profile_overrides = sa.Table(
+    "profile_overrides",
+    metadata,
+    sa.Column("id", sa.String(length=36), nullable=False, primary_key=True),
+    sa.Column("db_id", sa.String(length=255), nullable=False),
+    sa.Column("table_name", sa.String(length=255), nullable=False),
+    sa.Column("column_name", sa.String(length=255), nullable=False),
+    sa.Column("field_path", sa.String(length=255), nullable=False),
+    sa.Column("value_json", sa.Text(), nullable=False),
+    sa.Column("edited_by", sa.String(length=36), nullable=False),
+    sa.Column("edited_at", sa.Integer(), nullable=False),
+    sa.UniqueConstraint(
+        "db_id", "table_name", "column_name", "field_path",
+        name="uq_profile_override",
+    ),
+    sa.Index("ix_profile_overrides_db_id", "db_id"),
 )

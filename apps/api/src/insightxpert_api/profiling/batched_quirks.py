@@ -105,9 +105,12 @@ def _select_llm_worthy(profile: DatabaseProfile) -> list[ColumnRef]:
 
 
 def _render_batch_prompt(
-    refs: list[ColumnRef], profile: DatabaseProfile
+    refs: list[ColumnRef], profile: DatabaseProfile,
+    unified_evidence: str = "",
 ) -> str:
     lines: list[str] = [_BATCH_PROMPT_HEADER.format(n=len(refs))]
+    if unified_evidence:
+        lines.append(f"\nShared domain knowledge for this database:\n{unified_evidence}\n")
     lines.append("Columns:")
     for i, ref in enumerate(refs, start=1):
         col = profile.tables[ref.table_idx].columns[ref.col_idx]
@@ -200,8 +203,9 @@ class BatchedQuirkDetector:
         *,
         batch_index: int,
         batch_total: int,
+        unified_evidence: str = "",
     ) -> None:
-        prompt = _render_batch_prompt(refs, profile)
+        prompt = _render_batch_prompt(refs, profile, unified_evidence)
         raw: str
         try:
             raw = await self._llm.async_generate(prompt)
@@ -241,6 +245,8 @@ class BatchedQuirkDetector:
         self,
         profile: DatabaseProfile,
         schema: DatabaseSchema,
+        *,
+        unified_evidence: str = "",
     ) -> DatabaseProfile:
         """Run rule-based quirks in-place, then batched LLM enrichment.
 
@@ -269,7 +275,8 @@ class BatchedQuirkDetector:
         )
         for i, batch in enumerate(batches):
             await self._run_batch(
-                profile, batch, batch_index=i, batch_total=batch_total
+                profile, batch, batch_index=i, batch_total=batch_total,
+                unified_evidence=unified_evidence,
             )
         log.info(
             "profiling.batched_quirks_completed",

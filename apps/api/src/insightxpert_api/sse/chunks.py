@@ -296,6 +296,8 @@ class ProfileCostEstimatePayload(BaseModel):
     batch_size: int
     total_llm_calls: int
     estimated_seconds: int
+    provider: str | None = None
+    model: str | None = None
 
 
 class ProfileDonePayload(BaseModel):
