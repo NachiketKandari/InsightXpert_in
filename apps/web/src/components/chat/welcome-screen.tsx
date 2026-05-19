@@ -3,13 +3,15 @@
 import { useRef, useState, useCallback, useEffect, useMemo, startTransition, type KeyboardEvent } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Shuffle } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Textarea } from "@/components/ui/textarea";
 import { DatabasePickerPanel } from "@/components/dataset/database-picker-panel";
 import { InputToolbar } from "./input-toolbar";
 import { useChatStore } from "@/stores/chat-store";
 import { useClientConfigStore } from "@/stores/client-config-store";
 import { useVoiceInput } from "@/hooks/use-voice-input";
-import { useSampleQuestions } from "@/hooks/use-sample-questions";
+import { useDatabases } from "@/hooks/use-databases";
+import { useSampleQuestions, fetchProfile } from "@/hooks/use-sample-questions";
 
 function pickRandom(pool: string[], count: number, exclude?: string[]): string[] {
   const filtered = exclude ? pool.filter((q) => !exclude.includes(q)) : [...pool];
@@ -50,6 +52,24 @@ export function WelcomeScreen({ onSendMessage, onStop, isStreaming }: WelcomeScr
   const { voiceState, voiceError, toggleVoice, clearVoiceText } = useVoiceInput(setValue);
   const selectedDbId = useChatStore((s) => s.selectedDbId);
   const { data: sampleData } = useSampleQuestions(selectedDbId ?? undefined);
+  const { data: databases = [] } = useDatabases();
+  const queryClient = useQueryClient();
+
+  // Pre-fetch profiles for ALL databases in parallel as soon as the list
+  // arrives, so sample questions are already cached when the user switches
+  // databases. TanStack Query deduplicates: if the selected DB's profile is
+  // already in-flight from useSampleQuestions, prefetchQuery reuses the same
+  // promise instead of firing a duplicate request.
+  useEffect(() => {
+    if (databases.length === 0) return;
+    for (const db of databases) {
+      queryClient.prefetchQuery({
+        queryKey: ["profile", db.db_id],
+        queryFn: () => fetchProfile(db.db_id),
+        staleTime: 30_000,
+      });
+    }
+  }, [databases, queryClient]);
 
   // Build pool from per-DB sample questions, refreshing when data changes
   const allQuestions = useMemo(
@@ -58,11 +78,17 @@ export function WelcomeScreen({ onSendMessage, onStop, isStreaming }: WelcomeScr
   );
 
   // Re-pick when the question pool changes (new DB, new generation).
-  // Wrap in startTransition to avoid "setState synchronously in effect" lint error.
+  // Clear when switching to a DB that has no sample questions yet, so stale
+  // chips from the previous DB don't linger.
   useEffect(() => {
     if (allQuestions.length > 0) {
       startTransition(() => {
         setQuestions(pickRandom(allQuestions, 3));
+        setShuffleKey((k) => k + 1);
+      });
+    } else {
+      startTransition(() => {
+        setQuestions([]);
         setShuffleKey((k) => k + 1);
       });
     }

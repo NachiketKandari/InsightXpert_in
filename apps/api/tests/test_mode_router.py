@@ -16,6 +16,12 @@ from insightxpert_api.config import get_settings
 from insightxpert_api.services import mode_router as mod
 
 
+@pytest.fixture(autouse=True)
+def _reset_router_clients() -> None:
+    """Discard cached HTTP clients so each test starts with a clean slate."""
+    mod._reset_mode_router_clients()
+
+
 # Live-call expectations: (question, expected_mode).
 # Curated to cover the BASIC / AGENTIC boundary cases called out in the prompt.
 SAMPLES: list[tuple[str, str]] = [

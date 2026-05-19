@@ -48,7 +48,8 @@ class Settings(BaseSettings):
     db_max_overflow: int = 10
     db_pool_timeout: int = 10
     db_pool_pre_ping: bool = False  # transaction pooler handles dead conns
-    db_pool_recycle: int = 1800
+    db_pool_recycle: int = 600
+    db_connect_timeout: int = 10
 
     db_background_pool_size: int = 2
     db_background_max_overflow: int = 0

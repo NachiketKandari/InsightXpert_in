@@ -25,7 +25,7 @@ export const viewport: Viewport = {
 export const metadata: Metadata = {
   title: "InsightXpert - AI Data Analyst",
   description:
-    "AI-powered analytics for Indian digital payment transactions. Ask questions in natural language.",
+    "Conversational analytics for any database. Ask questions in natural language and get answers backed by SQL.",
   icons: {
     icon: [{ url: "/icon.svg", type: "image/svg+xml" }],
     apple: "/apple-icon.png",

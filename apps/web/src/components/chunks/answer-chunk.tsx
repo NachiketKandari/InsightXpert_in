@@ -122,6 +122,28 @@ function parseSections(markdown: string): {
   return { preamble, sections };
 }
 
+/** Extract all footnote definition lines from markdown. */
+function extractAllFootnoteDefinitions(markdown: string): string {
+  const re = /^\[\^[^\]]+\]:\s*[^\n]*$/gm;
+  const defs: string[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(markdown)) !== null) defs.push(m[0]);
+  return defs.join("\n");
+}
+
+/** Build a map of footnote id → definition text (without {rows=} directive). */
+function buildFootnoteDefMap(markdown: string): Record<string, string> {
+  const map: Record<string, string> = {};
+  const re = /^\[\^([^\]]+)\]:\s*([^\n]*)$/gm;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(markdown)) !== null) {
+    const id = m[1];
+    const body = m[2].replace(/\s*\{rows=[^}]*\}/, "").trim();
+    map[id] = body;
+  }
+  return map;
+}
+
 /** Shared markdown renderer for analyst sections. */
 function AnalystMarkdown({
   content,
@@ -305,7 +327,7 @@ function AnswerChunkInner({ content, messageId }: AnswerChunkProps) {
   // 5. Parse the {rows=...} footnote directives from the answer_synthesizer
   //    prompt's References section to wire [^N] clicks to data-table rows.
   // 6. Strip {rows=...} directives from displayed text.
-  const { footnoteRows, displayContent } = useMemo(() => {
+  const { footnoteRows, displayContent, fullPreprocessed } = useMemo(() => {
     const sanitized = stripAnsiEscapes(content);
     const { processed: bracketFixed } =
       convertBracketCitationsToFootnotes(sanitized);
@@ -313,8 +335,32 @@ function AnswerChunkInner({ content, messageId }: AnswerChunkProps) {
     const withBackfilledFootnotes = fixDanglingFootnotes(expanded);
     const rows = parseFootnoteRowMap(withBackfilledFootnotes);
     const stripped = stripRowsDirectives(withBackfilledFootnotes);
-    return { footnoteRows: rows, displayContent: stripped };
+    return {
+      footnoteRows: rows,
+      displayContent: stripped,
+      fullPreprocessed: withBackfilledFootnotes,
+    };
   }, [content]);
+
+  // Extract all footnote definitions so they can be injected into every
+  // section's ReactMarkdown instance. Without this, remarkGfmFootnotes
+  // can't resolve [^N] markers in sections 1-4 when definitions are in
+  // section 5 (References).
+  const allFootnoteDefs = useMemo(
+    () => extractAllFootnoteDefinitions(fullPreprocessed),
+    [fullPreprocessed],
+  );
+  const footnoteDefMap = useMemo(
+    () => buildFootnoteDefMap(fullPreprocessed),
+    [fullPreprocessed],
+  );
+  const withDefs = useCallback(
+    (sectionContent: string) =>
+      allFootnoteDefs ? sectionContent + "\n\n" + allFootnoteDefs : sectionContent,
+    [allFootnoteDefs],
+  );
+
+  const [activeCitation, setActiveCitation] = useState<string | null>(null);
 
   const setMessageHighlight = useChatStore((s) => s.setMessageHighlight);
 
@@ -322,8 +368,10 @@ function AnswerChunkInner({ content, messageId }: AnswerChunkProps) {
     (footnoteId: string) => {
       if (!messageId) return;
       const rowIndices = footnoteRows[footnoteId] ?? [];
-      if (rowIndices.length === 0) return;
-      setMessageHighlight({ messageId, rowIndices });
+      if (rowIndices.length > 0) {
+        setMessageHighlight({ messageId, rowIndices });
+      }
+      setActiveCitation((prev) => (prev === footnoteId ? null : footnoteId));
     },
     [messageId, footnoteRows, setMessageHighlight],
   );
@@ -342,7 +390,7 @@ function AnswerChunkInner({ content, messageId }: AnswerChunkProps) {
         <div className="space-y-3">
           {preamble && (
             <AnalystMarkdown
-              content={preamble}
+              content={withDefs(preamble)}
               onFootnoteClick={handleFootnoteClick}
             />
           )}
@@ -353,7 +401,7 @@ function AnswerChunkInner({ content, messageId }: AnswerChunkProps) {
                 {section.title}
               </h3>
               <AnalystMarkdown
-                content={section.content}
+                content={withDefs(section.content)}
                 onFootnoteClick={handleFootnoteClick}
               />
             </div>
@@ -365,10 +413,48 @@ function AnswerChunkInner({ content, messageId }: AnswerChunkProps) {
                 <CollapsibleSection
                   key={`secondary-${i}`}
                   title={section.title}
-                  content={section.content}
+                  content={withDefs(section.content)}
                   onFootnoteClick={handleFootnoteClick}
                 />
               ))}
+            </div>
+          )}
+
+          {/* Citation detail card */}
+          {activeCitation && footnoteDefMap[activeCitation] && (
+            <div className="mt-3 p-3 rounded-lg border border-primary/20 bg-primary/5 dark:bg-primary/10">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-semibold text-primary mb-1">
+                    Source [{activeCitation}]
+                  </p>
+                  <p className="text-sm text-foreground/85 leading-relaxed">
+                    {footnoteDefMap[activeCitation]}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveCitation(null)}
+                  className="shrink-0 size-5 inline-flex items-center justify-center rounded text-muted-foreground hover:text-foreground transition-colors"
+                  aria-label="Close citation"
+                >
+                  &times;
+                </button>
+              </div>
+              {(footnoteRows[activeCitation]?.length ?? 0) > 0 && (
+                <button
+                  type="button"
+                  className="mt-2 text-xs font-medium text-primary hover:text-primary/80 underline underline-offset-2 transition-colors"
+                  onClick={() => {
+                    const rowIndices = footnoteRows[activeCitation] ?? [];
+                    if (rowIndices.length > 0 && messageId) {
+                      setMessageHighlight({ messageId, rowIndices });
+                    }
+                  }}
+                >
+                  View in data table &rarr;
+                </button>
+              )}
             </div>
           )}
         </div>

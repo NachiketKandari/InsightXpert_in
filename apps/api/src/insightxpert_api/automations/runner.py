@@ -21,6 +21,7 @@ from typing import Any
 from fastapi import FastAPI
 
 from ..db.connector import DatabaseConnector
+from ..db.engine import get_background_engine
 from ..logging import get_logger
 from ..services.database_service import DatabaseService
 from . import notifications as notif_module
@@ -106,9 +107,10 @@ async def _execute_one(
         # the metric is joinable to a real persisted row, not a brittle
         # (user_id, created_at) window.
         persisted_run_id: str | None = None
+        _bg = get_background_engine()
 
         try:
-            auto = repository.get_automation(automation_id)
+            auto = repository.get_automation(automation_id, _engine=_bg)
             auto_for_usage = auto
             if auto is None:
                 return RunBatchItem(
@@ -137,7 +139,7 @@ async def _execute_one(
                     "automation_id": automation_id,
                     "status": "error",
                     "error_message": "no sql queries configured",
-                })
+                }, _engine=_bg)
                 persisted_run_id = _err_run["id"]
                 AutomationService().mark_run_completed(automation_id, int(time.time()))
                 log.error(
@@ -172,7 +174,7 @@ async def _execute_one(
                     "automation_id": automation_id,
                     "status": "error",
                     "error_message": f"db not found: {auto['db_id']}",
-                })
+                }, _engine=_bg)
                 persisted_run_id = _err_run["id"]
                 AutomationService().mark_run_completed(automation_id, int(time.time()))
                 log.error(
@@ -200,7 +202,7 @@ async def _execute_one(
                     "status": "error",
                     "error_message": str(exc),
                     "execution_time_ms": execution_ms,
-                })
+                }, _engine=_bg)
                 persisted_run_id = _err_run["id"]
                 AutomationService().mark_run_completed(automation_id, int(time.time()))
                 log.error(
@@ -223,7 +225,7 @@ async def _execute_one(
             )
 
             # Gather trigger conditions + previous result for change_detection
-            trigger_rows = repository.list_triggers(automation_id)
+            trigger_rows = repository.list_triggers(automation_id, _engine=_bg)
             conditions = [
                 {
                     "type": t["type"],
@@ -239,7 +241,7 @@ async def _execute_one(
 
             previous_result: dict | None = None
             if conditions:
-                prev_runs = repository.list_runs(automation_id, limit=1)
+                prev_runs = repository.list_runs(automation_id, limit=1, _engine=_bg)
                 if prev_runs:
                     raw = prev_runs[0].get("result_json")
                     if isinstance(raw, str):
@@ -260,7 +262,7 @@ async def _execute_one(
                     "result_json": json.dumps(result_to_store),
                     "row_count": row_count,
                     "execution_time_ms": execution_ms,
-                })
+                }, _engine=_bg)
                 persisted_run_id = run["id"]
                 AutomationService().mark_run_completed(automation_id, int(time.time()))
                 log.info(
@@ -300,7 +302,7 @@ async def _execute_one(
                 "row_count": row_count,
                 "execution_time_ms": execution_ms,
                 "triggers_fired_json": json.dumps(trigger_results),
-            })
+            }, _engine=_bg)
             persisted_run_id = run["id"]
             AutomationService().mark_run_completed(automation_id, int(time.time()))
 

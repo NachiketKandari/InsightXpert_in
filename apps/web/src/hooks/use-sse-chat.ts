@@ -4,7 +4,6 @@ import { useCallback, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useChatStore } from "@/stores/chat-store";
 import { createSSEStream, type AgentMode } from "@/lib/sse-client";
-import { apiFetch } from "@/lib/api";
 import { parseChunk } from "@/lib/chunk-parser";
 import { useInsightStore } from "@/stores/insight-store";
 import { useSettingsStore } from "@/stores/settings-store";
@@ -330,55 +329,11 @@ export function useSSEChat() {
         abortRef.current = controller;
       };
 
-      if (agentMode === "auto") {
-        // Pre-flight: ask the server to classify the question. The server
-        // also re-classifies if a client sends `auto` to /chat directly, but
-        // routing client-side first lets us (a) show the routed mode + reason
-        // immediately as a synthetic chunk and (b) pass the resolved mode to
-        // /chat so the auto_routed chunk doesn't show up twice.
-        const stepId = generateStepId();
-        addAgentStep({
-          id: stepId,
-          label: "Choosing mode...",
-          status: "running",
-          timestamp: Date.now() / 1000,
-        });
-        lastRunningStepId = stepId;
-
-        (async () => {
-          let resolvedMode: AgentMode = "agentic"; // safe default
-          try {
-            const res = await apiFetch("/api/v1/chat/route", {
-              method: "POST",
-              body: JSON.stringify({ question: message, db_id: dbId }),
-            });
-            if (res.ok) {
-              const decision = (await res.json()) as {
-                mode: "basic" | "agentic";
-                reason: string;
-              };
-              resolvedMode = decision.mode;
-              // Inject the routing decision as a synthetic chunk so the
-              // ChunkRenderer pill renders at the top of the assistant
-              // message. Mirrors the server-side `auto_routed` payload shape.
-              appendChunk({
-                type: "auto_routed",
-                data: { mode: decision.mode, reason: decision.reason },
-                conversation_id: convId!,
-                timestamp: Date.now() / 1000,
-              });
-            }
-          } catch {
-            // Network error — fall back to agentic and let the server-side
-            // safety net handle the rest. No synthetic chunk emitted.
-          }
-          // Drop the "Choosing mode..." step now that we have a decision.
-          markLastRunningDone();
-          launchStream(resolvedMode);
-        })();
-      } else {
-        launchStream(agentMode);
-      }
+      // When agentMode is "auto", the server handles classification and
+      // emits an `auto_routed` chunk naturally via SSE — no client-side
+      // preflight needed. The server races classification against profile
+      // prefetch so it adds zero extra wall-clock time.
+      launchStream(agentMode);
     },
     [
       isActiveStreaming,

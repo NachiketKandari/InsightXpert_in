@@ -42,6 +42,19 @@ _PROMPT_PATH = (
 )
 _TEMPLATE = Template(_PROMPT_PATH.read_text())
 
+# Cached clients — reused across calls so we don't pay DNS+TLS+TCP per
+# classification. Reset in tests via _reset_mode_router_clients().
+_deepseek_client: "AsyncOpenAI | None" = None
+_gemini_client: "genai.Client | None" = None
+
+
+def _reset_mode_router_clients() -> None:
+    """Test hook: discard cached clients so tests can inject fresh ones."""
+    global _deepseek_client, _gemini_client
+    _deepseek_client = None
+    _gemini_client = None
+
+
 # Gemini Flash-Lite is purpose-built for low-latency classification. We force
 # this regardless of ``settings.gemini_chat_model`` because the router runs on
 # the critical-path before any pipeline activity is visible to the user, and
@@ -67,12 +80,14 @@ def _fallback(reason: str = "fallback (router error)") -> RouteDecision:
 
 async def _classify_via_deepseek(prompt: str, settings: Settings) -> str:
     """Classify using DeepSeek V4 Flash with JSON mode."""
-    from openai import AsyncOpenAI
-    client = AsyncOpenAI(
-        api_key=settings.deepseek_api_key,
-        base_url="https://api.deepseek.com",
-    )
-    resp = await client.chat.completions.create(
+    global _deepseek_client
+    if _deepseek_client is None:
+        from openai import AsyncOpenAI
+        _deepseek_client = AsyncOpenAI(
+            api_key=settings.deepseek_api_key,
+            base_url="https://api.deepseek.com",
+        )
+    resp = await _deepseek_client.chat.completions.create(
         model=_ROUTER_MODEL_DEEPSEEK,
         messages=[{"role": "user", "content": prompt}],
         temperature=0.0,
@@ -84,13 +99,15 @@ async def _classify_via_deepseek(prompt: str, settings: Settings) -> str:
 
 async def _classify_via_gemini(prompt: str, settings: Settings) -> str:
     """Classify using Gemini Flash-Lite with native JSON mode."""
-    client = genai.Client(api_key=settings.gemini_api_key)
+    global _gemini_client
+    if _gemini_client is None:
+        _gemini_client = genai.Client(api_key=settings.gemini_api_key)
     config = types.GenerateContentConfig(
         response_mime_type="application/json",
         temperature=0.0,
         max_output_tokens=128,
     )
-    resp = await client.aio.models.generate_content(
+    resp = await _gemini_client.aio.models.generate_content(
         model=_ROUTER_MODEL_GEMINI,
         contents=prompt,
         config=config,

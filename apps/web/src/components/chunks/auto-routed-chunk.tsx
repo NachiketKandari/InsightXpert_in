@@ -11,10 +11,10 @@ interface AutoRoutedData {
  * Compact pill rendered at the top of an assistant message when the chat
  * was sent in `auto` mode. Shows the routed mode + the classifier's reason.
  *
- * The chunk is emitted either by the FE pre-flight call to
- * `POST /api/v1/chat/route` (injected synthetically into the message) or by
- * the server-side fallback in `routes/chat.py` (when a client sent
- * `agent_mode="auto"` directly).
+ * The chunk is emitted by the server-side classifier in `routes/chat.py`
+ * when the client sends `agent_mode="auto"`. No client-side preflight is
+ * needed — the server races classification against profile prefetch so it
+ * adds no extra wall-clock time.
  */
 export function AutoRoutedChunk({ data }: { data: AutoRoutedData }) {
   const isAgentic = data.mode === "agentic";

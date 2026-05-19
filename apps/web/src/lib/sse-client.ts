@@ -6,10 +6,11 @@ export interface SSECallbacks {
   onError: (error: Error) => void;
 }
 
-// Three-state toggle. `"auto"` is the new default — the FE pre-routes via
-// POST /api/v1/chat/route to a concrete mode, then dispatches /chat with
-// the resolved mode. `deep_think` is deferred — see
-// `docs/deferred-features.md`. Do NOT add `"deep"` back here.
+// Three-state toggle. `"auto"` is the new default — the server handles
+// classification (races against profile prefetch, zero wall-clock cost) and
+// emits an `auto_routed` chunk via SSE. No client-side preflight needed.
+// `deep_think` is deferred — see `docs/deferred-features.md`.
+// Do NOT add `"deep"` back here.
 export type AgentMode = "basic" | "agentic" | "auto";
 
 // Tier-1 admin toggle. "auto" = no override (fall back to per-DB default or

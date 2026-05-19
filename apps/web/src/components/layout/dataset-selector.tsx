@@ -37,7 +37,12 @@ export function DatasetSelector() {
   const setSelectedDbId = useChatStore((s) => s.setSelectedDbId);
 
   const { data: databases, isLoading } = useDatabases();
-  const { regenerate: regenerateSampleQuestions } = useSampleQuestions(selectedDbId ?? undefined);
+  const {
+    profileQuery,
+    data: sampleQuestions,
+    regenerate: regenerateSampleQuestions,
+    ensure: ensureSampleQuestions,
+  } = useSampleQuestions(selectedDbId ?? undefined);
 
   // Auto-select the first DB when nothing is selected (or the previous
   // selection has disappeared). Driven by query state, not a fetch effect.
@@ -48,6 +53,25 @@ export function DatasetSelector() {
       setSelectedDbId(databases[0].db_id);
     }
   }, [databases, selectedDbId, setSelectedDbId]);
+
+  // When the user selects a DB that lacks sample questions, fire an
+  // idempotent background ensure so questions are ready by the time
+  // they open the sample-questions modal. Safe to call repeatedly —
+  // the backend no-ops when questions already exist or are pending.
+  useEffect(() => {
+    if (!selectedDbId) return;
+    const sq = sampleQuestions;
+    if (
+      profileQuery.data &&
+      (!sq ||
+       sq.status === "failed" ||
+       sq.status === "pending")
+    ) {
+      // Already pending — no need to re-trigger.
+      if (sq?.status === "pending") return;
+      ensureSampleQuestions.mutate();
+    }
+  }, [selectedDbId, sampleQuestions, profileQuery.data, ensureSampleQuestions]);
 
   // Trigger label: render whatever the user already chose — no fetch
   // dependency. Falls back to a sensible static string only when there is

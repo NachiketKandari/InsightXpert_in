@@ -698,6 +698,53 @@ async def regenerate_sample_questions(
     return {"status": existing.status.value if existing else "pending"}
 
 
+@router.post("/{db_id}/sample-questions/ensure", status_code=200)
+async def ensure_sample_questions(
+    db_id: str,
+    cu: CurrentUser = Depends(get_current_user),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    """Idempotently ensure sample questions exist for a database.
+
+    Safe to call on every DB-select — only triggers work when needed:
+    - ok / fallback → return as-is (no-op)
+    - pending → return as-is (generation already in flight)
+    - null / failed → spawn background generation
+    - no profile → 404
+
+    This lets the FE prefetch questions when the user selects a DB rather
+    than waiting until they open the sample-questions modal.
+    """
+    _validate_db_id(db_id)
+    prof = _prof_svc(settings)
+    if prof.load(cu.id, db_id) is None:
+        raise HTTPException(status_code=404, detail="profile_not_found")
+
+    existing = sq_repo.get_sample_questions(db_id)
+
+    if existing is not None and existing.status in ("ok", "fallback"):
+        return {"status": existing.status.value, "message": "Questions already exist"}
+
+    if existing is not None and existing.status == "pending":
+        return {"status": "pending", "message": "Generation already in progress"}
+
+    # Null or failed — spawn background generation
+    from ..llm import create_chat_llm
+    from ..routes.chat import _chat_model
+    llm = create_chat_llm(settings) if (
+        (settings.llm_provider == "deepseek" and settings.deepseek_api_key)
+        or settings.gemini_api_key
+    ) else None
+    _spawn_background_task(
+        run_sample_questions_job(
+            db_id=db_id, llm=llm, model_name=_chat_model(settings),
+            emitter=None, session_id=cu.id,
+        )
+    )
+    get_process_profile_cache().invalidate(db_id, "base")
+    return {"status": "pending", "message": "Generation started"}
+
+
 # Fallback when trailing slash variant is hit (FastAPI defaults redirect; this keeps
 # strict-slash clients happy without a redirect hop).
 @router.get("/", include_in_schema=False, response_model=list[DatabaseListItem])

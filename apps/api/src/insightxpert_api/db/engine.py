@@ -38,6 +38,15 @@ def _apply_sqlite_pragmas(dbapi_connection, _connection_record) -> None:  # noqa
         cursor.close()
 
 
+def _apply_statement_timeout(dbapi_connection, _connection_record) -> None:
+    """Set per-connection statement_timeout for Postgres."""
+    cursor = dbapi_connection.cursor()
+    try:
+        cursor.execute("SET statement_timeout = '30s'")
+    finally:
+        cursor.close()
+
+
 def _build_engine(*, pool_size: int, max_overflow: int, pool_timeout: int) -> Engine:
     settings = get_settings()
     url = settings.database_url
@@ -56,8 +65,9 @@ def _build_engine(*, pool_size: int, max_overflow: int, pool_timeout: int) -> En
     connect_args: dict[str, object] = {}
     if "+psycopg" in driver and "+psycopg2" not in driver:
         connect_args["prepare_threshold"] = None
+        connect_args["connect_timeout"] = settings.db_connect_timeout
 
-    return create_engine(
+    engine = create_engine(
         url,
         future=True,
         pool_size=pool_size,
@@ -67,6 +77,8 @@ def _build_engine(*, pool_size: int, max_overflow: int, pool_timeout: int) -> En
         pool_recycle=settings.db_pool_recycle,
         connect_args=connect_args,
     )
+    event.listen(engine, "connect", _apply_statement_timeout)
+    return engine
 
 
 def get_request_engine() -> Engine:

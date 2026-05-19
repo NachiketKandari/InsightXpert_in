@@ -123,6 +123,8 @@ def resolve_connector(
 
         if not isinstance(config, PostgresConnection):
             raise ValueError("postgres dispatch requires a PostgresConnection config")
+        # NOTE: Caller MUST call .dispose() on the returned connector when done.
+        # PostgresConnector owns its own connection pool (pool_size=2).
         return PostgresConnector(config)
     if kind in ("libsql", "sqlite_external"):
         raise NotImplementedError(

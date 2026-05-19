@@ -144,7 +144,7 @@ export function SampleQuestionsModal({ open, onOpenChange, dbId }: SampleQuestio
       >
         {/* Header */}
         <div className="px-5 pt-4 pb-3 border-b border-border/50 shrink-0 space-y-3">
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2.5 pr-12">
             <div className="flex items-center justify-center size-7 rounded-md bg-primary/10 dark:bg-cyan-accent/10">
               <MessageSquareText className="size-3.5 text-primary dark:text-cyan-accent" />
             </div>

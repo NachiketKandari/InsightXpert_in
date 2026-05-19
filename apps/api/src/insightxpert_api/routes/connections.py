@@ -54,11 +54,13 @@ async def test_connection(
 ) -> dict[str, Any]:
     cfg = _build_typed_config(req.kind, req.config)
     if req.kind == "postgres":
+        conn = PostgresConnector(cfg)
         try:
-            conn = PostgresConnector(cfg)
             tables = conn.list_tables()
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"connection failed: {e}")
+        finally:
+            conn.dispose()
         return {"ok": True, "tables": tables}
     if req.kind == "libsql":
         # Reserved by the Turso cutover plan — surface a clear 501 rather than

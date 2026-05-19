@@ -100,3 +100,7 @@ class PostgresConnector:
         return [
             {"name": r[0], "type": r[1], "nullable": r[2] == "YES"} for r in rows
         ]
+
+    def dispose(self) -> None:
+        """Close all connections in the pool. Safe to call multiple times."""
+        self._engine.dispose()

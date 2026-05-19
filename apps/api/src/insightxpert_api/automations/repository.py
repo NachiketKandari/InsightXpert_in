@@ -13,7 +13,7 @@ import time
 import uuid
 from typing import Any
 
-from sqlalchemy import and_, delete, desc, func, insert, select, text, update
+from sqlalchemy import Engine, and_, delete, desc, func, insert, select, text, update
 
 from ..db.engine import get_background_engine, get_engine
 from .table import (
@@ -77,8 +77,9 @@ def insert_automation_with_cap(values: dict[str, Any], *, cap: int) -> bool:
         return True
 
 
-def get_automation(automation_id: str) -> dict[str, Any] | None:
-    with get_engine().connect() as conn:
+def get_automation(automation_id: str, *, _engine: Engine | None = None) -> dict[str, Any] | None:
+    engine = _engine or get_engine()
+    with engine.connect() as conn:
         row = conn.execute(
             select(automations).where(automations.c.id == automation_id)
         ).first()
@@ -156,9 +157,10 @@ def delete_automation(automation_id: str) -> bool:
     return (result.rowcount or 0) > 0
 
 
-def list_due_automations(now_ts: int) -> list[dict[str, Any]]:
+def list_due_automations(now_ts: int, *, _engine: Engine | None = None) -> list[dict[str, Any]]:
     """Active automations whose next_run_at <= now_ts (or null)."""
-    with get_engine().connect() as conn:
+    engine = _engine or get_engine()
+    with engine.connect() as conn:
         rows = conn.execute(
             select(automations).where(
                 and_(
@@ -231,8 +233,9 @@ def claim_due_automations(
         return [dict(r._mapping) for r in rows]
 
 
-def list_active_automations() -> list[dict[str, Any]]:
-    with get_engine().connect() as conn:
+def list_active_automations(*, _engine: Engine | None = None) -> list[dict[str, Any]]:
+    engine = _engine or get_engine()
+    with engine.connect() as conn:
         rows = conn.execute(
             select(automations).where(automations.c.is_active.is_(True))
         ).all()
@@ -274,8 +277,9 @@ def replace_triggers(
         conn.execute(insert(automation_triggers), rows)
 
 
-def list_triggers(automation_id: str) -> list[dict[str, Any]]:
-    with get_engine().connect() as conn:
+def list_triggers(automation_id: str, *, _engine: Engine | None = None) -> list[dict[str, Any]]:
+    engine = _engine or get_engine()
+    with engine.connect() as conn:
         rows = conn.execute(
             select(automation_triggers)
             .where(automation_triggers.c.automation_id == automation_id)
@@ -289,15 +293,17 @@ def list_triggers(automation_id: str) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
-def insert_run(values: dict[str, Any]) -> dict[str, Any]:
+def insert_run(values: dict[str, Any], *, _engine: Engine | None = None) -> dict[str, Any]:
     values = {"id": _uuid(), "created_at": _now(), **values}
-    with get_engine().begin() as conn:
+    engine = _engine or get_engine()
+    with engine.begin() as conn:
         conn.execute(insert(automation_runs).values(**values))
     return values
 
 
-def list_runs(automation_id: str, limit: int = 20) -> list[dict[str, Any]]:
-    with get_engine().connect() as conn:
+def list_runs(automation_id: str, limit: int = 20, *, _engine: Engine | None = None) -> list[dict[str, Any]]:
+    engine = _engine or get_engine()
+    with engine.connect() as conn:
         rows = conn.execute(
             select(automation_runs)
             .where(automation_runs.c.automation_id == automation_id)

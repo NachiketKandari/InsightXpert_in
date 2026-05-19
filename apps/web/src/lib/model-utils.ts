@@ -1,5 +1,6 @@
 export const PROVIDER_LABELS: Record<string, string> = {
   gemini: "Gemini",
+  deepseek: "DeepSeek",
   ollama: "Ollama",
   vertex_ai: "Vertex AI",
 };

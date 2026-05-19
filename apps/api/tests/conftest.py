@@ -21,6 +21,7 @@ def _env(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     """Populate required env for every test."""
     monkeypatch.setenv("SESSION_SECRET", "s" * 32)
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_PROVIDER", "gemini")
     monkeypatch.setenv("APP_ENV", "local")
     # Force a per-test SQLite file. Without this, .env.local (loaded from the
     # api package root) leaks the dev DATABASE_URL into tests — including

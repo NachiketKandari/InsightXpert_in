@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Plus, PanelLeftClose, Search, X } from "lucide-react";
+import { Plus, PanelLeftClose, Search, X, ListChecks } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -21,6 +21,8 @@ import {
 export function LeftSidebar() {
   const clearActiveConversation = useChatStore((s) => s.clearActiveConversation);
   const toggleLeftSidebar = useChatStore((s) => s.toggleLeftSidebar);
+  const setSampleQuestionsOpen = useChatStore((s) => s.setSampleQuestionsOpen);
+  const selectedDbId = useChatStore((s) => s.selectedDbId);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
@@ -149,7 +151,7 @@ export function LeftSidebar() {
 
       {!isSearchActive && (
         <>
-          <div className="p-3">
+          <div className="p-3 space-y-1.5">
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -163,6 +165,21 @@ export function LeftSidebar() {
               </TooltipTrigger>
               <TooltipContent side="right">Start a new conversation</TooltipContent>
             </Tooltip>
+            {selectedDbId && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    className="w-full justify-start gap-2 text-xs text-muted-foreground hover:text-foreground"
+                    onClick={() => setSampleQuestionsOpen(true)}
+                  >
+                    <ListChecks className="size-3.5" />
+                    Sample questions
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="right">Browse suggested questions for this database</TooltipContent>
+              </Tooltip>
+            )}
           </div>
           <Separator />
         </>

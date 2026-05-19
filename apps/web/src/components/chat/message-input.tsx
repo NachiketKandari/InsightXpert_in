@@ -64,7 +64,7 @@ export function MessageInput({ onSend, onStop, isStreaming }: MessageInputProps)
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Ask about Indian digital payments..."
+          placeholder="Ask a question about your data…"
           className="min-h-[36px] max-h-[140px] flex-1 resize-none border-0 bg-transparent px-1 py-1.5 text-sm shadow-none focus-visible:ring-0"
           rows={1}
         />

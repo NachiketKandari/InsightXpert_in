@@ -1,17 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { ListChecks, Share2 } from "lucide-react";
 import { useSSEChat } from "@/hooks/use-sse-chat";
 import { useChatStore } from "@/stores/chat-store";
 import { useSettingsStore } from "@/stores/settings-store";
+import { useDatabases } from "@/hooks/use-databases";
 import { WelcomeScreen } from "@/components/chat/welcome-screen";
 import { MessageList } from "@/components/chat/message-list";
 import { MessageInput } from "@/components/chat/message-input";
 import { Button } from "@/components/ui/button";
 import { ShareDialog } from "@/components/chat/share-dialog";
-import { apiCall } from "@/lib/api";
-import type { DatabaseListItem } from "@/types/database";
 
 export function ChatPanel() {
   const { sendMessage, stopStreaming, isStreaming } = useSSEChat();
@@ -30,13 +29,7 @@ export function ChatPanel() {
     isLoadingConversation && !!conversation && conversation.messages.length === 0;
 
   const [shareOpen, setShareOpen] = useState(false);
-  const [databases, setDatabases] = useState<DatabaseListItem[]>([]);
-
-  useEffect(() => {
-    apiCall<DatabaseListItem[]>("/api/v1/databases").then((data) => {
-      if (data) setDatabases(data);
-    });
-  }, []);
+  const { data: databases = [] } = useDatabases();
 
   const setSampleQuestionsOpen = useChatStore((s) => s.setSampleQuestionsOpen);
   const conversationId = conversation?.id ?? null;
