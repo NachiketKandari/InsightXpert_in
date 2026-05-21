@@ -289,6 +289,33 @@ def list_triggers(automation_id: str, *, _engine: Engine | None = None) -> list[
     return [dict(r._mapping) for r in rows]
 
 
+def list_triggers_batch(
+    automation_ids: list[str], *, _engine: Engine | None = None
+) -> dict[str, list[dict[str, Any]]]:
+    """Fetch triggers for multiple automations in a single query.
+
+    Returns a dict mapping ``automation_id`` → list of trigger dicts (sorted by
+    ordinal). Eliminates the N+1 pattern in ``AutomationService.list_for_user``.
+    """
+    if not automation_ids:
+        return {}
+    engine = _engine or get_engine()
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(automation_triggers)
+            .where(automation_triggers.c.automation_id.in_(automation_ids))
+            .order_by(
+                automation_triggers.c.automation_id,
+                automation_triggers.c.ordinal,
+            )
+        ).all()
+    result: dict[str, list[dict[str, Any]]] = {aid: [] for aid in automation_ids}
+    for r in rows:
+        d = dict(r._mapping)
+        result[d["automation_id"]].append(d)
+    return result
+
+
 # ---------------------------------------------------------------------------
 # automation_runs
 # ---------------------------------------------------------------------------

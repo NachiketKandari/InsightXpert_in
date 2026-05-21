@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
@@ -86,7 +87,7 @@ class MeResponse(BaseModel):
 
 @router.get("/me", response_model=MeResponse)
 async def me(cu: CurrentUser = Depends(get_current_user)) -> MeResponse:
-    full = service.get_public(cu.id)
+    full = await asyncio.to_thread(service.get_public, cu.id)
     if full is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="unauthorized")
     return MeResponse(

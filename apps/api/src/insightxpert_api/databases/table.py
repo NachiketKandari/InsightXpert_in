@@ -10,6 +10,7 @@ from __future__ import annotations
 from sqlalchemy import (
     CheckConstraint,
     Column,
+    Index,
     Integer,
     String,
     Table,
@@ -47,6 +48,9 @@ databases_table = Table(
         name="databases_kind_check",
     ),
 )
+
+Index("ix_databases_owner_user_id", databases_table.c.owner_user_id)
+Index("ix_databases_visibility", databases_table.c.visibility)
 
 database_shares = Table(
     "database_shares",

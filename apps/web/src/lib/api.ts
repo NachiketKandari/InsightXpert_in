@@ -28,10 +28,20 @@ export async function apiFetch(
 ): Promise<Response> {
   const { skipAuthRedirect, ...rest } = options;
   const isFormData = rest.body instanceof FormData;
+  const method = (rest.method || "GET").toUpperCase();
+  // Let the browser honour server Cache-Control headers for reads.
+  // Writes (POST/PUT/PATCH/DELETE) stay "no-store". Callers can still
+  // override via options.cache if needed.
+  const cache =
+    "cache" in rest
+      ? rest.cache
+      : method === "GET" || method === "HEAD"
+        ? "default"
+        : "no-store";
   const res = await fetch(`${API_BASE_URL}${path}`, {
     ...rest,
     credentials: "include",
-    cache: "no-store",
+    cache,
     headers: {
       // Don't set Content-Type for FormData — the browser sets it with the
       // correct multipart boundary automatically.

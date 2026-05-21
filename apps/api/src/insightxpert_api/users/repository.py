@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import delete, insert, select, update
+from sqlalchemy import delete, func, insert, select, update
 
 from ..db.engine import get_engine
 from .models import UserWithHash
@@ -80,9 +80,9 @@ def delete_user(user_id: str) -> None:
 
 def count_active_admins() -> int:
     with get_engine().connect() as conn:
-        rows = conn.execute(
-            select(users_table).where(
+        row = conn.execute(
+            select(func.count()).select_from(users_table).where(
                 (users_table.c.role == "admin") & (users_table.c.is_active == 1)
             )
-        ).all()
-    return len(rows)
+        ).scalar()
+    return int(row or 0)

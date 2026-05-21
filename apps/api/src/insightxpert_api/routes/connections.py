@@ -10,10 +10,11 @@ Mounted under ``/api/v1/connections`` by ``main.create_app``.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field
 
 from ..auth import CurrentUser, get_current_user
@@ -95,9 +96,11 @@ async def create_connection(
 
 @router.get("")
 async def list_connections(
+    response: Response,
     cu: CurrentUser = Depends(get_current_user),
 ) -> list[dict[str, Any]]:
-    rows = databases_repo.list_owned(cu.id)
+    response.headers["Cache-Control"] = "private, max-age=10"
+    rows = await asyncio.to_thread(databases_repo.list_owned, cu.id)
     # NEVER return connection_config_encrypted or its decrypted contents.
     # Bundled / uploaded sqlite_file rows are surfaced via /api/v1/databases.
     return [

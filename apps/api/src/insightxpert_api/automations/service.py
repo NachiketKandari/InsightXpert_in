@@ -83,6 +83,64 @@ class AutomationService:
     # ---- helpers ---------------------------------------------------------
 
     @staticmethod
+    def _hydrate_batch(autos: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Hydrate a list of automations with a single batch trigger query.
+
+        Eliminates the N+1 pattern in ``list_for_user`` and
+        ``list_for_user_paged`` by loading all triggers in one ``WHERE IN``.
+        """
+        ids = [a["id"] for a in autos]
+        triggers_by_auto = repository.list_triggers_batch(ids)
+        result: list[dict[str, Any]] = []
+        for auto in autos:
+            triggers = triggers_by_auto.get(auto["id"], [])
+            trigger_conditions = [
+                {
+                    "type": t["type"],
+                    "column": t["column"],
+                    "operator": t["operator"],
+                    "value": t["value"],
+                    "change_percent": t["change_percent"],
+                    "scope": t["scope"],
+                    "nl_text": t["nl_text"],
+                }
+                for t in triggers
+            ]
+            try:
+                sql_queries = json.loads(auto.get("sql_queries_json") or "[]")
+                if not isinstance(sql_queries, list):
+                    sql_queries = []
+            except json.JSONDecodeError:
+                sql_queries = []
+            workflow_graph: dict | None = None
+            raw_wf = auto.get("workflow_graph_json")
+            if raw_wf:
+                try:
+                    workflow_graph = json.loads(raw_wf)
+                except json.JSONDecodeError:
+                    workflow_graph = None
+            result.append({
+                "id": auto["id"],
+                "name": auto["name"],
+                "description": auto.get("description"),
+                "nl_query": auto["nl_query"],
+                "sql_queries": sql_queries,
+                "db_id": auto["db_id"],
+                "cron_expression": auto["cron_expression"],
+                "trigger_conditions": trigger_conditions,
+                "is_active": bool(auto["is_active"]),
+                "owner_user_id": auto["owner_user_id"],
+                "source_conversation_id": auto.get("source_conversation_id"),
+                "source_message_id": auto.get("source_message_id"),
+                "workflow_graph": workflow_graph,
+                "last_run_at": auto.get("last_run_at"),
+                "next_run_at": auto.get("next_run_at"),
+                "created_at": auto["created_at"],
+                "updated_at": auto["updated_at"],
+            })
+        return result
+
+    @staticmethod
     def _hydrate(auto: dict[str, Any]) -> dict[str, Any]:
         """Attach trigger_conditions + sql_queries + parsed workflow_graph."""
         triggers = repository.list_triggers(auto["id"])
@@ -206,7 +264,7 @@ class AutomationService:
             repository.list_automations(owner_user_id=None) if is_admin
             else repository.list_automations(owner_user_id=user_id)
         )
-        return [self._hydrate(r) for r in rows]
+        return self._hydrate_batch(rows)
 
     def list_for_user_paged(
         self,
@@ -219,7 +277,7 @@ class AutomationService:
         rows, total = repository.list_for_user_paged(
             user_id, is_admin=is_admin, limit=limit, offset=offset
         )
-        return [self._hydrate(r) for r in rows], total
+        return self._hydrate_batch(rows), total
 
     def update(
         self,

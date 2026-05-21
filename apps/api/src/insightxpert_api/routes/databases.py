@@ -148,6 +148,7 @@ def _cached_list_tables(path: str) -> list[str]:
 
 @router.get("", response_model=list[DatabaseListItem])
 async def list_databases(
+    response: Response,
     cu: CurrentUser = Depends(get_current_user),
     settings: Settings = Depends(get_settings),
 ) -> list[DatabaseListItem]:
@@ -159,14 +160,16 @@ async def list_databases(
     filtered by ownership / shares. Admins bypass the filter and see everything.
     """
     svc = _db_svc(settings)
-    refs = await asyncio.to_thread(svc.list, cu.id)
     is_admin = cu.role == "admin"
-    visible_ids = await asyncio.to_thread(
-        visibility_service.visible_ids, cu.id, is_admin
+    response.headers["Cache-Control"] = "private, max-age=10"
+    # Run all three independent data fetches in parallel — they have no
+    # dependency on each other. Wall time drops from sum-of-three to
+    # max-of-three.
+    refs, visible_ids, summaries = await asyncio.gather(
+        asyncio.to_thread(svc.list, cu.id),
+        asyncio.to_thread(visibility_service.visible_ids, cu.id, is_admin),
+        asyncio.to_thread(profiles_repo.list_summaries),
     )
-    # One DB round-trip for all profile summaries — replaces the per-card
-    # GET /databases/{id}/profile fetches the FE used to make.
-    summaries = await asyncio.to_thread(profiles_repo.list_summaries)
     out: list[DatabaseListItem] = []
     for r in refs:
         # If there's no row in the `databases` table for a given db_id the
@@ -853,6 +856,7 @@ async def ensure_sample_questions(
 
 @router.get("/{db_id}/sample-questions/status")
 async def get_sample_questions_status(
+    response: Response,
     db_id: str,
     cu: CurrentUser = Depends(get_current_user),
     settings: Settings = Depends(get_settings),
@@ -862,12 +866,13 @@ async def get_sample_questions_status(
     Used by the FE to poll while a background generation is in flight, so the
     welcome-screen chips / progress bar can update without an active SSE stream.
     """
+    response.headers["Cache-Control"] = "private, max-age=2"
     _validate_db_id(db_id)
     prof = _prof_svc(settings)
-    if prof.load(cu.id, db_id) is None:
+    if await asyncio.to_thread(prof.load, cu.id, db_id) is None:
         raise HTTPException(status_code=404, detail="profile_not_found")
 
-    sq = sq_repo.get_sample_questions(db_id)
+    sq = await asyncio.to_thread(sq_repo.get_sample_questions, db_id)
     if sq is None:
         return {"status": "not_found", "generated_at": None, "progress": None}
 
@@ -912,12 +917,14 @@ async def set_profile_hints(
 
 @router.get("/{db_id}/profile-hints")
 async def get_profile_hints(
+    response: Response,
     db_id: str,
     settings: Settings = Depends(get_settings),
 ) -> dict[str, str | None]:
     """Get stored pre-profiling domain hints for this database."""
+    response.headers["Cache-Control"] = "private, max-age=30"
     prof_svc = _prof_svc(settings)
-    hints = prof_svc.get_user_hints("", db_id)
+    hints = await asyncio.to_thread(prof_svc.get_user_hints, "", db_id)
     return {"hints": hints}
 
 
@@ -974,12 +981,14 @@ async def delete_column_override(
 
 @router.get("/{db_id}/profile/overrides")
 async def get_profile_overrides(
+    response: Response,
     db_id: str,
     settings: Settings = Depends(get_settings),
 ) -> list[dict]:
     """Return all field overrides for a database profile."""
+    response.headers["Cache-Control"] = "private, max-age=30"
     prof_svc = _prof_svc(settings)
-    return prof_svc.get_overrides(db_id)
+    return await asyncio.to_thread(prof_svc.get_overrides, db_id)
 
 
 # Fallback when trailing slash variant is hit (FastAPI defaults redirect; this keeps

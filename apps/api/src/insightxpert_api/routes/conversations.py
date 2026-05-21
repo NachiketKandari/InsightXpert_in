@@ -63,6 +63,7 @@ def _list(user_id: str) -> list[dict[str, Any]]:
             conversations.c.updated_at.desc(),
             conversations.c.created_at.desc(),
         )
+        .limit(200)
     )
     with get_engine().connect() as conn:
         rows = conn.execute(q).all()

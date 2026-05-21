@@ -30,6 +30,7 @@ database_profiles = sa.Table(
     sa.Column("sample_questions", JSONB().with_variant(sa.JSON(), "sqlite"), nullable=True),
     sa.PrimaryKeyConstraint("db_id", "profile_kind"),
     sa.Index("ix_database_profiles_owner_user_id", "owner_user_id"),
+    sa.Index("ix_database_profiles_profile_kind", "profile_kind"),
 )
 
 profile_overrides = sa.Table(

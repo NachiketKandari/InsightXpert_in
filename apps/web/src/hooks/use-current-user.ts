@@ -17,7 +17,7 @@ export function useCurrentUser(): {
   const q = useQuery({
     queryKey: ["current-user"],
     queryFn: fetchMe,
-    staleTime: 30_000,
+    staleTime: 300_000,
     retry: false,
   });
   return {

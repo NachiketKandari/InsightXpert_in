@@ -59,7 +59,7 @@ export function useAdminPrompts() {
       if (!res.ok) throw new Error(`prompts_list_failed_${res.status}`);
       return (await res.json()) as PromptSummary[];
     },
-    staleTime: 15_000,
+    staleTime: 120_000,
   });
 }
 
@@ -74,7 +74,7 @@ export function useAdminPrompt(name: string | null) {
       if (!res.ok) throw await parseError(res);
       return (await res.json()) as PromptDetail;
     },
-    staleTime: 15_000,
+    staleTime: 120_000,
   });
 }
 

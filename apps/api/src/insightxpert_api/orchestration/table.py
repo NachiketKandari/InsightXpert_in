@@ -25,6 +25,12 @@ conversations = Table(
     Column("updated_at", Integer, nullable=False),
 )
 Index("ix_conversations_user_id", conversations.c.user_id)
+Index(
+    "ix_conversations_user_updated",
+    conversations.c.user_id,
+    conversations.c.updated_at.desc(),
+    conversations.c.created_at.desc(),
+)
 
 messages = Table(
     "messages",
@@ -40,6 +46,7 @@ messages = Table(
     Column("created_at", Integer, nullable=False),
 )
 Index("ix_messages_conversation_id", messages.c.conversation_id)
+Index("ix_messages_conv_created", messages.c.conversation_id, messages.c.created_at)
 
 prompt_templates = Table(
     "prompt_templates",

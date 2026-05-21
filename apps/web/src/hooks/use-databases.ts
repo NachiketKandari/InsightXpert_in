@@ -22,6 +22,6 @@ export function useDatabases() {
   return useQuery({
     queryKey: ["databases", "list"],
     queryFn: fetchDatabases,
-    staleTime: 30_000,
+    staleTime: 120_000,
   });
 }

@@ -8,12 +8,13 @@ returns to the env-pinned default.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel
 
-from ..auth.dependencies import get_current_user
+from ..auth.dependencies import get_current_user, require_admin
 from ..config import Settings, get_settings
 from ..metrics.pricing import PRICING
+from .client_config import _FEATURES  # in-process feature flags, shared with client-config
 
 router = APIRouter(prefix="/api/v1/config", tags=["config"])
 
@@ -58,9 +59,11 @@ class SwitchRequest(BaseModel):
 
 @router.get("", response_model=ConfigResponse)
 async def get_config(
+    response: Response,
     _user: object = Depends(get_current_user),
     settings: Settings = Depends(get_settings),
 ) -> ConfigResponse:
+    response.headers["Cache-Control"] = "private, max-age=60"
     return ConfigResponse(
         current_provider=settings.llm_provider,
         current_model=_current_model(settings),
@@ -107,3 +110,33 @@ async def switch_model(
             for p, m in sorted(_CHAT_MODELS.items())
         ],
     )
+
+
+class FeatureToggleUpdate(BaseModel):
+    feature: str
+    enabled: bool
+
+
+@router.get("/features")
+async def get_features(
+    response: Response,
+    _user: object = Depends(get_current_user),
+) -> dict[str, object]:
+    """Return current feature flags (authenticated, read by admin panel)."""
+    response.headers["Cache-Control"] = "private, max-age=300"
+    return {"features": dict(_FEATURES)}
+
+
+@router.post("/features")
+async def update_feature(
+    body: FeatureToggleUpdate,
+    _admin: object = Depends(require_admin),
+) -> dict[str, object]:
+    """Toggle a single feature flag in-process (admin only)."""
+    if body.feature not in _FEATURES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unknown feature '{body.feature}'.",
+        )
+    _FEATURES[body.feature] = body.enabled
+    return {"features": dict(_FEATURES)}
