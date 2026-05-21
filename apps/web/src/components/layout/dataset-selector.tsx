@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChevronDown, Database, Check, Loader2, Plus, FileUp, Plug, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -56,8 +56,9 @@ export function DatasetSelector() {
 
   // When the user selects a DB that lacks sample questions, fire an
   // idempotent background ensure so questions are ready by the time
-  // they open the sample-questions modal. Safe to call repeatedly —
-  // the backend no-ops when questions already exist or are pending.
+  // they open the sample-questions modal. Debounced (300ms) so rapid
+  // DB switches don't stack multiple POSTs.
+  const ensureTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (!selectedDbId) return;
     const sq = sampleQuestions;
@@ -67,10 +68,18 @@ export function DatasetSelector() {
        sq.status === "failed" ||
        sq.status === "pending")
     ) {
-      // Already pending — no need to re-trigger.
       if (sq?.status === "pending") return;
-      ensureSampleQuestions.mutate();
+      if (ensureTimerRef.current) clearTimeout(ensureTimerRef.current);
+      ensureTimerRef.current = setTimeout(() => {
+        ensureSampleQuestions.mutate();
+      }, 300);
     }
+    return () => {
+      if (ensureTimerRef.current) {
+        clearTimeout(ensureTimerRef.current);
+        ensureTimerRef.current = null;
+      }
+    };
   }, [selectedDbId, sampleQuestions, profileQuery.data, ensureSampleQuestions]);
 
   // Trigger label: render whatever the user already chose — no fetch

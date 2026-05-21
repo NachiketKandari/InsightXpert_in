@@ -2,16 +2,22 @@
 
 import { useRef, useState, useCallback, useEffect, useMemo, startTransition, type KeyboardEvent } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Shuffle } from "lucide-react";
+import { Shuffle, Sparkles } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Textarea } from "@/components/ui/textarea";
 import { DatabasePickerPanel } from "@/components/dataset/database-picker-panel";
 import { InputToolbar } from "./input-toolbar";
+import { GenerationProgress } from "@/components/sample-questions/generation-progress";
 import { useChatStore } from "@/stores/chat-store";
 import { useClientConfigStore } from "@/stores/client-config-store";
 import { useVoiceInput } from "@/hooks/use-voice-input";
 import { useDatabases } from "@/hooks/use-databases";
-import { useSampleQuestions, fetchProfile } from "@/hooks/use-sample-questions";
+import {
+  useSampleQuestions,
+  useSampleQuestionStatus,
+  useGenerateSampleQuestions,
+  fetchProfile,
+} from "@/hooks/use-sample-questions";
 
 function pickRandom(pool: string[], count: number, exclude?: string[]): string[] {
   const filtered = exclude ? pool.filter((q) => !exclude.includes(q)) : [...pool];
@@ -51,9 +57,22 @@ export function WelcomeScreen({ onSendMessage, onStop, isStreaming }: WelcomeScr
   const displayName = useClientConfigStore((s) => s.config?.branding?.display_name);
   const { voiceState, voiceError, toggleVoice, clearVoiceText } = useVoiceInput(setValue);
   const selectedDbId = useChatStore((s) => s.selectedDbId);
-  const { data: sampleData } = useSampleQuestions(selectedDbId ?? undefined);
+  const { data: sampleData, profileQuery } = useSampleQuestions(selectedDbId ?? undefined);
   const { data: databases = [] } = useDatabases();
   const queryClient = useQueryClient();
+
+  // Poll for sample-question generation progress while "pending".
+  const { data: sqStatus } = useSampleQuestionStatus(selectedDbId ?? undefined);
+  const generateSq = useGenerateSampleQuestions(selectedDbId ?? undefined);
+
+  const sqStatusPending = sqStatus?.status === "pending" || generateSq.isPending;
+  const showGenerateButton =
+    profileQuery.isSuccess &&
+    !sqStatusPending &&
+    (sampleData === undefined ||
+     sampleData === null ||
+     (sampleData && sampleData.status === "failed"));
+  const showProgressBar = sqStatusPending || sampleData?.status === "pending";
 
   // Pre-fetch profiles for ALL databases in parallel as soon as the list
   // arrives, so sample questions are already cached when the user switches
@@ -77,21 +96,33 @@ export function WelcomeScreen({ onSendMessage, onStop, isStreaming }: WelcomeScr
     [sampleData],
   );
 
+  // Track the last non-empty pool so chips don't blink to empty during a
+  // DB switch (while the new profile is in-flight or cached). Only truly
+  // clear chips when the DB has no sample questions AND no generation is
+  // in progress.
+  const prevQuestionsRef = useRef<string[]>([]);
+  useEffect(() => {
+    if (allQuestions.length > 0) {
+      prevQuestionsRef.current = allQuestions;
+    }
+  }, [allQuestions]);
+
   // Re-pick when the question pool changes (new DB, new generation).
-  // Clear when switching to a DB that has no sample questions yet, so stale
-  // chips from the previous DB don't linger.
   useEffect(() => {
     if (allQuestions.length > 0) {
       startTransition(() => {
         setQuestions(pickRandom(allQuestions, 3));
         setShuffleKey((k) => k + 1);
       });
-    } else {
+    } else if (prevQuestionsRef.current.length === 0) {
+      // No previous data at all — genuinely no sample questions available.
       startTransition(() => {
         setQuestions([]);
         setShuffleKey((k) => k + 1);
       });
     }
+    // Else: allQuestions is empty but we had data before (DB switch in
+    // progress). Keep old chips visible — don't clear to avoid the blink.
   }, [allQuestions]);
 
   // Subscribe to pendingInput changes outside the render cycle to avoid
@@ -181,6 +212,36 @@ export function WelcomeScreen({ onSendMessage, onStop, isStreaming }: WelcomeScr
       {/* First-class database picker — shown only on the landing screen so
           users don't have to hunt for the header dropdown. */}
       <DatabasePickerPanel />
+
+      {/* Generate sample questions button — shown when a profiled DB has no
+          questions yet and generation is not already in progress. */}
+      {showGenerateButton && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mt-4"
+        >
+          <button
+            onClick={() => generateSq.mutate()}
+            disabled={generateSq.isPending}
+            className="inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors cursor-pointer disabled:opacity-50"
+          >
+            <Sparkles className="size-4" />
+            Generate sample questions
+          </button>
+        </motion.div>
+      )}
+
+      {/* Progress bar — shown while generation is in flight. */}
+      {showProgressBar && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mt-4"
+        >
+          <GenerationProgress progress={sqStatus?.progress ?? null} />
+        </motion.div>
+      )}
 
       {/* Suggestion chips */}
       <AnimatePresence mode="wait">

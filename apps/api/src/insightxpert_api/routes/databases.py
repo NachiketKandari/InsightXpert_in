@@ -17,6 +17,7 @@ pipeline — profiling is the only work here.
 from __future__ import annotations
 
 import asyncio
+import functools
 import io
 import re
 import sqlite3
@@ -32,6 +33,7 @@ from fastapi import (
     Form,
     HTTPException,
     Request,
+    Response,
     UploadFile,
     status,
 )
@@ -115,7 +117,10 @@ def _db_svc(settings: Settings) -> DatabaseService:
 
 
 def _prof_svc(settings: Settings) -> ProfileService:
-    return ProfileService(build_store(settings))
+    # ProfileService ignores the store parameter — it only uses the
+    # process-level ProfileCache.  Avoid constructing an unnecessary
+    # ObjectStore (which creates a GCS client in prod) on every call.
+    return ProfileService()
 
 
 def _list_tables(path: str) -> list[str]:
@@ -127,6 +132,18 @@ def _list_tables(path: str) -> list[str]:
     finally:
         con.close()
     return [r[0] for r in rows]
+
+
+@functools.lru_cache(maxsize=128)
+def _cached_schema_ddl(path: str) -> str:
+    """Memoized DDL reader — DDL is immutable for a given SQLite file."""
+    return schema_ddl(path)
+
+
+@functools.lru_cache(maxsize=128)
+def _cached_list_tables(path: str) -> list[str]:
+    """Memoized table lister — table names don't change for a given SQLite file."""
+    return _list_tables(path)
 
 
 @router.get("", response_model=list[DatabaseListItem])
@@ -419,28 +436,40 @@ async def upload_csv(
 @router.get("/{db_id}/schema", response_model=SchemaResponse)
 async def get_schema(
     db_id: str,
+    response: Response,
     cu: CurrentUser = Depends(get_current_user),
     settings: Settings = Depends(get_settings),
 ) -> SchemaResponse:
+    response.headers["Cache-Control"] = "private, max-age=10"
     svc = _db_svc(settings)
-    ref = svc.resolve(cu.id, db_id)
+    ref = await asyncio.to_thread(svc.resolve, cu.id, db_id)
     if ref is None:
         raise HTTPException(status_code=404, detail="invalid_db")
-    return SchemaResponse(ddl=schema_ddl(ref.local_path), tables=_list_tables(ref.local_path))
+    path = ref.local_path
+    ddl, tables = await asyncio.gather(
+        asyncio.to_thread(_cached_schema_ddl, path),
+        asyncio.to_thread(_cached_list_tables, path),
+    )
+    return SchemaResponse(ddl=ddl, tables=tables)
 
 
 @router.get("/{db_id}/profile")
 async def get_profile(
     db_id: str,
+    response: Response,
     cu: CurrentUser = Depends(get_current_user),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
+    response.headers["Cache-Control"] = "private, max-age=10"
     prof = _prof_svc(settings)
-    profile = prof.load(cu.id, db_id)
+    user_id = cu.id
+    profile, sq = await asyncio.gather(
+        asyncio.to_thread(prof.load, user_id, db_id),
+        asyncio.to_thread(sq_repo.get_sample_questions, db_id),
+    )
     if profile is None:
         raise HTTPException(status_code=404, detail="not_found")
     out = profile.model_dump(mode="json")
-    sq = sq_repo.get_sample_questions(db_id)
     out["sample_questions"] = sq.model_dump(mode="json") if sq else None
     return out
 
@@ -478,6 +507,7 @@ async def _run_profile_v2(
     llm: object | None,
     user_id: str | None = None,
     user_hints: str = "",
+    app: object | None = None,
 ) -> None:
     try:
         profile = await run_profile_stream(
@@ -511,8 +541,66 @@ async def _run_profile_v2(
                     emitter=emitter, session_id=session_id,
                 )
             )
+            # Push a notification so the user knows profiling completed, even if
+            # they left the database detail page and the SSE stream closed.
+            if app is not None and user_id is not None:
+                _spawn_background_task(
+                    _push_profile_notification(
+                        app=app,
+                        user_id=user_id,
+                        db_id=db_id,
+                        table_count=len(profile.tables),
+                        column_count=sum(len(t.columns) for t in profile.tables),
+                    )
+                )
+    except Exception as exc:
+        log.warning("profile.run_failed", db_id=db_id, error=str(exc))
+        if app is not None and user_id is not None:
+            _spawn_background_task(
+                _push_profile_notification(
+                    app=app,
+                    user_id=user_id,
+                    db_id=db_id,
+                    table_count=0,
+                    column_count=0,
+                    error=str(exc),
+                )
+            )
     finally:
         await emitter.close()
+
+
+async def _push_profile_notification(
+    app: object,
+    user_id: str,
+    db_id: str,
+    table_count: int,
+    column_count: int,
+    error: str = "",
+) -> None:
+    from ..automations.notifications import create as notif_create
+    from ..automations.notifications import dispatch as notif_dispatch
+
+    if error:
+        notif = await asyncio.to_thread(
+            notif_create,
+            user_id,
+            title="Profiling failed",
+            message=f"Profiling for database failed: {error}",
+            severity="error",
+        )
+    else:
+        notif = await asyncio.to_thread(
+            notif_create,
+            user_id,
+            title="Profiling complete",
+            message=f"Database profiling complete: {table_count} tables, {column_count} columns analyzed.",
+            severity="success",
+        )
+    try:
+        await notif_dispatch(app, user_id, notif)
+    except Exception as exc:
+        log.warning("profile.notification_dispatch_failed", error=str(exc))
 
 
 async def _emit_cost_estimate_and_close(
@@ -657,6 +745,7 @@ async def run_profile(
             llm=llm,
             user_id=cu.id,
             user_hints=req.user_hints if req else "",
+            app=request.app,
         )
     )
     return EventSourceResponse(emitter.stream())
@@ -760,6 +849,43 @@ async def ensure_sample_questions(
     )
     get_process_profile_cache().invalidate(db_id, "base")
     return {"status": "pending", "message": "Generation started"}
+
+
+@router.get("/{db_id}/sample-questions/status")
+async def get_sample_questions_status(
+    db_id: str,
+    cu: CurrentUser = Depends(get_current_user),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    """Return the current sample-question generation status + progress.
+
+    Used by the FE to poll while a background generation is in flight, so the
+    welcome-screen chips / progress bar can update without an active SSE stream.
+    """
+    _validate_db_id(db_id)
+    prof = _prof_svc(settings)
+    if prof.load(cu.id, db_id) is None:
+        raise HTTPException(status_code=404, detail="profile_not_found")
+
+    sq = sq_repo.get_sample_questions(db_id)
+    if sq is None:
+        return {"status": "not_found", "generated_at": None, "progress": None}
+
+    progress: dict[str, int] | None = None
+    if sq.status == "pending":
+        done = sum(
+            1 for cat in sq.categories
+            if cat.questions and cat.questions != ["…", "…", "…"]
+        )
+        progress = {"current": done, "total": len(sq.categories)}
+
+    return {
+        "status": sq.status.value,
+        "generated_at": sq.generated_at.isoformat() if sq.generated_at else None,
+        "model": sq.model,
+        "progress": progress,
+        "error": sq.error,
+    }
 
 
 class ProfileHintsRequest(BaseModel):

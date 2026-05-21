@@ -40,6 +40,7 @@ interface ChatState {
 
   isLoadingConversation: boolean;
   isLoadingConversations: boolean;
+  conversationsLastFetched: number;
 
   // Derived
   activeConversation: () => Conversation | null;
@@ -111,6 +112,7 @@ export const useChatStore = create<ChatState>()(persist((set, get) => ({
   selectedDbId: null,
   isLoadingConversation: false,
   isLoadingConversations: false,
+  conversationsLastFetched: 0,
 
   activeConversation: () => {
     const { conversations, activeConversationId } = get();
@@ -118,6 +120,13 @@ export const useChatStore = create<ChatState>()(persist((set, get) => ({
   },
 
   initFromStorage: async () => {
+    // Skip the network call if conversations were fetched recently (within
+    // the last 60 s). Prevents a full refetch on every client-side navigation
+    // (e.g. / → /admin → /) while the component unmounts and remounts.
+    if (Date.now() - get().conversationsLastFetched < 60_000) {
+      set({ isLoadingConversations: false });
+      return;
+    }
     set({ isLoadingConversations: true });
     try {
       const res = await apiFetch("/api/v1/conversations");
@@ -152,6 +161,7 @@ export const useChatStore = create<ChatState>()(persist((set, get) => ({
         return {
           conversations: merged,
           isLoadingConversations: false,
+          conversationsLastFetched: Date.now(),
           ...(state.activeConversationId && !activeStillExists
             ? { activeConversationId: null }
             : {}),
