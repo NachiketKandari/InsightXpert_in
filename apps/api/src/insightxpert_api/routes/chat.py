@@ -144,6 +144,7 @@ def _schedule_record_turn(
         chunks=chunk_dicts,
         tokens_in=extracted["tokens_in"],
         tokens_out=extracted["tokens_out"],
+        generation_time_ms=extracted["duration_ms"],
     )
 
 
@@ -498,6 +499,7 @@ async def _run_pipeline(
                     chunks=chunk_dicts,
                     tokens_in=tokens_in or None,
                     tokens_out=tokens_out or None,
+                    generation_time_ms=latency_ms,
                 )
             except Exception:  # noqa: BLE001
                 pass
@@ -800,6 +802,7 @@ async def _run_orchestrator(
                     chunks=chunk_dicts,
                     tokens_in=tokens_in or None,
                     tokens_out=tokens_out or None,
+                    generation_time_ms=latency_ms,
                 )
             except Exception:  # noqa: BLE001
                 pass

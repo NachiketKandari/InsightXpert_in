@@ -36,6 +36,7 @@ messages = Table(
     Column("chunks_json", Text, nullable=True),
     Column("tokens_in", Integer, nullable=True),
     Column("tokens_out", Integer, nullable=True),
+    Column("generation_time_ms", Integer, nullable=True),
     Column("created_at", Integer, nullable=False),
 )
 Index("ix_messages_conversation_id", messages.c.conversation_id)

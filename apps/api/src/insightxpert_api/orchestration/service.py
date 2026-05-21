@@ -35,6 +35,7 @@ def record_conversation_snapshot(
     chunks: list[dict[str, Any]],
     tokens_in: int | None,
     tokens_out: int | None,
+    generation_time_ms: int | None = None,
 ) -> None:
     """Upsert conversations row + append user + assistant message rows.
 
@@ -103,6 +104,7 @@ def record_conversation_snapshot(
                     chunks_json=json.dumps(chunks) if chunks else None,
                     tokens_in=tokens_in,
                     tokens_out=tokens_out,
+                    generation_time_ms=generation_time_ms,
                     created_at=now,
                 )
             )

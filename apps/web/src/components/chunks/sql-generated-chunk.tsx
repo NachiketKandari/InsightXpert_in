@@ -26,7 +26,7 @@ interface SqlGeneratedChunkProps {
  * generated SQL with an iteration badge so refinement loops are visible.
  */
 export function SqlGeneratedChunk({ data }: SqlGeneratedChunkProps) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(true);
   const syntaxTheme = useSyntaxTheme();
   const iteration = data.iteration ?? 0;
   const isRefinement = iteration > 0;

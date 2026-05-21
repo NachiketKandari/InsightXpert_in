@@ -122,6 +122,7 @@ def _detail(user_id: str, conversation_id: str) -> dict[str, Any] | None:
                 "tokens_out": m.tokens_out,
                 "input_tokens": m.tokens_in,
                 "output_tokens": m.tokens_out,
+                "generation_time_ms": m.generation_time_ms,
                 "created_at": m.created_at,
             }
         )

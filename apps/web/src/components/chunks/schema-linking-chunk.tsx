@@ -309,7 +309,7 @@ export function LinkedSchemaFinalChunk({
 }: {
   data: LinkedSchemaFinalData;
 }) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
   const columnSources = data.column_sources ?? {};
   const linkedColumns = data.linked_columns ?? [];
   const linkedTables = data.linked_tables ?? [];
