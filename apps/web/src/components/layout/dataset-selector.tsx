@@ -54,19 +54,17 @@ export function DatasetSelector() {
     }
   }, [databases, selectedDbId, setSelectedDbId]);
 
-  // When the user selects a DB that lacks sample questions, fire an
-  // idempotent background ensure so questions are ready by the time
-  // they open the sample-questions modal. Debounced (300ms) so rapid
-  // DB switches don't stack multiple POSTs.
+  // Auto-retry when the user selects a DB whose previous sample-question
+  // generation failed. For DBs that simply have no questions yet (null),
+  // we let the welcome-screen generate button take over so the user can
+  // explicitly trigger it and see the progress bar.
   const ensureTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (!selectedDbId) return;
     const sq = sampleQuestions;
     if (
       profileQuery.data &&
-      (!sq ||
-       sq.status === "failed" ||
-       sq.status === "pending")
+      (sq?.status === "failed" || sq?.status === "pending")
     ) {
       if (sq?.status === "pending") return;
       if (ensureTimerRef.current) clearTimeout(ensureTimerRef.current);
