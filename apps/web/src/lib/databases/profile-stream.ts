@@ -96,7 +96,7 @@ export function startProfileStream(
             }
             try {
               const parsed = JSON.parse(data) as ProfileChunk;
-              if (parsed && typeof parsed === "object" && "type" in parsed) {
+              if (parsed && typeof parsed === "object" && "type" in parsed && "payload" in parsed) {
                 callbacks.onChunk(parsed);
               }
             } catch {

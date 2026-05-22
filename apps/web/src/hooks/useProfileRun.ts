@@ -145,6 +145,8 @@ export function useProfileRun(dbId: string): UseProfileRun {
               if (prev.kind === "succeeded" || prev.kind === "failed") {
                 return prev;
               }
+              // Malformed chunks from the server (missing payload) — skip silently.
+              if (!chunk.payload) return prev;
               // Ensure we have a `running` baseline the moment the first
               // stage_started arrives.
               const ensureRunning = (): ProfileStep[] => {
