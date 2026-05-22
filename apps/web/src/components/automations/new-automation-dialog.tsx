@@ -33,6 +33,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { apiCall } from "@/lib/api";
+import { useDatabases } from "@/hooks/use-databases";
 import { useAutomationStore } from "@/stores/automation-store";
 import { SCHEDULE_PRESETS } from "@/lib/automation-utils";
 import type { DatasetInfo } from "@/types/dataset";
@@ -70,12 +71,13 @@ export function NewAutomationDialog({ open, onOpenChange }: NewAutomationDialogP
   const [conditions, setConditions] = useState<TriggerCondition[]>([]);
   const [sqlEditorOpen, setSqlEditorOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const { data: cachedDatabases = [] } = useDatabases();
 
   // Column preflight state — populated by a LIMIT 0 execute call when dbId is known.
   const [columns, setColumns] = useState<string[]>([]);
   const [columnsLoading, setColumnsLoading] = useState(false);
 
-  // Reset form only on the open-transition (closed → open). Guarded by a ref
+  // Reset form fields on the open-transition (closed → open). Guarded by a ref
   // so the lint rule "set-state-in-effect" stays happy — no cascading renders
   // on each re-render while already open.
   const wasOpenRef = React.useRef(false);
@@ -95,25 +97,31 @@ export function NewAutomationDialog({ open, onOpenChange }: NewAutomationDialogP
     setColumns([]);
     setColumnsLoading(false);
     fetchTemplates();
-    // /api/v1/databases is the greenfield contract; map its {db_id, source}
-    // shape to DatasetInfo so this older dialog keeps compiling. Active-DB
-    // selection is now driven by the chat store's selectedDbId; fall back
-    // to the first database if not set.
-    apiCall<Array<{ db_id: string; source?: string }>>("/api/v1/databases").then((data) => {
-      if (data) {
-        const mapped: DatasetInfo[] = data.map((d) => ({
-          id: d.db_id,
-          name: d.db_id,
-          description: d.source ? `bundled (${d.source})` : null,
-          is_active: false,
-          table_name: null,
-          created_by: null,
-        }));
-        setDatasets(mapped);
-        if (mapped[0]) setDbId(mapped[0].id);
-      }
-    });
   }, [open, fetchTemplates]);
+
+  // Populate the database selector from the in-memory cache (useDatabases,
+  // 120s staleTime) instead of firing a duplicate GET /api/v1/databases.
+  // Only seeds the list once per dialog-open; subsequent cache updates won't
+  // overwrite the user's selection.
+  const datasetsSeededRef = React.useRef(false);
+  useEffect(() => {
+    if (!open) {
+      datasetsSeededRef.current = false;
+      return;
+    }
+    if (datasetsSeededRef.current || cachedDatabases.length === 0) return;
+    datasetsSeededRef.current = true;
+    const mapped: DatasetInfo[] = cachedDatabases.map((d) => ({
+      id: d.db_id,
+      name: d.db_id,
+      description: d.source ? `bundled (${d.source})` : null,
+      is_active: false,
+      table_name: null,
+      created_by: null,
+    }));
+    setDatasets(mapped);
+    if (mapped[0]) setDbId(mapped[0].id);
+  }, [open, cachedDatabases]);
 
   // When dbId changes, preflight GET /schema then POST /sql/execute LIMIT 0 to
   // discover columns so TriggerConditionBuilder's column_expression dropdown is
