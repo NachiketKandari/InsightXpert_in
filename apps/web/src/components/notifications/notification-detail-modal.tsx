@@ -30,7 +30,7 @@ export function NotificationDetailModal({
         <DialogHeader>
           <DialogTitle>{notification.title}</DialogTitle>
           <DialogDescription>
-            {new Date(notification.created_at).toLocaleString()}
+            {new Date(notification.created_at * 1000).toLocaleString()}
           </DialogDescription>
         </DialogHeader>
 

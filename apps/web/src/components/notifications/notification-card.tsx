@@ -62,7 +62,7 @@ export function NotificationCard({
             </Badge>
           )}
           {n.automation_name && <span>{n.automation_name}</span>}
-          <span>{new Date(n.created_at).toLocaleString()}</span>
+          <span>{new Date(n.created_at * 1000).toLocaleString()}</span>
         </div>
       </div>
       {!n.is_read && onMarkRead && (

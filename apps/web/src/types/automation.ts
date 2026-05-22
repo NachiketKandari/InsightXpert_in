@@ -45,7 +45,7 @@ export interface Automation {
   created_by?: string;
   source_conversation_id: string | null;
   source_message_id: string | null;
-  created_at: string;
+  created_at: number;
   updated_at: string;
 }
 
@@ -62,7 +62,7 @@ export interface AutomationRun {
   execution_time_ms: number | null;
   triggers_fired: TriggerResult[] | null;
   error_message: string | null;
-  created_at: string;
+  created_at: number;
 }
 
 export interface Notification {
@@ -75,7 +75,7 @@ export interface Notification {
   severity: "info" | "success" | "warning" | "error" | "critical";
   is_read: boolean;
   automation_name?: string | null;
-  created_at: string;
+  created_at: number;
   // Present in admin-scoped responses (/api/v1/notifications/all)
   user_email?: string;
   user_is_admin?: boolean;
@@ -88,7 +88,7 @@ export interface TriggerTemplate {
   conditions: TriggerCondition[];
   created_by?: string;
   owner_user_id?: string;
-  created_at: string;
+  created_at: number;
   updated_at: string;
 }
 

@@ -158,7 +158,7 @@ function NotificationDetail({
           </Badge>
           <span className="text-xs text-muted-foreground flex items-center gap-1">
             <Clock className="size-3" />
-            {new Date(notification.created_at).toLocaleString()}
+            {new Date(notification.created_at * 1000).toLocaleString()}
           </span>
         </div>
       </div>
