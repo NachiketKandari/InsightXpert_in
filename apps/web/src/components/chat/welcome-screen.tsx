@@ -86,21 +86,17 @@ export function WelcomeScreen({ onSendMessage, onStop, isStreaming }: WelcomeScr
      (sampleData && sampleData.status === "failed"));
   const showProgressBar = sqStatusPending || sampleData?.status === "pending";
 
-  // Pre-fetch profiles for ALL databases in parallel as soon as the list
-  // arrives, so sample questions are already cached when the user switches
-  // databases. TanStack Query deduplicates: if the selected DB's profile is
-  // already in-flight from useSampleQuestions, prefetchQuery reuses the same
-  // promise instead of firing a duplicate request.
+  // Pre-fetch the profile ONLY for the currently selected DB so sample
+  // questions are already cached when the user starts interacting. Avoids
+  // N parallel fetches for every database in the list.
   useEffect(() => {
-    if (databases.length === 0) return;
-    for (const db of databases) {
-      queryClient.prefetchQuery({
-        queryKey: ["profile", db.db_id],
-        queryFn: () => fetchProfile(db.db_id),
-        staleTime: 30_000,
-      });
-    }
-  }, [databases, queryClient]);
+    if (!selectedDbId) return;
+    queryClient.prefetchQuery({
+      queryKey: ["profile", selectedDbId],
+      queryFn: () => fetchProfile(selectedDbId),
+      staleTime: 30_000,
+    });
+  }, [selectedDbId, queryClient]);
 
   // Build pool from per-DB sample questions, refreshing when data changes
   const allQuestions = useMemo(
