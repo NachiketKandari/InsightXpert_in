@@ -61,13 +61,25 @@ export function WelcomeScreen({ onSendMessage, onStop, isStreaming }: WelcomeScr
   const { data: databases = [] } = useDatabases();
   const queryClient = useQueryClient();
 
+  // Does the currently selected DB have a profile at all? Derived from the
+  // database list (instant, cached) so we can clear chips immediately when
+  // switching to an unprofiled DB instead of waiting for the profile fetch.
+  const selectedDbHasProfile = selectedDbId
+    ? databases.some((d) => d.db_id === selectedDbId && d.has_profile)
+    : false;
+
   // Poll for sample-question generation progress while "pending".
   const { data: sqStatus } = useSampleQuestionStatus(selectedDbId ?? undefined);
   const generateSq = useGenerateSampleQuestions(selectedDbId ?? undefined);
 
   const sqStatusPending = sqStatus?.status === "pending" || generateSq.isPending;
+  // Profile has "settled" once it's not fetching/loading — this includes both
+  // HTTP 200 (profile exists) and HTTP 404 (no profile yet). We need the
+  // generate button to appear in both cases, not just on success.
+  const profileSettled =
+    !profileQuery.isFetching && !profileQuery.isLoading && selectedDbId != null;
   const showGenerateButton =
-    profileQuery.isSuccess &&
+    profileSettled &&
     !sqStatusPending &&
     (sampleData === undefined ||
      sampleData === null ||
@@ -114,9 +126,20 @@ export function WelcomeScreen({ onSendMessage, onStop, isStreaming }: WelcomeScr
         setQuestions(pickRandom(allQuestions, 3));
         setShuffleKey((k) => k + 1);
       });
+    } else if (!selectedDbHasProfile) {
+      // The target DB has no profile — we know instantly from the cached
+      // database list that no questions exist. Clear chips immediately
+      // instead of waiting for the 404 from the profile endpoint.
+      if (prevQuestionsRef.current.length > 0) {
+        prevQuestionsRef.current = [];
+      }
+      startTransition(() => {
+        setQuestions([]);
+        setShuffleKey((k) => k + 1);
+      });
     } else if (!profileQuery.isFetching) {
       // Profile settled — either succeeded with no sample questions or
-      // errored (404 = no profile). Clear stale chips.
+      // errored. Clear stale chips.
       if (prevQuestionsRef.current.length > 0) {
         prevQuestionsRef.current = [];
       }
@@ -127,7 +150,7 @@ export function WelcomeScreen({ onSendMessage, onStop, isStreaming }: WelcomeScr
     }
     // Else: allQuestions is empty but the profile query is still in flight
     // (DB switch in progress). Keep old chips visible to avoid the blink.
-  }, [allQuestions, profileQuery.isFetching]);
+  }, [allQuestions, profileQuery.isFetching, selectedDbHasProfile]);
 
   // Subscribe to pendingInput changes outside the render cycle to avoid
   // cascading setState-in-effect warnings.
