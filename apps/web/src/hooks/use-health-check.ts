@@ -7,7 +7,7 @@
 //   to the backend (same as SSE calls) to avoid Next.js proxy hiccups causing
 //   false "Backend unavailable" banners.
 // - Defensive parsing: we only look at `res.ok`; any body shape is fine.
-// - Backoff: when healthy, poll every 30s. When unhealthy, poll every 15s so
+// - Backoff: when healthy, poll every 120s. When unhealthy, poll every 30s so
 //   the banner clears quickly once the backend comes back.
 // - Short fetch timeout (2s) so a hung backend doesn't pile up in-flight reqs.
 // - 1 automatic retry so a single transient failure doesn't lock the banner
@@ -18,8 +18,8 @@ import { SSE_BASE_URL } from "@/lib/constants";
 
 const HEALTH_URL = `${SSE_BASE_URL || "http://localhost:8080"}/api/v1/health`;
 const FETCH_TIMEOUT_MS = 2_000;
-const HEALTHY_POLL_MS = 30_000;
-const UNHEALTHY_POLL_MS = 15_000;
+const HEALTHY_POLL_MS = 120_000;
+const UNHEALTHY_POLL_MS = 30_000;
 
 async function probeHealth(): Promise<boolean> {
   try {
