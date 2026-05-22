@@ -27,7 +27,7 @@ export async function fetchProfile(
   return (await res.json()) as ProfileResponse;
 }
 
-async function postRegenerate(dbId: string): Promise<void> {
+export async function postRegenerate(dbId: string): Promise<void> {
   const res = await apiFetch(
     `/api/v1/databases/${encodeURIComponent(dbId)}/sample-questions/regenerate`,
     { method: "POST" },

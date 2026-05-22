@@ -14,8 +14,13 @@ import {
 import { CsvUploadDialog } from "@/components/dataset/csv-upload-dialog";
 import { SqliteUploadDialog } from "@/components/dataset/sqlite-upload-dialog";
 import { ConnectDbDialog } from "@/components/dataset/connect-db-dialog";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useDatabases } from "@/hooks/use-databases";
-import { useSampleQuestions } from "@/hooks/use-sample-questions";
+import {
+  useSampleQuestionStatus,
+  useGenerateSampleQuestions,
+  postRegenerate,
+} from "@/hooks/use-sample-questions";
 import { useChatStore } from "@/stores/chat-store";
 
 /**
@@ -37,12 +42,21 @@ export function DatasetSelector() {
   const setSelectedDbId = useChatStore((s) => s.setSelectedDbId);
 
   const { data: databases, isLoading } = useDatabases();
-  const {
-    profileQuery,
-    data: sampleQuestions,
-    regenerate: regenerateSampleQuestions,
-    ensure: ensureSampleQuestions,
-  } = useSampleQuestions(selectedDbId ?? undefined);
+  const queryClient = useQueryClient();
+
+  // Lightweight status poll (GET /sample-questions/status) — avoids fetching
+  // the full profile JSON just to check generation state.
+  const { data: sqStatus } = useSampleQuestionStatus(selectedDbId ?? undefined);
+
+  const ensureSampleQuestions = useGenerateSampleQuestions(selectedDbId ?? undefined);
+
+  const regenerateSampleQuestions = useMutation({
+    mutationFn: () => postRegenerate(selectedDbId!),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["sample-questions-status", selectedDbId] });
+      queryClient.invalidateQueries({ queryKey: ["profile", selectedDbId] });
+    },
+  });
 
   // Auto-select the first DB when nothing is selected (or the previous
   // selection has disappeared). Driven by query state, not a fetch effect.
@@ -55,18 +69,12 @@ export function DatasetSelector() {
   }, [databases, selectedDbId, setSelectedDbId]);
 
   // Auto-retry when the user selects a DB whose previous sample-question
-  // generation failed. For DBs that simply have no questions yet (null),
-  // we let the welcome-screen generate button take over so the user can
-  // explicitly trigger it and see the progress bar.
+  // generation failed. Uses the lightweight status endpoint to avoid pulling
+  // the full profile JSON just for the status check.
   const ensureTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    if (!selectedDbId) return;
-    const sq = sampleQuestions;
-    if (
-      profileQuery.data &&
-      (sq?.status === "failed" || sq?.status === "pending")
-    ) {
-      if (sq?.status === "pending") return;
+    if (!selectedDbId || !sqStatus) return;
+    if (sqStatus.status === "failed") {
       if (ensureTimerRef.current) clearTimeout(ensureTimerRef.current);
       ensureTimerRef.current = setTimeout(() => {
         ensureSampleQuestions.mutate();
@@ -78,7 +86,7 @@ export function DatasetSelector() {
         ensureTimerRef.current = null;
       }
     };
-  }, [selectedDbId, sampleQuestions, profileQuery.data, ensureSampleQuestions]);
+  }, [selectedDbId, sqStatus, ensureSampleQuestions]);
 
   // Trigger label: render whatever the user already chose — no fetch
   // dependency. Falls back to a sensible static string only when there is
