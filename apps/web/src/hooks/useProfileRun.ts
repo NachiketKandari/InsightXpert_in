@@ -119,6 +119,11 @@ export function useProfileRun(dbId: string): UseProfileRun {
   // re-subscribing — keep a mutable mirror.
   const stateRef = useRef<ProfileRunState>(state);
   stateRef.current = state;
+  // Generation counter — incremented on each runStream call so stale
+  // onClose callbacks from a cost-gate stream don't clobber the state
+  // after the confirmed stream has already started (race: cost-gate
+  // onClose fires after confirmCost → runStream → setState(connecting)).
+  const genRef = useRef(0);
 
   // Abort on unmount so we don't leak a long-running stream.
   useEffect(() => {
@@ -133,6 +138,7 @@ export function useProfileRun(dbId: string): UseProfileRun {
       // Fresh stream — kill any previous.
       controllerRef.current?.abort();
 
+      const gen = ++genRef.current;
       setState({ kind: "connecting" });
 
       controllerRef.current = startProfileStream(
@@ -140,6 +146,8 @@ export function useProfileRun(dbId: string): UseProfileRun {
         { ...flags, confirmed },
         {
           onChunk: (chunk) => {
+            // Silently drop chunks from a previous (cost-gate) stream.
+            if (genRef.current !== gen) return;
             setState((prev) => {
               // Terminal states ignore late chunks — don't regress.
               if (prev.kind === "succeeded" || prev.kind === "failed") {
@@ -234,6 +242,9 @@ export function useProfileRun(dbId: string): UseProfileRun {
             });
           },
           onClose: () => {
+            // Stale onClose from a cost-gate stream that finished after
+            // the confirmed stream already started (generation changed).
+            if (genRef.current !== gen) return;
             // If we're still connecting/running and haven't hit a terminal
             // chunk, treat as a benign close EXCEPT when we're awaiting
             // confirmation (cost-gate path closes the stream intentionally).
@@ -260,6 +271,7 @@ export function useProfileRun(dbId: string): UseProfileRun {
             });
           },
           onNetworkError: (err) => {
+            if (genRef.current !== gen) return;
             setState((prev) => ({
               kind: "failed",
               steps: prev.kind === "running" ? prev.steps : seedSteps(),
