@@ -52,3 +52,9 @@ apps/api/Databases/**/*.sqlite
 
 # Worktrees
 .worktrees/
+
+# Superpowers / agent artifacts
+.clone/
+.superpowers/
+council-report-*
+council-transcript-*

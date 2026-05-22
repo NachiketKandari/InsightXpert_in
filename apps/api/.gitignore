@@ -1,3 +1,6 @@
 # SQLite app DB
 app.db
 app.db-*
+
+# Runtime-generated vector search indices
+indices/
