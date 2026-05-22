@@ -22,7 +22,10 @@ from __future__ import annotations
 
 from sqlalchemy import Engine, create_engine, event
 
+import time as _time
+
 from ..config import get_settings
+from ..observability import db_query_duration
 
 _request_engine: Engine | None = None
 _background_engine: Engine | None = None
@@ -78,6 +81,25 @@ def _build_engine(*, pool_size: int, max_overflow: int, pool_timeout: int) -> En
         connect_args=connect_args,
     )
     event.listen(engine, "connect", _apply_statement_timeout)
+
+    _label = "request" if pool_size > 10 else "background"
+
+    @event.listens_for(engine, "before_cursor_execute")
+    def _before(conn, cursor, statement, parameters, context, executemany):  # noqa: ANN001
+        conn.info["_query_start"] = _time.monotonic()
+
+    @event.listens_for(engine, "after_cursor_execute")
+    def _after(conn, cursor, statement, parameters, context, executemany):  # noqa: ANN001
+        start = conn.info.pop("_query_start", None)
+        if start is None:
+            return
+        elapsed = _time.monotonic() - start
+        op = statement.strip().split()[0].upper() if statement and statement.strip() else "UNKNOWN"
+        try:
+            db_query_duration.labels(operation=op, engine=_label).observe(elapsed)
+        except Exception:  # noqa: BLE001
+            pass
+
     return engine
 
 

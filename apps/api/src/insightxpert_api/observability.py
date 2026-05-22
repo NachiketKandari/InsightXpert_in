@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import threading
 
+from prometheus_client import Counter, Histogram
+
 # ---------------------------------------------------------------------------
 # SSE counters (updated by the idle reaper in main.py)
 # ---------------------------------------------------------------------------
@@ -33,7 +35,48 @@ llm_calls_total: dict[str, int] = {
     "trigger_compile": 0,
 }
 
+# ---------------------------------------------------------------------------
+# HTTP request timing histograms (populated by TimingMiddleware)
+# ---------------------------------------------------------------------------
+
+http_request_duration = Histogram(
+    "http_request_duration_seconds",
+    "End-to-end HTTP request duration in seconds (wall clock).",
+    ["method", "route", "status_class"],
+    buckets=[0.01, 0.025, 0.05, 0.1, 0.25, 0.3, 0.5, 0.75, 1.0, 2.5, 5.0, 10.0],
+)
+
+http_requests_total = Counter(
+    "http_requests_total",
+    "Total HTTP requests processed.",
+    ["method", "route", "status_class"],
+)
+
+# ---------------------------------------------------------------------------
+# DB query timing histograms (populated by engine.py event listeners)
+# ---------------------------------------------------------------------------
+
+db_query_duration = Histogram(
+    "db_query_duration_seconds",
+    "App DB query duration in seconds.",
+    ["operation", "engine"],
+    buckets=[0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5],
+)
+
+# ---------------------------------------------------------------------------
+# SLA violation counters
+# ---------------------------------------------------------------------------
+
+sla_violations = Counter(
+    "sla_violations_total",
+    "Requests exceeding their SLA tier p95 target.",
+    ["tier", "route"],
+)
+
+# ---------------------------------------------------------------------------
 # Lock for mutation from multiple async tasks / threads.
+# ---------------------------------------------------------------------------
+
 _lock = threading.Lock()
 
 

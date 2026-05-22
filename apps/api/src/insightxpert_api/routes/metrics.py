@@ -16,6 +16,8 @@ import time
 from fastapi import APIRouter, Request
 from fastapi.responses import PlainTextResponse
 
+from prometheus_client import generate_latest, REGISTRY
+
 from ..audit.queue import get_queue as _get_audit_queue
 from ..observability import llm_calls_total, sse_evicted_total
 
@@ -123,6 +125,13 @@ async def metrics(request: Request) -> str:
             open_files,
             "Approximate number of open file descriptors.",
         ))
+
+    # Append prometheus_client histograms (handles bucket serialization
+    # correctly — cumulative counts, +Inf, _sum/_count, type declarations).
+    try:
+        sections.append(generate_latest(REGISTRY).decode("utf-8").rstrip("\n"))
+    except Exception:  # noqa: BLE001
+        pass
 
     # Prometheus expects the body to end with a newline.
     body = "\n\n".join(sections) + "\n"

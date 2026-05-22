@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -17,6 +18,7 @@ from .routes import (
     admin_databases,
     admin_metrics,
     admin_overview,
+    admin_performance,
     admin_prompts,
     admin_rag,
     admin_users,
@@ -30,6 +32,7 @@ from .routes import (
     databases,
     feedback,
     health,
+    insights as insights_routes,
     internal as internal_routes,
     notifications as notifications_routes,
     shared_snapshots as shared_snapshots_routes,
@@ -200,6 +203,11 @@ def create_app() -> FastAPI:
         version="0.1.0",
         lifespan=lifespan,
     )
+    # Timing middleware MUST be first so it wraps the entire stack
+    # and captures true end-to-end wall-clock latency.
+    from .middleware.timing import TimingMiddleware
+    app.add_middleware(TimingMiddleware)
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
@@ -218,10 +226,12 @@ def create_app() -> FastAPI:
     app.include_router(sql.router)
     app.include_router(conversations.router)
     app.include_router(feedback.router)
+    app.include_router(insights_routes.router)
     app.include_router(client_config.router)
     app.include_router(config_routes.router)
     app.include_router(admin_users.router)
     app.include_router(admin_overview.router)
+    app.include_router(admin_performance.router)
     app.include_router(admin_audit.router)
     app.include_router(admin_metrics.router)
     app.include_router(admin_conversations.router)
@@ -238,6 +248,9 @@ def create_app() -> FastAPI:
     # Internal scheduler endpoint is always mounted — it returns 503 when
     # automations are disabled, which external callers can detect.
     app.include_router(internal_routes.router)
+
+    # Store process start time for the admin/performance endpoint.
+    app.state.process_started_at = time.monotonic()
 
     # User-facing automations + notifications routes only exist when enabled.
     # templates_router must be included BEFORE router so that

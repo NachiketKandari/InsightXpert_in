@@ -149,6 +149,11 @@ class Settings(BaseSettings):
     # exceeded, POST /api/v1/automations returns HTTP 429.
     automations_max_per_user: int = 50
 
+    # --- sla thresholds (ms) — override code defaults in sla.py -----------
+    sla_critical_p95_ms: int = 300
+    sla_standard_p95_ms: int = 500
+    sla_background_p95_ms: int = 2000
+
     # --- observability: Sentry --------------------------------------------
     # Empty DSN → Sentry is a no-op (safe default for tests / fresh clones).
     # DSN itself is not secret (it's used in browser SDKs) but we still load
