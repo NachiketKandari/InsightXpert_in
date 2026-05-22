@@ -97,9 +97,9 @@ export function WelcomeScreen({ onSendMessage, onStop, isStreaming }: WelcomeScr
   );
 
   // Track the last non-empty pool so chips don't blink to empty during a
-  // DB switch (while the new profile is in-flight or cached). Only truly
-  // clear chips when the DB has no sample questions AND no generation is
-  // in progress.
+  // DB switch (while the new profile is in-flight). Clear when the profile
+  // query settles with no data so stale chips from the previous DB don't
+  // linger on a DB that genuinely has no sample questions.
   const prevQuestionsRef = useRef<string[]>([]);
   useEffect(() => {
     if (allQuestions.length > 0) {
@@ -114,16 +114,20 @@ export function WelcomeScreen({ onSendMessage, onStop, isStreaming }: WelcomeScr
         setQuestions(pickRandom(allQuestions, 3));
         setShuffleKey((k) => k + 1);
       });
-    } else if (prevQuestionsRef.current.length === 0) {
-      // No previous data at all — genuinely no sample questions available.
+    } else if (!profileQuery.isFetching) {
+      // Profile settled — either succeeded with no sample questions or
+      // errored (404 = no profile). Clear stale chips.
+      if (prevQuestionsRef.current.length > 0) {
+        prevQuestionsRef.current = [];
+      }
       startTransition(() => {
         setQuestions([]);
         setShuffleKey((k) => k + 1);
       });
     }
-    // Else: allQuestions is empty but we had data before (DB switch in
-    // progress). Keep old chips visible — don't clear to avoid the blink.
-  }, [allQuestions]);
+    // Else: allQuestions is empty but the profile query is still in flight
+    // (DB switch in progress). Keep old chips visible to avoid the blink.
+  }, [allQuestions, profileQuery.isFetching]);
 
   // Subscribe to pendingInput changes outside the render cycle to avoid
   // cascading setState-in-effect warnings.
