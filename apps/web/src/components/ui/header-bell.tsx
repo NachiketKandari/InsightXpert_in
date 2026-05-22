@@ -31,11 +31,25 @@ export function HeaderBell({
   const [modalOpen, setModalOpen] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
 
-  // Poll on interval
+  // Poll on interval, paused when the tab is in the background.
   useEffect(() => {
     onPoll();
-    const interval = setInterval(onPoll, pollIntervalMs);
-    return () => clearInterval(interval);
+    let interval = setInterval(onPoll, pollIntervalMs);
+
+    const handleVisibility = () => {
+      if (document.hidden) {
+        clearInterval(interval);
+      } else {
+        onPoll();
+        interval = setInterval(onPoll, pollIntervalMs);
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
   }, [onPoll, pollIntervalMs]);
 
   // Toggle popover; fetch data when opening
