@@ -35,6 +35,14 @@ class ConversationPatch(BaseModel):
     starred: bool | None = None
 
 
+def _ts(raw: Any) -> int:
+    """Convert epoch-seconds integer to milliseconds for JS. Zero/null -> now."""
+    import time as _time
+
+    val = raw or 0
+    return (val * 1000) if val > 0 else int(_time.time() * 1000)
+
+
 def _row_to_summary(row: Any) -> dict[str, Any]:
     return {
         "id": row.id,
@@ -42,8 +50,8 @@ def _row_to_summary(row: Any) -> dict[str, Any]:
         "title": row.title,
         "starred": bool(row.is_starred),
         "db_id": row.db_id,
-        "created_at": row.created_at,
-        "updated_at": row.updated_at,
+        "created_at": _ts(row.created_at),
+        "updated_at": _ts(row.updated_at),
         "messages": [],
     }
 
@@ -124,17 +132,10 @@ def _detail(user_id: str, conversation_id: str) -> dict[str, Any] | None:
                 "input_tokens": m.tokens_in,
                 "output_tokens": m.tokens_out,
                 "generation_time_ms": m.generation_time_ms,
-                "created_at": m.created_at,
+                "created_at": _ts(m.created_at),
             }
         )
     out["messages"] = parsed
-    # Replay buffer: flatten every message's chunk list so the FE can
-    # re-render a finished turn on reload. Matches the legacy in-memory
-    # ConversationStore shape (``conversation.chunks``).
-    flat_chunks: list[Any] = []
-    for m in parsed:
-        flat_chunks.extend(m["chunks"])
-    out["chunks"] = flat_chunks
     return out
 
 
