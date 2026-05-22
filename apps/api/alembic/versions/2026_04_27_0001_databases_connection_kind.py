@@ -1,7 +1,7 @@
 """BYO-DB — kind + connection_config_encrypted columns on databases.
 
 Revision ID: 20260427_0001
-Revises: 20260425_0001
+Revises: 20260425_0002
 
 Adds two columns used by the BYO external DB connector:
 
@@ -24,7 +24,7 @@ from alembic import op
 
 
 revision = "20260427_0001"
-down_revision: str | None = "20260425_0001"
+down_revision: str | None = "20260425_0002"
 branch_labels = None
 depends_on = None
 
