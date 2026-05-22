@@ -39,6 +39,41 @@ class DatabaseRef:
     connection_url_env_var: str | None = None
 
 
+class _LazyDatabaseRef:
+    """A DatabaseRef whose ``local_path`` is hydrated from the object store on first access.
+
+    This avoids the eager-download problem: :meth:`DatabaseService._list_uploaded`
+    previously called ``_hydrate`` (which downloads from GCS) for *every* uploaded
+    DB on every ``resolve()`` / ``list()`` call.  Now the download only fires when
+    ``local_path`` is actually read — i.e. when someone needs to open the SQLite
+    file.
+    """
+
+    def __init__(self, db_id: str, source: str, key: str, store: object) -> None:
+        self.db_id = db_id
+        self.source = source
+        self._key = key
+        self._store = store
+        self._path: str | None = None
+
+    @property
+    def local_path(self) -> str:
+        if self._path is None:
+            self._path = self._hydrate(self._key)
+        return self._path
+
+    def _hydrate(self, key: str) -> str:
+        """Materialize an object-store blob to a local tmp path."""
+        tmp = Path(tempfile.gettempdir()) / "ix_uploads" / key
+        tmp.parent.mkdir(parents=True, exist_ok=True)
+        if not tmp.exists():
+            tmp.write_bytes(self._store.get_bytes(key))
+        return str(tmp)
+
+    def __hash__(self) -> int:
+        return hash((self.db_id, self.source))
+
+
 class DatabaseService:
     _BUNDLED = "bundled"
     _UPLOADED = "uploaded"
@@ -172,6 +207,18 @@ class DatabaseService:
         return refs
 
     def _list_uploaded(self, session_id: str) -> list[DatabaseRef]:
+        """List uploaded DB keys, deferring hydration until local_path is accessed.
+
+        Previously every call to _list_uploaded (which fires on both list() and
+        resolve()) would eagerly download every uploaded SQLite file from the
+        object store via _hydrate().  For GCS-backed deployments this meant a
+        network download of every DB the user had ever uploaded, on every
+        request — even requests that only needed one DB's path.
+
+        Now we wrap the lazy-hydration logic in a property so the download only
+        happens when local_path is actually read (i.e. when someone calls
+        sqlite3.connect).  resolve() and list() no longer trigger downloads.
+        """
         prefix = self._uploaded_prefix(session_id)
         refs: list[DatabaseRef] = []
         for key in self._store.list(prefix):
@@ -179,10 +226,11 @@ class DatabaseService:
                 continue
             db_id = Path(key).stem
             refs.append(
-                DatabaseRef(
+                _LazyDatabaseRef(
                     db_id=db_id,
                     source=self._UPLOADED,
-                    local_path=self._hydrate(key),
+                    key=key,
+                    store=self._store,
                 )
             )
         return refs

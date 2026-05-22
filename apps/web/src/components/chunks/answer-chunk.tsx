@@ -1,51 +1,35 @@
 "use client";
 
-import React, { useState, useMemo, useCallback } from "react";
+import React, { useState, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import remarkGfmFootnotes from "@/lib/remark-gfm-footnotes";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import {
-  expandCombinedFootnoteMarkers,
-  parseFootnoteRowMap,
-  stripRowsDirectives,
-} from "@/lib/footnote-parser";
-import { stripAnsiEscapes, convertBracketCitationsToFootnotes, fixDanglingFootnotes } from "@/lib/citation-utils";
-import { useChatStore } from "@/stores/chat-store";
 
 interface AnswerChunkProps {
   content: string;
-  /**
-   * The id of the assistant message this answer belongs to. Used to scope
-   * footnote-citation highlights so the data-table chunk for the same message
-   * (and only that message) flashes the cited rows. Optional for back-compat
-   * with older callers, but every in-thread render path passes it.
-   */
-  messageId?: string;
-}
-
-/** Extract a footnote id from a remark-gfm footnote anchor href. */
-function footnoteIdFromHref(href: string | undefined): string | null {
-  if (!href) return null;
-  // remark-gfm emits anchors like:
-  //   #user-content-fn-1            (footnote definition target)
-  //   #user-content-fnref-1         (back-ref from definition)
-  //   #user-content-fnref-1-2       (multi-ref disambiguation suffix)
-  const m = href.match(/^#user-content-fn(?:ref)?-([^-\s]+)/);
-  return m ? m[1] : null;
 }
 
 /** Normalize dashes (em-dash, en-dash, hyphen) to spaces and collapse whitespace. */
 function normalizeTitle(title: string): string {
   return title
     .toLowerCase()
-    .replace(/[\u2014\u2013\-]+/g, " ")
+    .replace(/[—–\-]+/g, " ")
     .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Strip citation markers and footnote definitions the backend may emit in answer text. */
+function cleanAnswerMarkdown(text: string): string {
+  return text
+    .replace(/\[\[\d+\]\]/g, "")                // [[N]] bracket citations
+    .replace(/^\[\^[^\]]+\]:\s*[^\n]*$/gm, "")  // [^N]: definition lines (must run before inline strip)
+    .replace(/\[\^[\d,\s\-]+\]/g, "")           // [^N] and [^3,5,6] / [^3-6] inline footnote markers
+    .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
 
@@ -122,39 +106,11 @@ function parseSections(markdown: string): {
   return { preamble, sections };
 }
 
-/** Extract all footnote definition lines from markdown. */
-function extractAllFootnoteDefinitions(markdown: string): string {
-  const re = /^\[\^[^\]]+\]:\s*[^\n]*$/gm;
-  const defs: string[] = [];
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(markdown)) !== null) defs.push(m[0]);
-  return defs.join("\n");
-}
-
-/** Build a map of footnote id → definition text (without {rows=} directive). */
-function buildFootnoteDefMap(markdown: string): Record<string, string> {
-  const map: Record<string, string> = {};
-  const re = /^\[\^([^\]]+)\]:\s*([^\n]*)$/gm;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(markdown)) !== null) {
-    const id = m[1];
-    const body = m[2].replace(/\s*\{rows=[^}]*\}/, "").trim();
-    map[id] = body;
-  }
-  return map;
-}
-
 /** Shared markdown renderer for analyst sections. */
-function AnalystMarkdown({
-  content,
-  onFootnoteClick,
-}: {
-  content: string;
-  onFootnoteClick?: (footnoteId: string) => void;
-}) {
+function AnalystMarkdown({ content }: { content: string }) {
   return (
     <ReactMarkdown
-      remarkPlugins={[remarkGfm, remarkGfmFootnotes]}
+      remarkPlugins={[remarkGfm]}
       components={{
         h1: ({ children }) => (
           <h1 className="text-lg font-bold text-foreground mt-4 mb-2">
@@ -230,44 +186,16 @@ function AnalystMarkdown({
             {children}
           </td>
         ),
-        a: ({ children, href }) => {
-          const footnoteId = footnoteIdFromHref(href);
-          if (footnoteId !== null) {
-            // remark-gfm wraps footnote markers in <sup><a>...</a></sup>.
-            // Intercept the click so we can flash the cited rows in the
-            // data-table above instead of jumping to the page anchor.
-            const isBackref = href?.includes("user-content-fnref-");
-            return (
-              <a
-                href={href}
-                data-footnote-id={footnoteId}
-                onClick={(e) => {
-                  if (onFootnoteClick) {
-                    e.preventDefault();
-                    onFootnoteClick(footnoteId);
-                  }
-                }}
-                className={
-                  isBackref
-                    ? "text-primary/70 hover:text-primary underline-offset-2 no-underline"
-                    : "text-primary font-medium hover:text-primary/80 underline-offset-2 hover:underline cursor-pointer"
-                }
-              >
-                {children}
-              </a>
-            );
-          }
-          return (
-            <a
-              href={href}
-              className="text-primary underline underline-offset-2 hover:text-primary/80"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              {children}
-            </a>
-          );
-        },
+        a: ({ children, href }) => (
+          <a
+            href={href}
+            className="text-primary underline underline-offset-2 hover:text-primary/80"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            {children}
+          </a>
+        ),
         blockquote: ({ children }) => (
           <blockquote className="border-l-2 border-primary/50 pl-3 text-sm text-muted-foreground italic my-2">
             {children}
@@ -284,11 +212,9 @@ function AnalystMarkdown({
 function CollapsibleSection({
   title,
   content,
-  onFootnoteClick,
 }: {
   title: string;
   content: string;
-  onFootnoteClick?: (footnoteId: string) => void;
 }) {
   const [isOpen, setIsOpen] = useState(false);
 
@@ -306,79 +232,19 @@ function CollapsibleSection({
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div className="px-3 pt-2 pb-1">
-          <AnalystMarkdown content={content} onFootnoteClick={onFootnoteClick} />
+          <AnalystMarkdown content={content} />
         </div>
       </CollapsibleContent>
     </Collapsible>
   );
 }
 
-function AnswerChunkInner({ content, messageId }: AnswerChunkProps) {
-  // Pre-process the LLM text before markdown rendering:
-  // 1. Strip ANSI escape sequences (bold codes, etc.) leaked by some models.
-  // 2. Convert [[N]] bracket citations into [^src-N] footnotes so they render
-  //    as clickable superscripts instead of raw literal text.
-  // 3. Expand combined inline footnote markers (e.g. [^3,5,6] → [^3][^5][^6]).
-  //    Must happen BEFORE fixing dangling footnotes so individual [^N] IDs
-  //    are cleanly separated before we check for missing definitions.
-  // 4. Fix dangling [^N] inline markers — when the LLM emits [^1] in the body
-  //    but forgets the [^1]: definition, append a synthetic one so remark-gfm
-  //    still renders it as a clickable superscript.
-  // 5. Parse the {rows=...} footnote directives from the answer_synthesizer
-  //    prompt's References section to wire [^N] clicks to data-table rows.
-  // 6. Strip {rows=...} directives from displayed text.
-  const { footnoteRows, displayContent, fullPreprocessed } = useMemo(() => {
-    const sanitized = stripAnsiEscapes(content);
-    const { processed: bracketFixed } =
-      convertBracketCitationsToFootnotes(sanitized);
-    const expanded = expandCombinedFootnoteMarkers(bracketFixed);
-    const withBackfilledFootnotes = fixDanglingFootnotes(expanded);
-    const rows = parseFootnoteRowMap(withBackfilledFootnotes);
-    const stripped = stripRowsDirectives(withBackfilledFootnotes);
-    return {
-      footnoteRows: rows,
-      displayContent: stripped,
-      fullPreprocessed: withBackfilledFootnotes,
-    };
-  }, [content]);
-
-  // Extract all footnote definitions so they can be injected into every
-  // section's ReactMarkdown instance. Without this, remarkGfmFootnotes
-  // can't resolve [^N] markers in sections 1-4 when definitions are in
-  // section 5 (References).
-  const allFootnoteDefs = useMemo(
-    () => extractAllFootnoteDefinitions(fullPreprocessed),
-    [fullPreprocessed],
-  );
-  const footnoteDefMap = useMemo(
-    () => buildFootnoteDefMap(fullPreprocessed),
-    [fullPreprocessed],
-  );
-  const withDefs = useCallback(
-    (sectionContent: string) =>
-      allFootnoteDefs ? sectionContent + "\n\n" + allFootnoteDefs : sectionContent,
-    [allFootnoteDefs],
-  );
-
-  const [activeCitation, setActiveCitation] = useState<string | null>(null);
-
-  const setMessageHighlight = useChatStore((s) => s.setMessageHighlight);
-
-  const handleFootnoteClick = useCallback(
-    (footnoteId: string) => {
-      if (!messageId) return;
-      const rowIndices = footnoteRows[footnoteId] ?? [];
-      if (rowIndices.length > 0) {
-        setMessageHighlight({ messageId, rowIndices });
-      }
-      setActiveCitation((prev) => (prev === footnoteId ? null : footnoteId));
-    },
-    [messageId, footnoteRows, setMessageHighlight],
-  );
+function AnswerChunkInner({ content }: AnswerChunkProps) {
+  const cleaned = useMemo(() => cleanAnswerMarkdown(content), [content]);
 
   const { preamble, sections } = useMemo(
-    () => parseSections(displayContent),
-    [displayContent],
+    () => parseSections(cleaned),
+    [cleaned],
   );
   const primarySections = sections.filter((s) => s.isPrimary);
   const secondarySections = sections.filter((s) => !s.isPrimary);
@@ -388,22 +254,14 @@ function AnswerChunkInner({ content, messageId }: AnswerChunkProps) {
     <div className="prose-invert prose-sm max-w-none">
       {hasSections ? (
         <div className="space-y-3">
-          {preamble && (
-            <AnalystMarkdown
-              content={withDefs(preamble)}
-              onFootnoteClick={handleFootnoteClick}
-            />
-          )}
+          {preamble && <AnalystMarkdown content={preamble} />}
 
           {primarySections.map((section, i) => (
             <div key={`primary-${i}`}>
               <h3 className="text-sm font-semibold text-foreground mt-2 mb-1.5">
                 {section.title}
               </h3>
-              <AnalystMarkdown
-                content={withDefs(section.content)}
-                onFootnoteClick={handleFootnoteClick}
-              />
+              <AnalystMarkdown content={section.content} />
             </div>
           ))}
 
@@ -413,61 +271,19 @@ function AnswerChunkInner({ content, messageId }: AnswerChunkProps) {
                 <CollapsibleSection
                   key={`secondary-${i}`}
                   title={section.title}
-                  content={withDefs(section.content)}
-                  onFootnoteClick={handleFootnoteClick}
+                  content={section.content}
                 />
               ))}
             </div>
           )}
-
-          {/* Citation detail card */}
-          {activeCitation && footnoteDefMap[activeCitation] && (
-            <div className="mt-3 p-3 rounded-lg border border-primary/20 bg-primary/5 dark:bg-primary/10">
-              <div className="flex items-start justify-between gap-2">
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-semibold text-primary mb-1">
-                    Source [{activeCitation}]
-                  </p>
-                  <p className="text-sm text-foreground/85 leading-relaxed">
-                    {footnoteDefMap[activeCitation]}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setActiveCitation(null)}
-                  className="shrink-0 size-5 inline-flex items-center justify-center rounded text-muted-foreground hover:text-foreground transition-colors"
-                  aria-label="Close citation"
-                >
-                  &times;
-                </button>
-              </div>
-              {(footnoteRows[activeCitation]?.length ?? 0) > 0 && (
-                <button
-                  type="button"
-                  className="mt-2 text-xs font-medium text-primary hover:text-primary/80 underline underline-offset-2 transition-colors"
-                  onClick={() => {
-                    const rowIndices = footnoteRows[activeCitation] ?? [];
-                    if (rowIndices.length > 0 && messageId) {
-                      setMessageHighlight({ messageId, rowIndices });
-                    }
-                  }}
-                >
-                  View in data table &rarr;
-                </button>
-              )}
-            </div>
-          )}
         </div>
       ) : (
-        <AnalystMarkdown
-          content={displayContent}
-          onFootnoteClick={handleFootnoteClick}
-        />
+        <AnalystMarkdown content={cleaned} />
       )}
     </div>
   );
 }
 
-// Memoized to prevent React-Markdown re-parsing on every parent re-render
+// Memoized to prevent ReactMarkdown re-parsing on every parent re-render
 // when the content string hasn't changed (e.g. sibling chunks updating).
 export const AnswerChunk = React.memo(AnswerChunkInner);

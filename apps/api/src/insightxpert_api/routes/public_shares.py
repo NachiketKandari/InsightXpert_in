@@ -15,6 +15,12 @@ from ..shared_snapshots.dto import SharedSnapshotMessage, SharedSnapshotPublic
 router = APIRouter(prefix="/api/v1/public", tags=["public_shares"])
 
 
+def _ts(raw: int | None) -> int:
+    """Convert epoch-seconds integer to milliseconds for JS. Zero/null -> now."""
+    val = raw or 0
+    return (val * 1000) if val > 0 else int(time.time() * 1000)
+
+
 def _is_visible(row: dict, now: int) -> bool:
     if row["revoked_at"] is not None:
         return False
@@ -38,10 +44,14 @@ def get_public_share(token: str, response: Response) -> SharedSnapshotPublic:
     import json as _json
 
     payload = _json.loads(row["payload_json"])
+    msgs = payload.get("messages", [])
+    for m in msgs:
+        if "created_at" in m:
+            m["created_at"] = _ts(m["created_at"])
     return SharedSnapshotPublic(
         title=payload.get("title"),
         dataset_name=payload.get("dataset_name"),
-        messages=[SharedSnapshotMessage(**m) for m in payload.get("messages", [])],
-        created_at=row["created_at"],
+        messages=[SharedSnapshotMessage(**m) for m in msgs],
+        created_at=_ts(row["created_at"]),
         expires_at=row["expires_at"],
     )

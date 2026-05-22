@@ -10,25 +10,25 @@ def test_client_config_is_public(client: TestClient):
     r = client.get("/api/v1/client-config")
     assert r.status_code == 200
     body = r.json()
-    assert body["version"] == "0.1.0"
-    assert body["features"]["sql_runner"] is True
-    assert body["features"]["upload"] is True
-    assert body["features"]["voice"] is False
+    assert body["config"]["features"]["sql_executor"] is True
+    assert body["config"]["features"]["model_switching"] is False
+    assert body["is_admin"] is False
+    assert body["org_id"] is None
 
 
 def test_client_config_shape(client: TestClient):
     r = client.get("/api/v1/client-config")
     assert r.status_code == 200
-    feats = r.json()["features"]
+    feats = r.json()["config"]["features"]
     expected = {
-        "sql_runner",
-        "upload",
-        "profile_editor",
-        "voice",
-        "ollama",
-        "automations",
-        "admin",
-        "insights",
-        "notifications",
+        "sql_executor",
+        "model_switching",
+        "rag_training",
+        "rag_retrieval",
+        "chart_rendering",
+        "conversation_export",
+        "agent_process_sidebar",
+        "clarification_enabled",
+        "stats_context_injection",
     }
     assert set(feats.keys()) == expected

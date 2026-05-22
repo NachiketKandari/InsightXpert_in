@@ -187,7 +187,7 @@ function ChunkRendererInner({ chunk, isComplete, isStreaming, enrichmentTraces, 
       content = (
         <>
           <ProgressStep label="Generating answer" isComplete={isComplete} />
-          <AnswerChunk content={legacyText} messageId={messageId} />
+          <AnswerChunk content={legacyText} />
         </>
       );
       break;
@@ -207,7 +207,7 @@ function ChunkRendererInner({ chunk, isComplete, isStreaming, enrichmentTraces, 
           {enrichmentTraces && enrichmentTraces.length > 0 ? (
             <InsightChunk content={insightText} traces={enrichmentTraces} />
           ) : (
-            <AnswerChunk content={insightText} messageId={messageId} />
+            <AnswerChunk content={insightText} />
           )}
         </>
       );
@@ -331,7 +331,6 @@ function ChunkRendererInner({ chunk, isComplete, isStreaming, enrichmentTraces, 
           <ProgressStep label="Generated answer" isComplete={isComplete} />
           <AnswerGeneratedChunk
             data={chunk.data as unknown as AnswerGeneratedData}
-            messageId={messageId}
           />
         </>
       );

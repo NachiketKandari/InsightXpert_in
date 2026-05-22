@@ -26,6 +26,14 @@ _DEFAULT_LIMIT = 50
 _MAX_LIMIT = 200
 
 
+def _ts(raw: Any) -> int:
+    """Convert epoch-seconds integer to milliseconds for JS. Zero/null -> now."""
+    import time as _time
+
+    val = raw or 0
+    return (val * 1000) if val > 0 else int(_time.time() * 1000)
+
+
 def _decode(cursor: str | None) -> tuple[int, str] | None:
     if not cursor:
         return None
@@ -106,8 +114,8 @@ def _list(
                 "db_id": r.db_id,
                 "title": r.title,
                 "message_count": int(r.message_count or 0),
-                "created_at": r.created_at,
-                "updated_at": r.updated_at,
+                "created_at": _ts(r.created_at),
+                "updated_at": _ts(r.updated_at),
             }
             for r in rows
         ],
@@ -162,7 +170,7 @@ def _detail(conv_id: str) -> dict[str, Any] | None:
                 "tokens_in": m.tokens_in,
                 "tokens_out": m.tokens_out,
                 "chunks_json": chunks,
-                "created_at": m.created_at,
+                "created_at": _ts(m.created_at),
             }
         )
     return {
@@ -171,8 +179,8 @@ def _detail(conv_id: str) -> dict[str, Any] | None:
         "user_email": row.user_email,
         "db_id": row.db_id,
         "title": row.title,
-        "created_at": row.created_at,
-        "updated_at": row.updated_at,
+        "created_at": _ts(row.created_at),
+        "updated_at": _ts(row.updated_at),
         "messages": parsed_msgs,
     }
 

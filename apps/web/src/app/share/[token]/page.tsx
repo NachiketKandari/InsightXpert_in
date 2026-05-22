@@ -45,7 +45,7 @@ export default async function SharePage({
         )}
         <p className="text-xs text-muted-foreground">
           Read-only snapshot — generated{" "}
-          {new Date(snapshot.created_at * 1000).toLocaleDateString()}.
+          {new Date(snapshot.created_at).toLocaleDateString()}.
         </p>
       </header>
       <SharedMessageList snapshot={snapshot} />

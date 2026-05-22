@@ -21,6 +21,11 @@ conversations = Table(
     Column("db_id", String(255), nullable=True),
     Column("title", String(255), nullable=True),
     Column("is_starred", Integer, nullable=False, server_default="0"),
+    # NOTE: created_at / updated_at have no server_default because SQLite
+    # and PostgreSQL differ in how they handle dynamic function defaults for
+    # Integer columns. Callers MUST always supply an explicit epoch-seconds
+    # value. Rows with 0 or NULL are backfilled by migration
+    # 20260522_0001_backfill_timestamps.py.
     Column("created_at", Integer, nullable=False),
     Column("updated_at", Integer, nullable=False),
 )

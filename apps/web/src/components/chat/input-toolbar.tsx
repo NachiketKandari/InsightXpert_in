@@ -93,14 +93,15 @@ export function InputToolbar({
   const [uploadOpen, setUploadOpen] = useState(false);
   const [pdfUploadOpen, setPdfUploadOpen] = useState(false);
   const { isFeatureEnabled } = useClientConfig();
-  const showModelSwitching = isFeatureEnabled("model_switching");
+  const { isAdmin } = useCurrentUser();
+  const showModelSwitching =
+    isFeatureEnabled("model_switching") || isAdmin;
   const showSqlExecutor = isFeatureEnabled("sql_executor");
 
   const agentMode = useSettingsStore((s) => s.agentMode);
   const setAgentMode = useSettingsStore((s) => s.setAgentMode);
   const pipelineMode = useSettingsStore((s) => s.pipelineMode);
   const setPipelineMode = useSettingsStore((s) => s.setPipelineMode);
-  const { isAdmin } = useCurrentUser();
 
   const setSqlExecutorOpen = useChatStore((s) => s.setSqlExecutorOpen);
   const currentAgentPhase = useChatStore((s) => s.currentAgentPhase);

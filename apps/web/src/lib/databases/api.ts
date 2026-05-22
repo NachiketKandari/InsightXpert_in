@@ -47,3 +47,37 @@ export async function fetchProfile(
     return null;
   }
 }
+
+// Update a single column profile field.
+//   PATCH /api/v1/databases/{db_id}/profile/columns/{table}/{column}
+export async function updateColumnProfile(
+  dbId: string,
+  tableName: string,
+  columnName: string,
+  fieldPath: string,
+  value: unknown,
+): Promise<boolean> {
+  const res = await apiFetch(
+    `/api/v1/databases/${encodeURIComponent(dbId)}/profile/columns/${encodeURIComponent(tableName)}/${encodeURIComponent(columnName)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ field_path: fieldPath, value }),
+    },
+  );
+  return res.ok;
+}
+
+// Revert a column profile field override to its generated value.
+//   DELETE /api/v1/databases/{db_id}/profile/columns/{table}/{column}/overrides/{field_path}
+export async function deleteColumnOverride(
+  dbId: string,
+  tableName: string,
+  columnName: string,
+  fieldPath: string,
+): Promise<boolean> {
+  const res = await apiFetch(
+    `/api/v1/databases/${encodeURIComponent(dbId)}/profile/columns/${encodeURIComponent(tableName)}/${encodeURIComponent(columnName)}/overrides/${encodeURIComponent(fieldPath)}`,
+    { method: "DELETE" },
+  );
+  return res.ok;
+}
