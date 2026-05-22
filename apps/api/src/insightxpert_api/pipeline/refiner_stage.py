@@ -87,7 +87,7 @@ class SqlRefinerStage:
                     ChunkType.SQL_EXECUTING, SQLExecutingPayload(sql=new_sql)
                 )
             try:
-                result = DatabaseConnector(ref.local_path).execute(new_sql)
+                result = DatabaseConnector(ref).execute(new_sql)
             except Exception as exc:
                 ctx.state["error"] = f"sql_execution_failed: {exc}"
                 continue

@@ -23,7 +23,7 @@ from fastapi import FastAPI
 from ..db.connector import DatabaseConnector
 from ..db.engine import get_background_engine
 from ..logging import get_logger
-from ..services.database_service import DatabaseService
+from ..services.database_service import DatabaseRef, DatabaseService
 from . import notifications as notif_module
 from . import repository
 from .evaluator import TriggerEvaluator
@@ -67,19 +67,16 @@ def _lock_for(automation_id: str) -> asyncio.Lock:
     return lock
 
 
-def _resolve_db_path(db_svc: DatabaseService, db_id: str) -> str | None:
-    """Resolve a db_id against the bundled registry. Returns a local path or None."""
+def _resolve_db_ref(db_svc: DatabaseService, db_id: str) -> DatabaseRef | None:
+    """Resolve a db_id against the bundled registry. Returns a DatabaseRef or None."""
     # DatabaseService.resolve takes a session_id; bundled DBs ignore it. Using
     # the db_id itself works because bundled resolution is session-independent.
-    ref = db_svc.resolve(session_id=db_id, db_id=db_id)
-    if ref is None:
-        return None
-    return ref.local_path
+    return db_svc.resolve(session_id=db_id, db_id=db_id)
 
 
-def _run_sql(path: str, sql: str, row_limit: int = 1000) -> dict[str, Any]:
-    """Execute ``sql`` against the sqlite file at ``path``."""
-    result = DatabaseConnector(path, row_limit=row_limit).execute(sql)
+def _run_sql(ref: DatabaseRef, sql: str, row_limit: int = 1000) -> dict[str, Any]:
+    """Execute ``sql`` against the database described by ``ref``."""
+    result = DatabaseConnector(ref, row_limit=row_limit).execute(sql)
     return {"columns": result.columns, "rows": result.rows}
 
 
@@ -152,11 +149,11 @@ async def _execute_one(
                     error="no sql queries",
                 )
 
-            # Resolve DB path
-            db_path: str | None
+            # Resolve DB ref
+            db_ref: DatabaseRef | None
             if app is not None and hasattr(app.state, "db_service"):
                 db_svc: DatabaseService = app.state.db_service
-                db_path = _resolve_db_path(db_svc, auto["db_id"])
+                db_ref = _resolve_db_ref(db_svc, auto["db_id"])
             else:
                 # Fallback — construct a DatabaseService from settings.
                 from ..config import get_settings
@@ -167,9 +164,9 @@ async def _execute_one(
                     bundled_dir=settings.bundled_dbs_dir,
                     store=build_store(settings),
                 )
-                db_path = _resolve_db_path(db_svc, auto["db_id"])
+                db_ref = _resolve_db_ref(db_svc, auto["db_id"])
 
-            if db_path is None:
+            if db_ref is None:
                 _err_run = repository.insert_run({
                     "automation_id": automation_id,
                     "status": "error",
@@ -193,7 +190,7 @@ async def _execute_one(
             try:
                 for sql in sql_queries:
                     step_results.append(
-                        await asyncio.to_thread(_run_sql, db_path, sql)
+                        await asyncio.to_thread(_run_sql, db_ref, sql)
                     )
             except Exception as exc:  # noqa: BLE001
                 execution_ms = int((time.perf_counter() - start) * 1000)

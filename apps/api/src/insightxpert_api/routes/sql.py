@@ -1,12 +1,11 @@
 """SQL execute route.
 
 Powers the forked FE's SQL drawer. Read-only; write attempts are rejected by
-``DatabaseConnector.FORBIDDEN_SQL_RE`` before they ever touch SQLite.
+the per-dialect forbidden-SQL regex before the query touches the database.
 """
 
 from __future__ import annotations
 
-import sqlite3
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -46,7 +45,7 @@ async def execute_sql(
         raise HTTPException(status_code=404, detail="invalid_db")
 
     connector = DatabaseConnector(
-        ref.local_path,
+        ref,
         row_limit=settings.sql_row_limit,
         timeout_s=settings.sql_timeout_seconds,
     )
@@ -56,8 +55,8 @@ async def execute_sql(
         raise HTTPException(status_code=400, detail="sql_forbidden_write") from e
     except SQLTimeoutError as e:
         raise HTTPException(status_code=408, detail="sql_timeout") from e
-    except sqlite3.OperationalError as e:
-        raise HTTPException(status_code=400, detail="sql_syntax") from e
+    except Exception as e:
+        raise HTTPException(status_code=400, detail="sql_error") from e
 
     return SqlExecuteResponse(
         columns=result.columns,

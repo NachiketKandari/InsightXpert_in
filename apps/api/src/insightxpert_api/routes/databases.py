@@ -44,6 +44,7 @@ from ..auth.current_user import CurrentUser, get_current_user, require_admin
 from ..config import Settings, get_settings
 from ..databases import repository as databases_repo
 from ..databases import service as visibility_service
+from ..db.dialects import get_adapter
 from ..db.schema import ddl as schema_ddl
 from ..logging import get_logger
 from ..profiling import repository as profiles_repo
@@ -123,15 +124,28 @@ def _prof_svc(settings: Settings) -> ProfileService:
     return ProfileService()
 
 
-def _list_tables(path: str) -> list[str]:
-    con = sqlite3.connect(path)
-    try:
-        rows = con.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
-        ).fetchall()
-    finally:
-        con.close()
-    return [r[0] for r in rows]
+def _list_tables(ref: Any) -> list[str]:
+    """List table names in the database described by ``ref``.
+
+    For SQLite: queries sqlite_master directly.
+    For Postgres: intentional stub — table listing via information_schema lands in Task 10.
+    """
+    if ref.dialect == "sqlite":
+        adapter = get_adapter(ref.dialect)
+        con = adapter.open_readonly(ref)
+        try:
+            rows = con.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+            ).fetchall()
+        finally:
+            con.close()
+        return [r[0] for r in rows]
+
+    # Intentional stub: Postgres table listing via information_schema lands in Task 10.
+    raise NotImplementedError(
+        f"Table listing for dialect {ref.dialect!r} is not yet implemented "
+        "(Postgres table listing lands in Task 10)"
+    )
 
 
 @functools.lru_cache(maxsize=128)
@@ -448,10 +462,9 @@ async def get_schema(
     ref = await asyncio.to_thread(svc.resolve, cu.id, db_id)
     if ref is None:
         raise HTTPException(status_code=404, detail="invalid_db")
-    path = ref.local_path
     ddl, tables = await asyncio.gather(
-        asyncio.to_thread(_cached_schema_ddl, path),
-        asyncio.to_thread(_cached_list_tables, path),
+        asyncio.to_thread(schema_ddl, ref),
+        asyncio.to_thread(_list_tables, ref),
     )
     return SchemaResponse(ddl=ddl, tables=tables)
 
@@ -667,7 +680,7 @@ async def run_profile(
     # Any expensive flag on + not confirmed → emit a single estimate chunk
     # and close the stream. FE re-POSTs with confirmed=true to run.
     if flags.any and not req.confirmed:
-        _, column_count = count_columns(ref.local_path, db_id)
+        _, column_count = count_columns(ref)
         estimate = estimate_cost(
             column_count, flags, settings.profiling_batch_size,
             provider=settings.llm_provider,

@@ -80,6 +80,8 @@ def test_upgrade_creates_databases_and_shares(tmp_path, monkeypatch):
         "db_id", "owner_user_id", "visibility", "size_bytes", "created_at",
         # Added by 20260424_0001 (Tier-1 full-schema mode).
         "pipeline_mode_default",
+        # Added by 20260425_0002 (postgres dialect adapter).
+        "dialect", "connection_url_env_var",
         # Added by 20260427_0001 (BYO external DB connector).
         "kind", "connection_config_encrypted",
     }

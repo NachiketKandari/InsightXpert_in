@@ -52,9 +52,11 @@ apps/api/Databases/**/*.sqlite
 
 # Worktrees
 .worktrees/
-
 # Superpowers / agent artifacts
 .clone/
 .superpowers/
 council-report-*
 council-transcript-*
+
+# Bundled DB shared state (never commit)
+/apps/api/Databases/_shared

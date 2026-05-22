@@ -202,6 +202,10 @@ class ProfilerStage:
         if ref is None:
             raise ValueError(f"database not found: {db_id}")
 
+        # Propagate dialect so downstream stages (validator, generator) can read
+        # it from state without needing their own DatabaseService injection.
+        ctx.state["db_dialect"] = getattr(ref, "dialect", "sqlite")
+
         # Stash FK-aware schema on ctx.state so SchemaLinkerStage can use
         # real foreign keys from PRAGMA foreign_key_list.
         if ctx.state.get("schema") is None and ref.local_path:
