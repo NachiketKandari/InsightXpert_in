@@ -26,7 +26,6 @@ export const ConversationItem = React.memo(function ConversationItem({
   const setActiveConversation = useChatStore((s) => s.setActiveConversation);
   const deleteConversation = useChatStore((s) => s.deleteConversation);
   const renameConversation = useChatStore((s) => s.renameConversation);
-  const prefetchConversationMessages = useChatStore((s) => s.prefetchConversationMessages);
 
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(conversation.title);
@@ -98,8 +97,6 @@ export const ConversationItem = React.memo(function ConversationItem({
       role="button"
       tabIndex={0}
       onClick={() => setActiveConversation(conversation.id)}
-      onMouseEnter={() => prefetchConversationMessages(conversation.id)}
-      onFocus={() => prefetchConversationMessages(conversation.id)}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") setActiveConversation(conversation.id);
       }}
@@ -116,13 +113,13 @@ export const ConversationItem = React.memo(function ConversationItem({
             {conversation.title}
           </p>
           <span className="text-[10px] text-muted-foreground/50 shrink-0">
-            {(() => {
+            {conversation.updatedAt > 86400000 ? (() => {
               const startOfToday = new Date();
               startOfToday.setHours(0, 0, 0, 0);
               return conversation.updatedAt >= startOfToday.getTime()
                 ? relativeTime(conversation.updatedAt)
                 : formatDate(conversation.updatedAt);
-            })()}
+            })() : null}
           </span>
         </div>
       </div>

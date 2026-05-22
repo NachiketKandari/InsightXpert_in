@@ -51,7 +51,6 @@ interface ChatState {
   clearActiveConversation: () => void;
   setActiveConversation: (id: string) => void;
   loadConversationMessages: (id: string) => Promise<void>;
-  prefetchConversationMessages: (id: string) => void;
   deleteConversation: (id: string) => void;
   renameConversation: (id: string, title: string) => void;
 
@@ -141,8 +140,8 @@ export const useChatStore = create<ChatState>()(persist((set, get) => ({
           id: c.id,
           title: c.title,
           messages: c.messages || [],
-          createdAt: typeof c.created_at === "number" ? c.created_at * 1000 : new Date(c.created_at).getTime(),
-          updatedAt: typeof c.updated_at === "number" ? c.updated_at * 1000 : new Date(c.updated_at).getTime(),
+          createdAt: typeof c.created_at === "number" ? c.created_at : new Date(c.created_at).getTime(),
+          updatedAt: typeof c.updated_at === "number" ? c.updated_at : new Date(c.updated_at).getTime(),
         })
       );
       set((state) => {
@@ -212,21 +211,6 @@ export const useChatStore = create<ChatState>()(persist((set, get) => ({
     }
   },
 
-  // Hover/focus prefetch: kick off the load before the user clicks. Idempotent
-  // — if the conversation is already cached or a fetch is in flight, this is
-  // a no-op. Called from ConversationItem onMouseEnter/onFocus.
-  prefetchConversationMessages: (id) => {
-    const conv = get().conversations.find((c) => c.id === id);
-    if (!conv) return;
-    if (conv.messages.length > 0) return; // already cached
-    const isRecentlyCreated = Date.now() - conv.createdAt < 5000;
-    if (isRecentlyCreated) return;
-    if (inflightLoads.has(id)) return;
-    // Fire-and-forget. loadConversationMessages handles its own errors and
-    // populates the in-flight map.
-    void get().loadConversationMessages(id);
-  },
-
   loadConversationMessages: async (id) => {
     // Dedupe concurrent loads for the same conversation.
     const existing = inflightLoads.get(id);
@@ -262,7 +246,7 @@ export const useChatStore = create<ChatState>()(persist((set, get) => ({
           inputTokens: m.input_tokens ?? null,
           outputTokens: m.output_tokens ?? null,
           generationTimeMs: m.generation_time_ms ?? null,
-          timestamp: new Date(m.created_at).getTime(),
+          timestamp: typeof m.created_at === "number" ? m.created_at : new Date(m.created_at).getTime(),
         })
       );
       set((state) => ({
