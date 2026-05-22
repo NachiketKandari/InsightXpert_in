@@ -3,7 +3,14 @@
 // Overview tab: 6 aggregate cards + a compact 7-day chats sparkline.
 // No chart library — raw SVG is fine for a tiny widget.
 
+import { useCallback, useEffect, useState } from "react";
+import { toast } from "sonner";
+
+import { useAdminFeatures } from "@/hooks/use-admin-features";
 import { useAdminOverview } from "@/hooks/use-admin-overview";
+import { FeatureTogglesEditor } from "@/components/admin/feature-toggles";
+import { apiCall } from "@/lib/api";
+import type { FeatureToggles } from "@/types/admin";
 
 function Card({
   label,
@@ -64,6 +71,36 @@ function Sparkline({ points }: { points: { day: number; chats: number }[] }) {
 
 export default function OverviewPage() {
   const { data, isLoading, error } = useAdminOverview();
+  const { data: featuresData, isLoading: featuresLoading } = useAdminFeatures();
+
+  // Sync React Query data to local state for optimistic mutation updates
+  const [features, setFeatures] = useState<FeatureToggles | null>(null);
+  useEffect(() => {
+    if (featuresData?.features) {
+      setFeatures(featuresData.features);
+    }
+  }, [featuresData]);
+
+  const handleFeaturesChange = useCallback(async (next: FeatureToggles) => {
+    setFeatures(next); // optimistic
+    // Find which key changed and persist
+    for (const key of Object.keys(next) as (keyof FeatureToggles)[]) {
+      if (features && next[key] !== features[key]) {
+        const ok = await apiCall(
+          `/api/v1/config/features`,
+          {
+            method: "POST",
+            body: JSON.stringify({ feature: key, enabled: next[key] }),
+          },
+        );
+        if (!ok) {
+          toast.error(`Failed to toggle ${key}`);
+          setFeatures(features); // revert
+          return;
+        }
+      }
+    }
+  }, [features]);
 
   if (isLoading) {
     return (
@@ -109,6 +146,15 @@ export default function OverviewPage() {
           points={data.sparkline_7d.map((p) => ({ day: p.day, chats: p.chats }))}
         />
       </div>
+
+      {!featuresLoading && features && (
+        <div className="rounded-lg border border-border bg-card p-4">
+          <FeatureTogglesEditor
+            features={features}
+            onChange={handleFeaturesChange}
+          />
+        </div>
+      )}
     </div>
   );
 }
