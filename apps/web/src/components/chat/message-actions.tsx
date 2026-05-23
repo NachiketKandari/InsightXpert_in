@@ -24,7 +24,7 @@ interface MessageActionsProps {
   onRetry?: () => void;
   onResend?: (content: string) => void;
   onFeedback?: (type: "up" | "down", comment?: string) => void;
-  onMarkInsight?: (note?: string) => void;
+  onMarkInsight?: (note?: string) => Promise<boolean>;
   onDownloadMessage?: () => void;
   onDownloadConversation?: () => void;
 }
@@ -77,11 +77,13 @@ export function MessageActions({
     setShowInsightInput(true);
   };
 
-  const handleSubmitInsight = () => {
-    setInsightMarked(true);
+  const handleSubmitInsight = async () => {
     setShowInsightInput(false);
-    onMarkInsight?.(insightNote || undefined);
-    setInsightNote("");
+    const ok = await onMarkInsight?.(insightNote || undefined);
+    if (ok) {
+      setInsightMarked(true);
+      setInsightNote("");
+    }
   };
 
   if (!content) return null;

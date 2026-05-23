@@ -6,6 +6,7 @@ execute it. Emits ``sql_generated`` (iteration=N) for every refinement.
 """
 from __future__ import annotations
 
+import asyncio
 import re
 from pathlib import Path
 
@@ -65,7 +66,7 @@ class SqlRefinerStage:
                 iteration=i,
                 prior_attempts=[],
             )
-            resp = await self._llm.async_generate(prompt)
+            resp = await asyncio.wait_for(self._llm.async_generate(prompt), timeout=60.0)
             m = _FENCED_SQL.search(resp)
             new_sql = (m.group(1) if m else resp).strip().rstrip(";").strip()
             ctx.state["sql"] = new_sql

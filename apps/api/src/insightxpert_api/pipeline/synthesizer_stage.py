@@ -41,6 +41,7 @@ Returns:
 """
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 from jinja2 import Template
@@ -99,7 +100,7 @@ class AnswerSynthesizerStage:
         # answer_generated emission, which remains the route's responsibility.
         chunks: list[str] = []
         try:
-            stream = self._llm.async_generate_stream(prompt)
+            stream = await asyncio.wait_for(self._llm.async_generate_stream(prompt), timeout=60.0)
             async for delta in stream:
                 if not delta:
                     continue

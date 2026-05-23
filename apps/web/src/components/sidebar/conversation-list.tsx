@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { useShallow } from "zustand/shallow";
 import { useChatStore } from "@/stores/chat-store";
 import { ConversationItem } from "./conversation-item";
 import type { Conversation } from "@/types/chat";
@@ -38,7 +39,7 @@ function groupConversationsByDate(conversations: Conversation[]): ConversationGr
 }
 
 export function ConversationList() {
-  const conversations = useChatStore((s) => s.conversations);
+  const conversations = useChatStore(useShallow((s) => s.conversations));
   const activeConversationId = useChatStore((s) => s.activeConversationId);
   const isLoadingConversations = useChatStore((s) => s.isLoadingConversations);
 

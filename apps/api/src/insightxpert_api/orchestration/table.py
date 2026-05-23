@@ -68,11 +68,22 @@ insights = Table(
     "insights",
     metadata,
     Column("id", String(36), primary_key=True),
+    Column("user_id", String(36), nullable=True),
+    Column("org_id", String(36), nullable=True),
     Column("conversation_id", String(36), nullable=False),
-    Column("content", Text, nullable=False),
+    Column("message_id", String(36), nullable=True),
+    Column("title", String(255), nullable=True),
     Column("summary", Text, nullable=True),
+    Column("content", Text, nullable=False),
+    Column("categories", Text, nullable=True),
+    Column("enrichment_task_count", Integer, nullable=False, server_default="0"),
+    Column("is_bookmarked", Integer, nullable=False, server_default="0"),
+    Column("user_note", Text, nullable=True),
+    Column("source", String(16), nullable=False, server_default="auto"),
     Column("created_at", Integer, nullable=False),
 )
+Index("ix_insights_user_created", insights.c.user_id, insights.c.created_at.desc())
+Index("ix_insights_conversation_id", insights.c.conversation_id)
 
 agent_executions = Table(
     "agent_executions",

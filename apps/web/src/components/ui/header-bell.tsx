@@ -12,6 +12,7 @@ interface HeaderBellProps {
   pollIntervalMs: number;
   onPoll: () => void;
   onOpen: () => void;
+  onHover?: () => void;
   renderPopover: (controls: { showAll: () => void }) => React.ReactNode;
   renderModal: (open: boolean, onOpenChange: (open: boolean) => void) => React.ReactNode;
 }
@@ -24,12 +25,28 @@ export function HeaderBell({
   pollIntervalMs,
   onPoll,
   onOpen,
+  onHover,
   renderPopover,
   renderModal,
 }: HeaderBellProps) {
   const [popoverOpen, setPopoverOpen] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
+
+  // Prefetch data on hover so it is ready before the user clicks.
+  // Debounced 150ms to avoid redundant fetches during rapid mouse movement.
+  const hoverTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => {
+    return () => clearTimeout(hoverTimerRef.current);
+  }, []);
+  const handleHover = useCallback(() => {
+    if (hoverTimerRef.current) {
+      clearTimeout(hoverTimerRef.current);
+    }
+    hoverTimerRef.current = setTimeout(() => {
+      onHover?.();
+    }, 150);
+  }, [onHover]);
 
   // Poll on interval, paused when the tab is in the background.
   useEffect(() => {
@@ -86,6 +103,7 @@ export function HeaderBell({
           size="icon"
           className="size-9 relative"
           onClick={handleToggle}
+          onMouseEnter={handleHover}
           aria-label={label}
         >
           {icon}

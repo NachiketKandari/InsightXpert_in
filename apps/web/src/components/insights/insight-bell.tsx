@@ -25,9 +25,10 @@ export function InsightBell() {
       count={totalCount}
       badgeClassName="bg-amber-500"
       label="Insights"
-      pollIntervalMs={60_000}
+      pollIntervalMs={30_000}
       onPoll={fetchCount}
       onOpen={fetchInsights}
+      onHover={fetchInsights}
       renderPopover={({ showAll }) => (
         <InsightPopover
           onShowAll={() => { setInitialInsight(null); showAll(); }}

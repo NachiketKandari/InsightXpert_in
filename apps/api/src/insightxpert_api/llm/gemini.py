@@ -59,7 +59,7 @@ class GeminiLLM:
         model: str = "gemini-2.5-flash",
         embed_model: str = "gemini-embedding-001",
     ) -> None:
-        self._client = genai.Client(api_key=api_key)
+        self._client = genai.Client(api_key=api_key, http_options={"timeout": 120_000})
         self._model = model
         self._embed_model = embed_model
         # Vendored provider reuses the same API key; it maintains its own

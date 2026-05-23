@@ -304,7 +304,7 @@ async def _preflight_concurrent(
     return route_decision, profile, few_shot
 
 
-def _resolve_pipeline_mode(body: "ChatRequest", cu: CurrentUser) -> str:
+async def _resolve_pipeline_mode(body: "ChatRequest", cu: CurrentUser) -> str:
     """Resolve the effective pipeline mode for this turn.
 
     Precedence:
@@ -318,7 +318,7 @@ def _resolve_pipeline_mode(body: "ChatRequest", cu: CurrentUser) -> str:
         if cu.role != "admin":
             raise HTTPException(status_code=403, detail="pipeline_mode_requires_admin")
         return body.pipeline_mode
-    db_row = databases_repo.get(body.db_id) or {}
+    db_row = (await asyncio.to_thread(databases_repo.get, body.db_id)) or {}
     per_db = db_row.get("pipeline_mode_default")
     if per_db in ("linked", "full_schema"):
         return per_db
@@ -513,7 +513,7 @@ async def chat_sse(
     convo_store: ConversationStore = Depends(get_conversation_store),
 ) -> EventSourceResponse:
     """Run the pipeline and stream SSE chunks as they happen."""
-    pipeline_mode = _resolve_pipeline_mode(body, cu)
+    pipeline_mode = await _resolve_pipeline_mode(body, cu)
     convo = convo_store.get_or_create(cu.id, body.conversation_id)
     collected: list[Any] = []
 
@@ -691,49 +691,67 @@ async def _run_orchestrator(
                 exc_info=True,
             )
 
-        async for vchunk in orchestrator_loop(
-            question=body.message,
-            llm=llm,
-            db=None,
-            rag=None,
-            config=settings,
-            conversation_id=conversation_id,
-            history=[],
-            agent_mode=body.agent_mode or "agentic",
-            analyst_impl=analyst_impl,
-            rag_retrieval=False,  # no vector store wired in v1
-            stats_context_injection=False,  # StatsResolver not wired
-            clarification_enabled=False,
-            documentation_override=documentation_md,
-        ):
-            envelope = _vendored_to_envelope(vchunk)
-            if envelope is None:
-                continue
-            # Remember the final answer for the assistant message persistence.
-            if envelope.type == ChunkType.answer_generated:
-                payload = envelope.data
-                if isinstance(payload, dict):
-                    answer_text = str(payload.get("text", "")) or answer_text
-                elif hasattr(payload, "text"):
-                    answer_text = str(payload.text) or answer_text  # type: ignore[attr-defined]
-            elif envelope.type == ChunkType.sql_generated:
-                sql_payload = envelope.data
-                if isinstance(sql_payload, dict):
-                    sql_val = sql_payload.get("sql")
-                    if sql_val:
-                        final_sql_seen = str(sql_val)
-            # Push through the emitter (which persists chunks via on_emit).
-            # Route directly — don't go through emit() which re-wraps.
-            if emitter._on_emit is not None:  # noqa: SLF001 — mirrors emit()
-                try:
-                    emitter._on_emit(envelope)  # noqa: SLF001
-                except Exception:  # noqa: BLE001
-                    pass
-            await emitter._queue.put(envelope)  # noqa: SLF001
+        # 5-minute hard cap on the entire orchestrator run. If any internal
+        # LLM call or agent step hangs without raising, this ensures the
+        # emitter is still closed and the user sees an error instead of an
+        # infinite spinner.
+        async with asyncio.timeout(300):
+            async for vchunk in orchestrator_loop(
+                question=body.message,
+                llm=llm,
+                db=None,
+                rag=None,
+                config=settings,
+                conversation_id=conversation_id,
+                history=[],
+                agent_mode=body.agent_mode or "agentic",
+                analyst_impl=analyst_impl,
+                rag_retrieval=False,  # no vector store wired in v1
+                stats_context_injection=False,  # StatsResolver not wired
+                clarification_enabled=False,
+                documentation_override=documentation_md,
+            ):
+                envelope = _vendored_to_envelope(vchunk)
+                if envelope is None:
+                    continue
+                # Remember the final answer for the assistant message persistence.
+                if envelope.type == ChunkType.answer_generated:
+                    payload = envelope.data
+                    if isinstance(payload, dict):
+                        answer_text = str(payload.get("text", "")) or answer_text
+                    elif hasattr(payload, "text"):
+                        answer_text = str(payload.text) or answer_text  # type: ignore[attr-defined]
+                elif envelope.type == ChunkType.sql_generated:
+                    sql_payload = envelope.data
+                    if isinstance(sql_payload, dict):
+                        sql_val = sql_payload.get("sql")
+                        if sql_val:
+                            final_sql_seen = str(sql_val)
+                # Push through the emitter (which persists chunks via on_emit).
+                # Route directly — don't go through emit() which re-wraps.
+                if emitter._on_emit is not None:  # noqa: SLF001 — mirrors emit()
+                    try:
+                        emitter._on_emit(envelope)  # noqa: SLF001
+                    except Exception:  # noqa: BLE001
+                        pass
+                await emitter._queue.put(envelope)  # noqa: SLF001
         if not answer_text:
             answer_text = ""
         convo_store.append_message(
             cu.id, conversation_id, role="assistant", content=answer_text
+        )
+    except TimeoutError:
+        log.error(
+            "chat.orchestrator_timeout",
+            session_id=cu.id,
+            conversation_id=conversation_id,
+        )
+        await emitter.emit(
+            ChunkType.ERROR,
+            ErrorPayload(
+                code="orchestrator_timeout",
+                detail="The request timed out after 5 minutes. Please try again with a simpler question.",
+            ),
         )
     except Exception as exc:  # noqa: BLE001
         log.error(
@@ -866,7 +884,7 @@ async def chat_poll(
     convo_store: ConversationStore = Depends(get_conversation_store),
 ) -> ChatPollResponse:
     """Run pipeline to completion and return the full list of chunks (non-streaming)."""
-    pipeline_mode = _resolve_pipeline_mode(body, cu)
+    pipeline_mode = await _resolve_pipeline_mode(body, cu)
     convo = convo_store.get_or_create(cu.id, body.conversation_id)
     emitter = EventEmitter(
         convo.conversation_id,
@@ -915,7 +933,7 @@ async def chat_answer(
     convo_store: ConversationStore = Depends(get_conversation_store),
 ) -> ChatAnswerResponse:
     """Run pipeline to completion; return final answer text + generated SQL list."""
-    pipeline_mode = _resolve_pipeline_mode(body, cu)
+    pipeline_mode = await _resolve_pipeline_mode(body, cu)
     convo = convo_store.get_or_create(cu.id, body.conversation_id)
     emitter = EventEmitter(
         convo.conversation_id,

@@ -23,6 +23,7 @@ export function NotificationBell() {
   );
 
   const handleOpen = useCallback(() => fetchNotifications(true), [fetchNotifications]);
+  const handleHover = useCallback(() => fetchNotifications(true), [fetchNotifications]);
 
   return (
     <HeaderBell
@@ -33,6 +34,7 @@ export function NotificationBell() {
       pollIntervalMs={30_000}
       onPoll={fetchUnreadCount}
       onOpen={handleOpen}
+      onHover={handleHover}
       renderPopover={({ showAll }) => (
         <NotificationPopover onShowAll={showAll} />
       )}

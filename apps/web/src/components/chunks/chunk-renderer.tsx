@@ -12,13 +12,14 @@ import { StatusChunk } from "./status-chunk";
 import { ToolCallChunk } from "./tool-call-chunk";
 import { SqlChunk } from "./sql-chunk";
 import { ToolResultChunk } from "./tool-result-chunk";
-import { ChartBlock } from "./chart-block";
 import { AnswerChunk } from "./answer-chunk";
 import { InsightChunk } from "./insight-chunk";
 import { ErrorChunk } from "./error-chunk";
 import { ClarificationChunk } from "./clarification-chunk";
 import { StatsContextChunk } from "./stats-context-chunk";
 import { ProfileLoadedChunk } from "./profile-loaded-chunk";
+
+const ChartBlockLazy = React.lazy(() => import("./chart-block").then((m) => ({ default: m.ChartBlock })));
 import {
   SchemaLinkingStartedChunk,
   CandidateSqlsChunk,
@@ -166,14 +167,16 @@ function ChunkRendererInner({ chunk, isComplete, isStreaming, enrichmentTraces, 
                 transition={{ duration: 0.3, ease: "easeOut", delay: 0.7 }}
                 className="mt-3"
               >
-                <ChartBlock
-                  columns={parsed.columns}
-                  rows={parsed.rows}
-                  suggestedChartType={suggestedChartType}
-                  xColumn={xColumn}
-                  yColumn={yColumn}
-                  eager={isStreaming}
-                />
+                <React.Suspense fallback={<ProgressStep label="Loading chart" />}>
+                  <ChartBlockLazy
+                    columns={parsed.columns}
+                    rows={parsed.rows}
+                    suggestedChartType={suggestedChartType}
+                    xColumn={xColumn}
+                    yColumn={yColumn}
+                    eager={isStreaming}
+                  />
+                </React.Suspense>
               </motion.div>
             </>
           )}
@@ -187,7 +190,11 @@ function ChunkRendererInner({ chunk, isComplete, isStreaming, enrichmentTraces, 
       content = (
         <>
           <ProgressStep label="Generating answer" isComplete={isComplete} />
-          <AnswerChunk content={legacyText} />
+          {enrichmentTraces && enrichmentTraces.length > 0 ? (
+            <InsightChunk content={legacyText} traces={enrichmentTraces} />
+          ) : (
+            <AnswerChunk content={legacyText} />
+          )}
         </>
       );
       break;
@@ -329,9 +336,16 @@ function ChunkRendererInner({ chunk, isComplete, isStreaming, enrichmentTraces, 
       content = (
         <>
           <ProgressStep label="Generated answer" isComplete={isComplete} />
-          <AnswerGeneratedChunk
-            data={chunk.data as unknown as AnswerGeneratedData}
-          />
+          {enrichmentTraces && enrichmentTraces.length > 0 ? (
+            <InsightChunk
+              content={(chunk.data as unknown as AnswerGeneratedData)?.text ?? ""}
+              traces={enrichmentTraces}
+            />
+          ) : (
+            <AnswerGeneratedChunk
+              data={chunk.data as unknown as AnswerGeneratedData}
+            />
+          )}
         </>
       );
       break;

@@ -19,6 +19,7 @@ Steps (each emits its own SSE chunk):
 
 from __future__ import annotations
 
+import asyncio
 import pickle
 import re
 from collections import defaultdict
@@ -95,7 +96,7 @@ class SchemaLinkerStage:
 
         schema_text_full = SchemaFormatter().format(schema, profile, metadata_mode="profiling")
         prompt = self._tpl.render(question=question, evidence="", schema_text=schema_text_full)
-        raw = await self._llm.async_generate(prompt)
+        raw = await asyncio.wait_for(self._llm.async_generate(prompt), timeout=90.0)
 
         candidates = [m.strip().rstrip(";").strip() for m in _FENCE_RE.findall(raw)]
         await self._emit(

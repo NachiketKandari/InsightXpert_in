@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useMemo, memo } from "react";
+import { toast } from "sonner";
 import { useChatStore } from "@/stores/chat-store";
 import { useInsightStore } from "@/stores/insight-store";
 import { useAutoScroll } from "@/hooks/use-auto-scroll";
@@ -12,7 +13,7 @@ interface MessageListProps {
   readOnly?: boolean;
 }
 
-export function MessageList({ onRetry, readOnly }: MessageListProps) {
+export const MessageList = memo(function MessageList({ onRetry, readOnly }: MessageListProps) {
   const conversation = useChatStore((s) => s.activeConversation());
   const messages = conversation?.messages ?? [];
 
@@ -21,13 +22,14 @@ export function MessageList({ onRetry, readOnly }: MessageListProps) {
   const lastMsgChunkCount = messages.at(-1)?.chunks.length ?? 0;
   const { scrollRef, handleScroll } = useAutoScroll([messages.length, lastMsgChunkCount]);
 
-  // Find the last user message for retry
-  const lastUserMessage = [...messages].reverse().find((m) => m.role === "user");
+  const lastUserMessage = useMemo(
+    () => [...messages].reverse().find((m) => m.role === "user"),
+    [messages],
+  );
 
-  // Find the last assistant message index
-  const lastAssistantIdx = messages.reduce(
-    (acc, msg, idx) => (msg.role === "assistant" ? idx : acc),
-    -1
+  const lastAssistantIdx = useMemo(
+    () => messages.reduce((acc, msg, idx) => (msg.role === "assistant" ? idx : acc), -1),
+    [messages],
   );
 
   const handleRetry = useCallback(() => {
@@ -51,18 +53,27 @@ export function MessageList({ onRetry, readOnly }: MessageListProps) {
   );
 
   const handleMarkInsight = useCallback(
-    (messageId: string, note?: string) => {
-      apiFetch("/api/v1/insights", {
+    (messageId: string, note?: string): Promise<boolean> => {
+      // Optimistic: bump count immediately so the badge updates without
+      // waiting for the POST → GET round-trip. Reconcile after POST succeeds.
+      useInsightStore.getState().incrementCountOptimistic();
+      return apiFetch("/api/v1/insights", {
         method: "POST",
         body: JSON.stringify({
           message_id: messageId,
           user_note: note || null,
         }),
       })
-        .then(() => {
-          useInsightStore.getState().fetchCount();
+        .then((res) => {
+          if (!res.ok) throw new Error("Failed to save insight");
+          useInsightStore.getState().reconcileCount();
+          return true;
         })
-        .catch(() => {});
+        .catch(() => {
+          useInsightStore.getState().reconcileCount();
+          toast.error("Failed to save insight. Please try again.");
+          return false;
+        });
     },
     []
   );
@@ -90,4 +101,4 @@ export function MessageList({ onRetry, readOnly }: MessageListProps) {
       </div>
     </div>
   );
-}
+});

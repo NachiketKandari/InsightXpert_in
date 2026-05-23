@@ -3,12 +3,12 @@ import { render } from "@testing-library/react";
 import { AnswerChunk } from "./answer-chunk";
 
 describe("AnswerChunk", () => {
-  it("strips [[N]] bracket citation markers from rendered text", () => {
+  it("preserves [[N]] bracket citation markers in rendered text", () => {
     const md =
       "Revenue grew 15% [[1]] driven by enterprise expansion [[2]] in North America.";
     const { container } = render(<AnswerChunk content={md} />);
-    expect(container.textContent).not.toContain("[[1]]");
-    expect(container.textContent).not.toContain("[[2]]");
+    expect(container.textContent).toContain("[[1]]");
+    expect(container.textContent).toContain("[[2]]");
     expect(container.textContent).toContain("Revenue grew 15%");
     expect(container.textContent).toContain("enterprise expansion");
   });

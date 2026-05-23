@@ -42,6 +42,6 @@ export function useHealthCheck() {
     refetchInterval: (query) => (query.state.data === false ? UNHEALTHY_POLL_MS : HEALTHY_POLL_MS),
     refetchIntervalInBackground: false,
     retry: 1,
-    staleTime: 0,
+    staleTime: 15_000,
   });
 }

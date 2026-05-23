@@ -26,7 +26,6 @@ function normalizeTitle(title: string): string {
 /** Strip citation markers and footnote definitions the backend may emit in answer text. */
 function cleanAnswerMarkdown(text: string): string {
   return text
-    .replace(/\[\[\d+\]\]/g, "")                // [[N]] bracket citations
     .replace(/^\[\^[^\]]+\]:\s*[^\n]*$/gm, "")  // [^N]: definition lines (must run before inline strip)
     .replace(/\[\^[\d,\s\-]+\]/g, "")           // [^N] and [^3,5,6] / [^3-6] inline footnote markers
     .replace(/\n{3,}/g, "\n\n")

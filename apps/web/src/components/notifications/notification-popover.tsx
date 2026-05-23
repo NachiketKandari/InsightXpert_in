@@ -4,6 +4,7 @@ import { Check, CheckCheck } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useNotificationStore } from "@/stores/notification-store";
+import { ListLoading } from "@/components/ui/list-states";
 import { SEVERITY_VARIANT } from "./constants";
 
 interface NotificationPopoverProps {
@@ -12,6 +13,7 @@ interface NotificationPopoverProps {
 
 export function NotificationPopover({ onShowAll }: NotificationPopoverProps) {
   const notifications = useNotificationStore((s) => s.notifications);
+  const isLoading = useNotificationStore((s) => s.isLoading);
   const markAsRead = useNotificationStore((s) => s.markAsRead);
   const markAllAsRead = useNotificationStore((s) => s.markAllAsRead);
 
@@ -37,7 +39,9 @@ export function NotificationPopover({ onShowAll }: NotificationPopoverProps) {
       </div>
 
       {/* List */}
-      {recent.length === 0 ? (
+      {isLoading ? (
+        <ListLoading />
+      ) : recent.length === 0 ? (
         <div className="flex-1 py-6 text-center text-sm text-muted-foreground">
           No new notifications
         </div>

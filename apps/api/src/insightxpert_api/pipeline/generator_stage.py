@@ -1,6 +1,7 @@
 """SqlGeneratorStage — render the SQL-generation prompt (dialect-aware) and parse a fenced block."""
 from __future__ import annotations
 
+import asyncio
 import re
 from pathlib import Path
 
@@ -75,7 +76,7 @@ class SqlGeneratorStage:
             schema_text=ctx.state["schema_text"],
             few_shot_example=few_shot_example,
         )
-        resp = await self._llm.async_generate(prompt)
+        resp = await asyncio.wait_for(self._llm.async_generate(prompt), timeout=60.0)
         m = _FENCED_SQL.search(resp)
         sql = (m.group(1) if m else resp).strip().rstrip(";").strip()
         if ctx.emitter is not None:

@@ -409,7 +409,7 @@ export const useChatStore = create<ChatState>()(persist((set, get) => ({
             content: (lastMsg.content ?? "") + deltaText,
           };
           messages[messages.length - 1] = updated;
-          return { ...c, messages, updatedAt: Date.now() };
+          return { ...c, messages };
         }
 
         // Pull the natural-language answer text into message.content so that

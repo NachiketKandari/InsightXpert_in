@@ -60,7 +60,7 @@ class DeepSeekLLM:
         embed_api_key: str = "",
         embed_model: str = "gemini-embedding-001",
     ) -> None:
-        self._client = AsyncOpenAI(api_key=api_key, base_url=DEEPSEEK_BASE_URL)
+        self._client = AsyncOpenAI(api_key=api_key, base_url=DEEPSEEK_BASE_URL, timeout=120.0)
         self._model = model
         self._embed_model = embed_model
         self._embed_client = genai.Client(api_key=embed_api_key) if embed_api_key else None

@@ -89,7 +89,7 @@ interface MessageBubbleProps {
   // Takes messageId so callers can pass a stable handler without wrapping in
   // a per-message closure, which would break React.memo's prop comparison.
   onFeedback?: (messageId: string, type: "up" | "down", comment?: string) => void;
-  onMarkInsight?: (messageId: string, note?: string) => void;
+  onMarkInsight?: (messageId: string, note?: string) => Promise<boolean>;
   readOnly?: boolean;
 }
 
@@ -115,7 +115,8 @@ function MessageBubbleInner({
   );
 
   const handleMarkInsightForMsg = useCallback(
-    (note?: string) => onMarkInsight?.(message.id, note),
+    (note?: string): Promise<boolean> =>
+      onMarkInsight ? onMarkInsight(message.id, note) : Promise.resolve(false),
     [message.id, onMarkInsight],
   );
 
@@ -212,7 +213,7 @@ function MessageBubbleInner({
               })}
               {isStreaming && isLastAssistant && (() => {
                 const last = message.chunks[message.chunks.length - 1];
-                if (last?.type === "answer" || last?.type === "error") return null;
+                if (last?.type === "answer" || last?.type === "answer_generated" || last?.type === "error") return null;
                 return (
                   <motion.div
                     initial={{ opacity: 0 }}

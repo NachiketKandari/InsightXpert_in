@@ -58,6 +58,10 @@ def configure_logging(env: str) -> None:
         file_handler.setFormatter(_JSONFileFormatter())
         root.addHandler(file_handler)
 
+    # Suppress verbose SQLAlchemy engine logs (every SQL statement with
+    # params) at DEBUG level — they flood the file log and add disk I/O.
+    logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+
     # --- structlog (processors + renderer) ----------------------------------
     if env == "local":
         renderer: structlog.types.Processor = structlog.dev.ConsoleRenderer()

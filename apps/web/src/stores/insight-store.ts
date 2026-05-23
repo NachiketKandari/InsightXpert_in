@@ -12,6 +12,8 @@ interface InsightState {
   fetchInsights: (bookmarked?: boolean) => Promise<void>;
   fetchAllInsights: () => Promise<void>;
   fetchCount: () => Promise<void>;
+  incrementCountOptimistic: () => void;
+  reconcileCount: () => void;
   bookmarkInsight: (id: string, bookmarked: boolean) => Promise<void>;
   deleteInsight: (id: string) => Promise<void>;
 }
@@ -56,6 +58,13 @@ export const useInsightStore = create<InsightState>((set, get) => ({
   fetchCount: async () => {
     const data = await apiCall<{ count: number }>("/api/v1/insights/count");
     if (data) set({ totalCount: data.count });
+  },
+
+  incrementCountOptimistic: () => {
+    set((s) => ({ totalCount: s.totalCount + 1 }));
+  },
+  reconcileCount: () => {
+    get().fetchCount();
   },
 
   bookmarkInsight: async (id, bookmarked) => {
