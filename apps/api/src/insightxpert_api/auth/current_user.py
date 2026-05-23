@@ -53,6 +53,8 @@ class CurrentUser:
     id: str
     email: str
     role: Literal["admin", "user"]
+    is_active: bool
+    must_change_password: bool
 
 
 def _extract_token(request: Request, cookie_name: str) -> str | None:
@@ -80,7 +82,13 @@ def get_current_user(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="unauthorized")
     if claims.iat < row.sessions_valid_after:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="unauthorized")
-    return CurrentUser(id=row.id, email=row.email, role=row.role)
+    return CurrentUser(
+        id=row.id,
+        email=row.email,
+        role=row.role,
+        is_active=row.is_active,
+        must_change_password=row.must_change_password,
+    )
 
 
 def require_admin(cu: CurrentUser = Depends(get_current_user)) -> CurrentUser:

@@ -35,6 +35,7 @@ export function NotificationBell() {
       onPoll={fetchUnreadCount}
       onOpen={handleOpen}
       onHover={handleHover}
+      deferMs={3000}
       renderPopover={({ showAll }) => (
         <NotificationPopover onShowAll={showAll} />
       )}

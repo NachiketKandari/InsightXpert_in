@@ -29,6 +29,7 @@ export function InsightBell() {
       onPoll={fetchCount}
       onOpen={fetchInsights}
       onHover={fetchInsights}
+      deferMs={3000}
       renderPopover={({ showAll }) => (
         <InsightPopover
           onShowAll={() => { setInitialInsight(null); showAll(); }}

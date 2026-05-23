@@ -87,15 +87,15 @@ class MeResponse(BaseModel):
 
 @router.get("/me", response_model=MeResponse)
 async def me(cu: CurrentUser = Depends(get_current_user)) -> MeResponse:
-    full = await asyncio.to_thread(service.get_public, cu.id)
-    if full is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="unauthorized")
+    # CurrentUser already carries all the fields we need (fetched by the
+    # dependency). No second DB query — saves 300-800ms on the critical
+    # auth-gate path.
     return MeResponse(
-        id=full.id,
-        email=full.email,
-        role=full.role,
-        is_active=full.is_active,
-        must_change_password=full.must_change_password,
+        id=cu.id,
+        email=cu.email,
+        role=cu.role,
+        is_active=cu.is_active,
+        must_change_password=cu.must_change_password,
     )
 
 

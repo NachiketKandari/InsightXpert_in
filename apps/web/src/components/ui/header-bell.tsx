@@ -13,6 +13,8 @@ interface HeaderBellProps {
   onPoll: () => void;
   onOpen: () => void;
   onHover?: () => void;
+  /** Delay the initial poll by this many ms. Subsequent interval polls are unaffected. */
+  deferMs?: number;
   renderPopover: (controls: { showAll: () => void }) => React.ReactNode;
   renderModal: (open: boolean, onOpenChange: (open: boolean) => void) => React.ReactNode;
 }
@@ -26,6 +28,7 @@ export function HeaderBell({
   onPoll,
   onOpen,
   onHover,
+  deferMs,
   renderPopover,
   renderModal,
 }: HeaderBellProps) {
@@ -49,13 +52,38 @@ export function HeaderBell({
   }, [onHover]);
 
   // Poll on interval, paused when the tab is in the background.
+  // When deferMs is set, the initial poll is delayed to avoid competing
+  // with critical data fetches during initial page load.
   useEffect(() => {
-    onPoll();
-    let interval = setInterval(onPoll, pollIntervalMs);
+    let interval: ReturnType<typeof setInterval> | undefined;
 
+    const startPolling = () => {
+      onPoll();
+      interval = setInterval(onPoll, pollIntervalMs);
+    };
+
+    if (deferMs && deferMs > 0) {
+      const initialTimer = setTimeout(startPolling, deferMs);
+      const handleVisibilityDeferred = () => {
+        if (document.hidden) {
+          clearTimeout(initialTimer);
+          if (interval) clearInterval(interval);
+        } else {
+          startPolling();
+        }
+      };
+      document.addEventListener("visibilitychange", handleVisibilityDeferred);
+      return () => {
+        clearTimeout(initialTimer);
+        if (interval) clearInterval(interval);
+        document.removeEventListener("visibilitychange", handleVisibilityDeferred);
+      };
+    }
+
+    startPolling();
     const handleVisibility = () => {
       if (document.hidden) {
-        clearInterval(interval);
+        if (interval) clearInterval(interval);
       } else {
         onPoll();
         interval = setInterval(onPoll, pollIntervalMs);
@@ -64,10 +92,10 @@ export function HeaderBell({
     document.addEventListener("visibilitychange", handleVisibility);
 
     return () => {
-      clearInterval(interval);
+      if (interval) clearInterval(interval);
       document.removeEventListener("visibilitychange", handleVisibility);
     };
-  }, [onPoll, pollIntervalMs]);
+  }, [onPoll, pollIntervalMs, deferMs]);
 
   // Toggle popover; fetch data when opening
   const handleToggle = useCallback(() => {
