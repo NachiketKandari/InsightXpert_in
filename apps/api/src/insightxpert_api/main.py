@@ -153,15 +153,23 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         _sse_idle_reaper(app), name="sse-idle-reaper"
     )
 
+    # --- Background DB health checker ---------------------------------------
+    from .routes.health import run_health_checker
+
+    health_checker_task = asyncio.create_task(
+        run_health_checker(), name="health-checker"
+    )
+
     try:
         yield
     finally:
-        # Cancel the reaper first so it doesn't race with teardown.
-        reaper_task.cancel()
-        try:
-            await reaper_task
-        except (asyncio.CancelledError, Exception):  # noqa: BLE001
-            pass
+        # Cancel background tasks first so they don't race with teardown.
+        for task in (health_checker_task, reaper_task):
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
 
         try:
             await _get_audit_queue().stop()
