@@ -461,6 +461,18 @@ async def _run_sql_analyst(
             elif chunk.type == "sql" and chunk.sql:
                 step["sql"] = chunk.sql
                 collected_sql = chunk.sql
+            elif chunk.type == "rows_returned" and chunk.data:
+                cols = chunk.data.get("columns") or []
+                positional_rows = chunk.data.get("rows") or []
+                if positional_rows and cols:
+                    collected_rows = [dict(zip(cols, r, strict=False)) for r in positional_rows]
+                step["result_preview"] = f"{len(collected_rows)} rows, {len(cols)} cols"
+                display_data = {
+                    "columns": cols,
+                    "rows": collected_rows[:50],
+                    "row_count": len(collected_rows),
+                }
+                step["result_data"] = json.dumps(display_data)
             elif chunk.type == "tool_result" and chunk.data:
                 tool_name = chunk.data.get("tool", "")
                 step["tool_name"] = tool_name
@@ -498,8 +510,8 @@ async def _run_sql_analyst(
         return SubTaskResult(
             sql=collected_sql,
             rows=collected_rows,
-            answer=collected_answer,
-            success=bool(collected_answer),
+            answer=collected_answer or (f"Query returned {len(collected_rows)} rows." if collected_sql else ""),
+            success=bool(collected_sql),
             trace_steps=trace_steps,
             duration_ms=duration_ms,
         )
@@ -593,8 +605,8 @@ async def _run_quant_analyst(
         duration_ms = int((time.time() - t0) * 1000)
 
         return SubTaskResult(
-            answer=collected_answer,
-            success=bool(collected_answer),
+            answer=collected_answer or "Analysis complete — no narrative answer produced.",
+            success=True,
             trace_steps=trace_steps,
             duration_ms=duration_ms,
         )

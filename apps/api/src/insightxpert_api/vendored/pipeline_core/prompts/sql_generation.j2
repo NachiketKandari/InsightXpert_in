@@ -54,6 +54,7 @@ FORMAT: Double-quote all identifiers. Single-quote strings. Return ONLY ```sql``
 
 SELECT:
 - Select ONLY columns the question asks for, in the exact order they appear in the question. NEVER use `SELECT *`.
+- **Frequency/ranking exception:** When the question asks for frequency ("most often", "most common", "least common", "top N by count", "appears most/least", "how many times"), you MUST include COUNT(*) (or the relevant aggregate) alongside the entity column. SELECT both the entity AND the count — the count column is implicitly part of what the question asks for. Example: "Which X appears most often?" → `SELECT X, COUNT(*) AS count ... GROUP BY X ORDER BY count DESC`.
 {% if evidence %}- If EVIDENCE maps a requested concept to a specific column (e.g., "eyes refers to eye_colour_id"), select that exact column directly. Do NOT join a reference table to get a label.{% endif %}
 - Do NOT select columns used only for filtering in WHERE unless explicitly requested.
 - If question asks for multiple data points, include ALL of them. "What are the category and type" → SELECT both columns.
@@ -109,6 +110,7 @@ ORDERING & LIMITS:
 - Prefer `ORDER BY ... LIMIT 1` over subqueries with MAX/MIN — UNLESS ties matter.
 - **Ties:** If the question says "the league with the most matches" and multiple leagues could tie, use a subquery: `HAVING COUNT(*) = (SELECT MAX(cnt) FROM ...)` instead of LIMIT 1.
 - **LIMIT 1 only when one result is asked for.** "Which races did X win?" → ALL rows. "List X that Y" → ALL rows. Only use LIMIT 1 for "the top", "the best", "the single highest/lowest".
+- **Frequency questions ("most often", "most common", "top N by count", "appears most"):** Do NOT use LIMIT 1. Return ALL rows ordered by the count/aggregate DESC so the user can see the full distribution and compare values. The question asks "which is most frequent" but the answer is richer with the ranked list.
 - "Top N in each X" or word "rank" → **MUST** use `RANK() OVER (PARTITION BY ... ORDER BY ...)` (never `DENSE_RANK()`) in a subquery, then filter the rank. Do NOT add `IS NOT NULL` filters to the ranking column.
 - **Text columns with numbers:** If a TEXT column stores numeric-looking values AND the question implies magnitude ordering (e.g., "fastest", "highest speed", "longest distance"), use `CAST(col AS REAL)` in ORDER BY for sorting purposes.{% if evidence %} **Exception:** When evidence defines the concept as `MAX(col)` or `MIN(col)` on a TEXT column, follow the EVIDENCE PRIORITY rule instead: use `ORDER BY col DESC LIMIT 1` (or ASC for MIN) without CAST, so the output preserves the original TEXT value.{% endif %}
 

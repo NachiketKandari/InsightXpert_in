@@ -33,6 +33,10 @@ class Settings(BaseSettings):
             "http://localhost:3001",
         ]
     )
+    # DECISION(D-041): Supabase managed Postgres for metadata — pgvector support,
+    # built-in pgbouncer (transaction pooler on port 6543), PG 17.6.
+    # DATABASE_URL points to pooler for runtime; DATABASE_DIRECT_URL (port 5432)
+    # for Alembic migrations.
     database_url: str = "sqlite:///./app.db"
 
     # --- database connection pool ------------------------------------------
@@ -97,10 +101,12 @@ class Settings(BaseSettings):
 
     # --- orchestration (B2) ------------------------------------------------
     # Read by the vendored orchestrator_loop — see agents_core/orchestrator.py.
-    enable_stats_context: bool = False  # off by default in v1; no StatsResolver wired yet
-    max_orchestrator_tasks: int = 10
     clarification_enabled: bool = False
     llm_provider: str = "deepseek"
+    enable_stats_context: bool = True
+    max_orchestrator_tasks: int = 10
+    max_agent_iterations: int = 25
+    max_quant_analyst_iterations: int = 15
 
     # --- paths -------------------------------------------------------------
     bundled_dbs_dir: str = "./Databases"
@@ -149,11 +155,6 @@ class Settings(BaseSettings):
     # exceeded, POST /api/v1/automations returns HTTP 429.
     automations_max_per_user: int = 50
 
-    # --- sla thresholds (ms) — override code defaults in sla.py -----------
-    sla_critical_p95_ms: int = 300
-    sla_standard_p95_ms: int = 500
-    sla_background_p95_ms: int = 2000
-
     # --- observability: Sentry --------------------------------------------
     # Empty DSN → Sentry is a no-op (safe default for tests / fresh clones).
     # DSN itself is not secret (it's used in browser SDKs) but we still load
@@ -194,6 +195,7 @@ class Settings(BaseSettings):
         return self
 
 
+# DECISION(D-032): LRU-cached singleton Settings — @lru_cache on get_settings() instead of dependency injection
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     """FastAPI dependency: cached Settings instance.

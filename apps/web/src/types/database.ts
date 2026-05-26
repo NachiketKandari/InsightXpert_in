@@ -165,42 +165,4 @@ export type ProfileChunk =
  */
 export const PROFILING_MAX_COLUMNS_FOR_LLM = 500;
 
-// --- Join graph types --------------------------------------------------------
-
-export interface JoinEdge {
-  src_table: string;
-  src_col: string;
-  dst_table: string;
-  dst_col: string;
-  kind: "declared" | "value_verified" | "rejected";
-  containment: number;
-  reason: string | null;
-}
-
-export interface JoinGraph {
-  db_id: string;
-  canonical: Record<string, string>;
-  edges: JoinEdge[];
-}
-
-// --- Profile editing ---------------------------------------------------------
-
-export interface ProfileHintsRequest {
-  hints: string;
-}
-
-export interface ColumnProfileUpdateRequest {
-  field_path: string;
-  value: unknown;
-}
-
-export interface ProfileOverride {
-  id: string;
-  db_id: string;
-  table_name: string;
-  column_name: string;
-  field_path: string;
-  value_json: string;
-  edited_by: string;
-  edited_at: number;
-}
+// --- Profile editing (interfaces removed during orphan cleanup D-090) ---------
