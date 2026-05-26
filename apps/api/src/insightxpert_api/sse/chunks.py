@@ -1,3 +1,6 @@
+# DECISION(D-005): SSE streaming with typed chunk taxonomy — full pipeline
+# transparency via 50+ typed chunk types organized into four tiers: lifecycle,
+# tool protocol, pipeline transparency, orchestration transparency.
 """SSE chunk taxonomy — the wire contract between pipeline/agents and UI.
 
 Unified four-tier envelope (spec §8):
@@ -305,6 +308,7 @@ class ProfileDonePayload(BaseModel):
     table_count: int
     column_count: int
     summaries_populated: int
+    total_duration_ms: int = 0
 
 
 class ProfileErrorPayload(BaseModel):
@@ -454,6 +458,9 @@ ChunkPayload = Union[
 ]
 
 
+# DECISION(D-022): SSE envelope shape is {type, data, conversation_id, timestamp}.
+# Conversation-scoped for multi-tab support, timestamped for ordering,
+# type-discriminated for FE renderer routing.
 class ChatChunk(BaseModel):
     """Envelope sent over the wire as a single ``data:`` line.
 

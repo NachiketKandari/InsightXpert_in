@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { use, useCallback, useEffect, useState } from "react";
-import { ArrowLeft, Play } from "lucide-react";
+import { ArrowLeft, Play, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -13,7 +13,7 @@ import { ProfileStepper } from "@/components/databases/profile-stepper";
 import { SchemaPanel } from "@/components/databases/schema-panel";
 import { StageCheckboxGroup } from "@/components/databases/stage-checkbox-group";
 import { useProfileRun, type ProfileStep } from "@/hooks/useProfileRun";
-import { fetchProfile, fetchSchema } from "@/lib/databases/api";
+import { deleteProfile, fetchProfile, fetchSchema } from "@/lib/databases/api";
 import {
   PROFILE_STAGE_ORDER,
   type DatabaseProfile,
@@ -94,6 +94,18 @@ export default function DatabaseDetailPage({ params }: PageProps) {
       toast.error(state.message);
     }
   }, [state, dbId]);
+
+  const handleDeleteProfile = useCallback(async () => {
+    if (!confirm("Delete all profiled data for this database? This cannot be undone.")) return;
+    const ok = await deleteProfile(dbId);
+    if (ok) {
+      setProfile(null);
+      reset();
+      toast.success("Profile data deleted");
+    } else {
+      toast.error("Failed to delete profile");
+    }
+  }, [dbId, reset]);
 
   const runInFlight = state.kind === "connecting" || state.kind === "running";
   const showStepper =
@@ -198,6 +210,20 @@ export default function DatabaseDetailPage({ params }: PageProps) {
                 </Button>
               )}
             </div>
+
+            {profile && !runInFlight && (
+              <div className="mt-3 pt-3 border-t border-border">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="w-full text-muted-foreground hover:text-destructive"
+                  onClick={handleDeleteProfile}
+                >
+                  <Trash2 className="size-3.5 mr-1.5" />
+                  Delete profile data
+                </Button>
+              </div>
+            )}
           </div>
 
           {state.kind === "succeeded" && state.autoDisabled && (
@@ -228,6 +254,11 @@ export default function DatabaseDetailPage({ params }: PageProps) {
               <ProfileStepper
                 steps={
                   state.kind === "connecting" ? PENDING_STEPS : state.steps
+                }
+                totalDurationMs={
+                  state.kind === "succeeded"
+                    ? state.summary.total_duration_ms
+                    : null
                 }
               />
               {state.kind === "failed" && (

@@ -148,18 +148,6 @@ def _list_tables(ref: Any) -> list[str]:
     )
 
 
-@functools.lru_cache(maxsize=128)
-def _cached_schema_ddl(path: str) -> str:
-    """Memoized DDL reader — DDL is immutable for a given SQLite file."""
-    return schema_ddl(path)
-
-
-@functools.lru_cache(maxsize=128)
-def _cached_list_tables(path: str) -> list[str]:
-    """Memoized table lister — table names don't change for a given SQLite file."""
-    return _list_tables(path)
-
-
 @router.get("", response_model=list[DatabaseListItem])
 async def list_databases(
     response: Response,
@@ -1002,6 +990,29 @@ async def get_profile_overrides(
     response.headers["Cache-Control"] = "private, max-age=30"
     prof_svc = _prof_svc(settings)
     return await asyncio.to_thread(prof_svc.get_overrides, db_id)
+
+
+@router.delete("/{db_id}/profile", status_code=204)
+async def delete_profile(
+    db_id: str,
+    cu: CurrentUser = Depends(get_current_user),
+    settings: Settings = Depends(get_settings),
+) -> None:
+    """Delete all profiled data (profile row + overrides) for a database.
+
+    Gated to the database owner and admins only.
+    """
+    db_row = await asyncio.to_thread(databases_repo.get, db_id)
+    if db_row is None:
+        raise HTTPException(status_code=404, detail="invalid_db")
+
+    if cu.role != "admin" and db_row.get("owner_user_id") != cu.id:
+        raise HTTPException(status_code=403, detail="forbidden")
+
+    prof_svc = _prof_svc(settings)
+    deleted = await asyncio.to_thread(prof_svc.delete_profile, db_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="no_profile")
 
 
 # Fallback when trailing slash variant is hit (FastAPI defaults redirect; this keeps

@@ -30,6 +30,34 @@ _RESOURCE_TABLE: list[tuple[re.Pattern[str], str, Callable[[re.Match[str]], str 
     (re.compile(r"^/api/v1/auth/revoke-sessions/?$"), "auth.session", lambda _m: None),
     (re.compile(r"^/api/v1/admin/users/([^/]+)/?$"), "user", lambda m: m.group(1)),
     (re.compile(r"^/api/v1/admin/users/?$"), "user", lambda _m: None),
+    # Database profile routes — must precede the generic /databases/(db_id) catch-all
+    # so override mutations are tagged with the more specific resource type.
+    (
+        re.compile(
+            r"^/api/v1/databases/([^/]+)/profile/columns/([^/]+)/([^/]+)/overrides/([^/]+)/?$"
+        ),
+        "database.profile",
+        lambda m: m.group(1),
+    ),
+    (
+        re.compile(
+            r"^/api/v1/databases/([^/]+)/profile/columns/([^/]+)/([^/]+)/?$"
+        ),
+        "database.profile",
+        lambda m: m.group(1),
+    ),
+    (
+        re.compile(
+            r"^/api/v1/databases/([^/]+)/profile/overrides/?$"
+        ),
+        "database.profile",
+        lambda m: m.group(1),
+    ),
+    (
+        re.compile(r"^/api/v1/databases/([^/]+)/profile/?$"),
+        "database.profile",
+        lambda m: m.group(1),
+    ),
     (re.compile(r"^/api/v1/databases/([^/]+)/?$"), "database", lambda m: m.group(1)),
     (re.compile(r"^/api/v1/databases/?$"), "database", lambda _m: None),
     (re.compile(r"^/api/v1/conversations/([^/]+)/?$"), "conversation", lambda m: m.group(1)),

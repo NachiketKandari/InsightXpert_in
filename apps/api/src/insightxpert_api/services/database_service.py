@@ -153,8 +153,8 @@ class DatabaseService:
                 rows = (
                     conn.execute(
                         text(
-                            "SELECT db_id, visibility, connection_url_env_var, dialect "
-                            "FROM databases WHERE dialect != 'sqlite'"
+                            "SELECT db_id, kind, connection_config_encrypted "
+                            "FROM databases WHERE kind IN ('postgres', 'libsql', 'sqlite_external')"
                         )
                     )
                     .mappings()
@@ -168,40 +168,55 @@ class DatabaseService:
     def _build_non_sqlite_refs(self) -> list[DatabaseRef]:
         """Resolve each non-sqlite `databases` row into a DatabaseRef.
 
-        Rows whose ``connection_url_env_var`` is unset or names a missing env
-        var are logged and skipped — the DB just doesn't appear in the list.
-        Listing must never fail hard on a misconfigured row because the
-        ``databases`` table is shared infrastructure; one broken row must not
-        hide all the others. ``resolve(db_id)`` still raises when the operator
-        actually tries to use the broken DB (see below).
+        Handles user-created BYO-DB connections (``connection_config_encrypted``).
+        Rows whose config can't be decrypted are logged and skipped so one broken
+        row doesn't hide the rest.
         """
+        import json as _json
+
+        from ..connections.encryption import decrypt
+        from ..connections.types import PostgresConnection
+
         refs: list[DatabaseRef] = []
         for row in self._fetch_non_sqlite_rows():
-            env_var = row.get("connection_url_env_var")
-            if not env_var:
+            db_id_val = row["db_id"]
+            kind_val = row["kind"]
+            encrypted = row.get("connection_config_encrypted")
+
+            if not encrypted:
                 _log.warning(
-                    "non_sqlite_db_missing_env_var_ref",
-                    db_id=row["db_id"],
-                    hint="Set connection_url_env_var in the databases row.",
+                    "non_sqlite_db_no_encrypted_config",
+                    db_id=db_id_val,
                 )
                 continue
-            url = os.environ.get(env_var)
-            if not url:
+
+            try:
+                cfg_dict = _json.loads(decrypt(encrypted))
+                if kind_val == "postgres":
+                    cfg = PostgresConnection(**cfg_dict)
+                    url = cfg.to_dsn()
+                else:
+                    _log.warning(
+                        "non_sqlite_db_unknown_kind",
+                        db_id=db_id_val,
+                        kind=kind_val,
+                    )
+                    continue
+            except Exception as exc:
                 _log.warning(
-                    "non_sqlite_db_env_var_unset",
-                    db_id=row["db_id"],
-                    env_var=env_var,
-                    hint=f"Set {env_var} in apps/api/.env.local to enable this DB.",
+                    "non_sqlite_db_decrypt_failed",
+                    db_id=db_id_val,
+                    error=str(exc),
                 )
                 continue
+
             refs.append(
                 DatabaseRef(
-                    db_id=row["db_id"],
+                    db_id=db_id_val,
                     source=self._BUNDLED,
                     local_path=None,
-                    dialect=row["dialect"],
+                    dialect=kind_val,
                     connection_url=url,
-                    connection_url_env_var=env_var,
                 )
             )
         return refs

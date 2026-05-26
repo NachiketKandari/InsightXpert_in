@@ -144,6 +144,7 @@ export interface ProfileDonePayload {
   table_count: number;
   column_count: number;
   summaries_populated: number;
+  total_duration_ms?: number;
 }
 
 export interface ProfileErrorPayload {

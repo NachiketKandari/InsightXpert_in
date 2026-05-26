@@ -195,6 +195,13 @@ class ProfileService:
         )
         self._cache.invalidate(db_id, "base")
 
+    def delete_profile(self, db_id: str) -> int:
+        """Delete all profile rows and overrides for a database. Returns total rowcount."""
+        overrides_deleted = profiles_repo.delete_overrides_for_db(db_id)
+        profiles_deleted = profiles_repo.delete_for_db(db_id)
+        self._cache.invalidate(db_id, "base")
+        return overrides_deleted + profiles_deleted
+
     def delete_override(
         self,
         db_id: str,

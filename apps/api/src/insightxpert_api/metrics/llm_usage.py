@@ -56,6 +56,7 @@ def record_llm_usage(
     db_id: str | None = None,
     conversation_id: str | None = None,
     cost_usd_override: float | None = None,
+    stage_timings_json: str | None = None,
 ) -> str:
     """Insert one ``query_metrics`` row. Never raises.
 
@@ -100,7 +101,7 @@ def record_llm_usage(
             "tokens_out": tokens_out or None,
             "duration_ms": duration_ms,
             "thumbs": None,
-            "stage_timings_json": None,
+            "stage_timings_json": stage_timings_json,
             "agent_trace_summary_json": None,
             "created_at": int(time.time()),
             "source": source,

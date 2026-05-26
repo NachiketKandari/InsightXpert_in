@@ -298,6 +298,15 @@ def _get_override_row(
     return dict(row) if row else None
 
 
+def delete_overrides_for_db(db_id: str) -> int:
+    """Delete all profile overrides for a given db_id. Returns rowcount."""
+    with get_engine().begin() as conn:
+        result = conn.execute(
+            delete(profile_overrides).where(profile_overrides.c.db_id == db_id)
+        )
+    return result.rowcount or 0
+
+
 def delete_for_db(db_id: str) -> int:
     """Drop every profile_kind row for a given db_id. Returns rowcount."""
     with get_engine().begin() as conn:

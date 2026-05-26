@@ -67,6 +67,16 @@ export async function updateColumnProfile(
   return res.ok;
 }
 
+// Delete all profiled data + overrides for a database.
+//   DELETE /api/v1/databases/{db_id}/profile
+export async function deleteProfile(dbId: string): Promise<boolean> {
+  const res = await apiFetch(
+    `/api/v1/databases/${encodeURIComponent(dbId)}/profile`,
+    { method: "DELETE" },
+  );
+  return res.ok || res.status === 204;
+}
+
 // Revert a column profile field override to its generated value.
 //   DELETE /api/v1/databases/{db_id}/profile/columns/{table}/{column}/overrides/{field_path}
 export async function deleteColumnOverride(

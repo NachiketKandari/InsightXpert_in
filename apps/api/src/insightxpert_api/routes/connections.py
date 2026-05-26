@@ -22,6 +22,7 @@ from ..connections.encryption import encrypt
 from ..connections.postgres_connector import PostgresConnector
 from ..connections.types import LibsqlConnection, PostgresConnection
 from ..databases import repository as databases_repo
+from ..profiling import repository as profiles_repo
 
 
 router = APIRouter(prefix="/api/v1/connections", tags=["connections"])
@@ -124,5 +125,7 @@ async def delete_connection(
         raise HTTPException(status_code=404)
     if row["owner_user_id"] != cu.id:
         raise HTTPException(status_code=403)
+    profiles_repo.delete_overrides_for_db(db_id)
+    profiles_repo.delete_for_db(db_id)
     databases_repo.delete(db_id)
     return None
