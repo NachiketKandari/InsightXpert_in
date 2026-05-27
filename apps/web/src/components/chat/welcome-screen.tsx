@@ -2,12 +2,17 @@
 
 import { useRef, useState, useCallback, useEffect, useMemo, startTransition, type KeyboardEvent } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Shuffle, Sparkles } from "lucide-react";
+import { Shuffle, Sparkles, Upload, CheckCircle2, Loader2 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Textarea } from "@/components/ui/textarea";
+import { Button } from "@/components/ui/button";
 import { DatabasePickerPanel } from "@/components/dataset/database-picker-panel";
 import { InputToolbar } from "./input-toolbar";
 import { GenerationProgress } from "@/components/sample-questions/generation-progress";
+import { CsvUploadDialog } from "@/components/dataset/csv-upload-dialog";
+import { ProfileStepper } from "@/components/databases/profile-stepper";
+import { OnboardingTour } from "@/components/onboarding/onboarding-tour";
+import { startProfileStream } from "@/lib/databases/profile-stream";
 import { useChatStore } from "@/stores/chat-store";
 import { useClientConfigStore } from "@/stores/client-config-store";
 import { useVoiceInput } from "@/hooks/use-voice-input";
@@ -18,6 +23,14 @@ import {
   useGenerateSampleQuestions,
   fetchProfile,
 } from "@/hooks/use-sample-questions";
+import {
+  PROFILE_STAGE_ORDER,
+  type ProfileChunk,
+  type ProfileFlags,
+  type ProfileStage,
+  type ProfileDonePayload,
+} from "@/types/database";
+import type { ProfileStep, ProfileStepState, ProfileRunState } from "@/hooks/useProfileRun";
 
 function pickRandom(pool: string[], count: number, exclude?: string[]): string[] {
   const filtered = exclude ? pool.filter((q) => !exclude.includes(q)) : [...pool];
@@ -56,10 +69,145 @@ export function WelcomeScreen({ onSendMessage, onStop, isStreaming }: WelcomeScr
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const displayName = useClientConfigStore((s) => s.config?.branding?.display_name);
   const { voiceState, voiceError, toggleVoice, clearVoiceText } = useVoiceInput(setValue);
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [onboardingCompleted, setOnboardingCompleted] = useState(true); // default true = don't flash tour
+  const configFeatures = useClientConfigStore((s) => s.config?.features);
+  const onboardingEnabled = (configFeatures as Record<string, boolean> | undefined)?.["onboarding_enabled"] ?? true;
   const selectedDbId = useChatStore((s) => s.selectedDbId);
-  const { data: sampleData, profileQuery } = useSampleQuestions(selectedDbId ?? undefined);
+  const { data: sampleData, profileQuery, ensure } = useSampleQuestions(selectedDbId ?? undefined);
   const { data: databases = [] } = useDatabases();
   const queryClient = useQueryClient();
+
+  // Post-upload profiling flow — inline state machine (no useProfileRun hook,
+  // so dbId can be passed directly to startProfileStream without timing issues).
+  const [profileState, setProfileState] = useState<ProfileRunState>({ kind: "idle" });
+  const profileControllerRef = useRef<AbortController | null>(null);
+
+  // Abort profiling stream on unmount.
+  useEffect(() => {
+    return () => profileControllerRef.current?.abort();
+  }, []);
+
+  const handleProfileRequired = useCallback(
+    (dbId: string) => {
+      // Cancel any in-flight stream.
+      profileControllerRef.current?.abort();
+
+      setProfileState({ kind: "connecting" });
+
+      const flags: ProfileFlags = {
+        with_summaries: false,
+        with_quirks: false,
+        with_lsh: false,
+        with_vectors: false,
+      };
+
+      profileControllerRef.current = startProfileStream(
+        dbId,
+        { ...flags, confirmed: true },
+        {
+          onChunk: (chunk: ProfileChunk) => {
+            setProfileState((prev) => {
+              if (prev.kind === "succeeded" || prev.kind === "failed") return prev;
+
+              const ensureRunning = (): ProfileStep[] => {
+                if (prev.kind === "running") return prev.steps;
+                return PROFILE_STAGE_ORDER.map((stage) => ({
+                  stage,
+                  state: "pending" as ProfileStepState,
+                  durationMs: null,
+                  batchIndex: null,
+                  batchTotal: null,
+                  note: null,
+                }));
+              };
+
+              switch (chunk.type) {
+                case "profile_stage_started": {
+                  const steps = ensureRunning().map((s) =>
+                    s.stage === chunk.payload.stage
+                      ? { ...s, state: "running" as ProfileStepState }
+                      : s,
+                  );
+                  return { kind: "running", steps, requestedFlags: flags };
+                }
+                case "profile_stage_completed": {
+                  const nextState: ProfileStepState =
+                    chunk.payload.note === "skipped" ? "skipped" : "done";
+                  const steps = ensureRunning().map((s) =>
+                    s.stage === chunk.payload.stage
+                      ? { ...s, state: nextState, durationMs: chunk.payload.duration_ms, note: chunk.payload.note }
+                      : s,
+                  );
+                  return { kind: "running", steps, requestedFlags: flags };
+                }
+                case "profile_progress": {
+                  const steps = ensureRunning().map((s) =>
+                    s.stage === chunk.payload.stage
+                      ? { ...s, batchIndex: chunk.payload.batch_index, batchTotal: chunk.payload.batch_total }
+                      : s,
+                  );
+                  return { kind: "running", steps, requestedFlags: flags };
+                }
+                case "profile_done": {
+                  const steps = ensureRunning();
+                  const summary: ProfileDonePayload = chunk.payload;
+                  return { kind: "succeeded", steps, summary, autoDisabled: false };
+                }
+                case "profile_error": {
+                  const steps = ensureRunning().map((s) =>
+                    s.state === "running" ? { ...s, state: "error" as ProfileStepState } : s,
+                  );
+                  return { kind: "failed", steps, message: chunk.payload.message };
+                }
+                default:
+                  return prev;
+              }
+            });
+          },
+          onClose: () => {
+            setProfileState((prev) => {
+              if (prev.kind === "succeeded" || prev.kind === "failed") return prev;
+              if (prev.kind === "running") {
+                return { kind: "failed", steps: prev.steps, message: "Connection closed before completion." };
+              }
+              return { kind: "failed", steps: [], message: "Connection closed before completion." };
+            });
+          },
+          onNetworkError: (err: Error) => {
+            setProfileState((prev) => ({
+              kind: "failed",
+              steps: prev.kind === "running" ? prev.steps : [],
+              message: err.message || "Network error during profiling.",
+            }));
+          },
+        },
+      );
+    },
+    [],
+  );
+
+  // When profiling succeeds, trigger sample question generation.
+  useEffect(() => {
+    if (profileState.kind === "succeeded") {
+      ensure.mutate();
+    }
+  }, [profileState.kind, ensure]);
+
+  // Clear profiling UI on failure after a short delay.
+  useEffect(() => {
+    if (profileState.kind === "failed") {
+      const timer = setTimeout(() => {
+        setProfileState({ kind: "idle" });
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [profileState.kind]);
+
+  const selectedDbName = useMemo(() => {
+    if (!selectedDbId) return null;
+    return selectedDbId.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  }, [selectedDbId]);
 
   // Does the currently selected DB have a profile at all? Derived from the
   // database list (instant, cached) so we can clear chips immediately when
@@ -148,6 +296,21 @@ export function WelcomeScreen({ onSendMessage, onStop, isStreaming }: WelcomeScr
     // (DB switch in progress). Keep old chips visible to avoid the blink.
   }, [allQuestions, profileQuery.isFetching, selectedDbHasProfile]);
 
+  // Fetch user's onboarding status from server. Default to true (completed)
+  // to avoid flashing the tour on every load before the fetch resolves.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/v1/auth/me", { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: { onboarding_completed?: boolean } | null) => {
+        if (!cancelled && data) {
+          setOnboardingCompleted(data.onboarding_completed ?? true);
+        }
+      })
+      .catch(() => { /* leave as default */ });
+    return () => { cancelled = true; };
+  }, []);
+
   // Subscribe to pendingInput changes outside the render cycle to avoid
   // cascading setState-in-effect warnings.
   useEffect(() => {
@@ -195,7 +358,9 @@ export function WelcomeScreen({ onSendMessage, onStop, isStreaming }: WelcomeScr
           {displayName || (<>Insight<span className="text-primary dark:text-cyan-accent">Xpert</span></>)}
         </h1>
         <p className="mt-3 text-sm text-muted-foreground sm:text-base">
-          AI-powered analytics for Indian digital payments
+          {selectedDbName
+            ? `AI-powered analytics for ${selectedDbName}`
+            : "AI-powered analytics for your data"}
         </p>
       </motion.div>
 
@@ -212,9 +377,12 @@ export function WelcomeScreen({ onSendMessage, onStop, isStreaming }: WelcomeScr
             value={value}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Ask about Indian digital payments..."
+            placeholder={selectedDbName
+              ? `Ask anything about ${selectedDbName}...`
+              : "Select a database to get started..."}
             className="min-h-[36px] max-h-[140px] flex-1 resize-none border-0 bg-transparent px-1 py-1.5 text-sm shadow-none focus-visible:ring-0"
             rows={1}
+            data-onboarding-target="chat-input"
           />
           <InputToolbar
             onSend={handleSend}
@@ -235,6 +403,66 @@ export function WelcomeScreen({ onSendMessage, onStop, isStreaming }: WelcomeScr
       {/* First-class database picker — shown only on the landing screen so
           users don't have to hunt for the header dropdown. */}
       <DatabasePickerPanel />
+
+      {/* Upload CTA — when no databases exist, give a prominent upload button. */}
+      {databases.length === 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, delay: 0.2 }}
+          className="mt-4"
+        >
+          <Button
+            onClick={() => setUploadOpen(true)}
+            size="lg"
+            className="gap-2"
+            data-onboarding-target="upload"
+          >
+            <Upload className="size-4" />
+            Upload your data
+          </Button>
+        </motion.div>
+      )}
+
+      {/* Post-upload profiling progress */}
+      {profileState.kind === "connecting" && (
+        <div className="mt-4 flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="size-4 animate-spin" /> Connecting to profiling…
+        </div>
+      )}
+      {profileState.kind === "running" && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mt-4 w-full max-w-md"
+        >
+          <p className="mb-2 text-xs font-medium text-muted-foreground">Profiling your data…</p>
+          <ProfileStepper
+            steps={profileState.kind === "running" ? profileState.steps : []}
+            totalDurationMs={null}
+          />
+        </motion.div>
+      )}
+      {profileState.kind === "succeeded" && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mt-4 flex items-center gap-2 text-sm text-emerald-600 dark:text-emerald-400"
+        >
+          <CheckCircle2 className="size-4" />
+          Profiling complete — {profileState.summary.table_count} table
+          {profileState.summary.table_count !== 1 ? "s" : ""},{" "}
+          {profileState.summary.column_count} column
+          {profileState.summary.column_count !== 1 ? "s" : ""}
+          {profileState.summary.total_duration_ms != null &&
+            ` in ${(profileState.summary.total_duration_ms / 1000).toFixed(1)}s`}
+        </motion.div>
+      )}
+      {profileState.kind === "failed" && (
+        <div className="mt-4 text-sm text-destructive">
+          Profiling failed: {profileState.message}
+        </div>
+      )}
 
       {/* Generate sample questions button — shown when a profiled DB has no
           questions yet and generation is not already in progress. */}
@@ -275,6 +503,7 @@ export function WelcomeScreen({ onSendMessage, onStop, isStreaming }: WelcomeScr
           animate="show"
           exit="hidden"
           className="mt-4 sm:mt-6 grid w-full max-w-2xl grid-cols-1 min-[400px]:grid-cols-3 gap-2 sm:gap-3"
+          data-onboarding-target="suggestions"
         >
           {questions.map((question) => (
             <motion.button
@@ -314,6 +543,26 @@ export function WelcomeScreen({ onSendMessage, onStop, isStreaming }: WelcomeScr
           View all sample questions →
         </motion.button>
       )}
+
+      <CsvUploadDialog
+        open={uploadOpen}
+        onOpenChange={setUploadOpen}
+        onUploadSuccess={() => {
+          void queryClient.invalidateQueries({ queryKey: ["databases", "list"] });
+        }}
+        onProfileRequired={handleProfileRequired}
+      />
+
+      <OnboardingTour
+        enabled={databases.length === 0}
+        targetSelectors={[
+          '[data-onboarding-target="upload"]',
+          '[data-onboarding-target="chat-input"]',
+          '[data-onboarding-target="suggestions"]',
+        ]}
+        featureEnabled={onboardingEnabled}
+        onboardingCompleted={onboardingCompleted}
+      />
     </div>
   );
 }

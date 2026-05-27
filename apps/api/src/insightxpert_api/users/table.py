@@ -13,16 +13,20 @@ from ..db.base import metadata
 users = Table(
     "users",
     metadata,
+    # DECISION(D-010): UUID4 hex string IDs — uuid4().hex for all PKs, distributed-safe, human-readable
     Column("id", String(36), primary_key=True),
     Column("email", String(254), nullable=False, unique=True),
     Column("password_hash", String(512), nullable=False),
     Column("role", String(16), nullable=False),
     Column("is_active", Integer, nullable=False, server_default="1"),
     Column("must_change_password", Integer, nullable=False, server_default="0"),
+    # DECISION(D-054): Stateless session invalidation — bump this column to reject all tokens with older iat
     Column("sessions_valid_after", Integer, nullable=False),
+    # DECISION(D-011): Unix epoch integer timestamps — all created_at/updated_at are int(time.time())
     Column("created_at", Integer, nullable=False),
     Column("updated_at", Integer, nullable=False),
     Column("last_seen_at", Integer, nullable=True),
     Column("sharing_disabled", Integer, nullable=False, server_default="0"),
+    Column("onboarding_completed", Integer, nullable=False, server_default="0"),
     CheckConstraint("role IN ('admin','user')", name="users_role_check"),
 )

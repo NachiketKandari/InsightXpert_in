@@ -13,6 +13,7 @@ import {
   PanelRight,
   HelpCircle,
   Sparkles,
+  Map,
 } from "lucide-react";
 
 const FEATURE_DEFS: {
@@ -74,6 +75,12 @@ const FEATURE_DEFS: {
     label: "Pre-Computed Stats Context",
     description: "Inject pre-configured dataset statistics directly into the LLM context, enabling faster answers without SQL for common aggregate questions",
     icon: Sparkles,
+  },
+  {
+    key: "onboarding_enabled",
+    label: "Onboarding Tour",
+    description: "Show the guided onboarding tour for new users on their first visit",
+    icon: Map,
   },
 ];
 

@@ -24,13 +24,8 @@ _FEATURES: dict[str, bool] = {
     "agent_process_sidebar": True,
     "clarification_enabled": True,
     "stats_context_injection": False,
+    "onboarding_enabled": True,
 }
-
-_DEFAULTS = {
-    "features": dict(_FEATURES),
-    "branding": None,
-}
-
 
 @router.get("")
 async def get_client_config(response: Response) -> dict[str, object]:

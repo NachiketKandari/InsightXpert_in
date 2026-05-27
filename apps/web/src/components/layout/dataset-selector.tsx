@@ -167,7 +167,7 @@ export function DatasetSelector() {
             className="gap-2 cursor-pointer text-primary dark:text-cyan-accent"
           >
             <Plus className="size-3.5" />
-            <span className="text-sm font-medium">Upload CSV</span>
+            <span className="text-sm font-medium">Upload CSV / Excel</span>
           </DropdownMenuItem>
           <DropdownMenuItem
             onClick={() => setSqliteUploadOpen(true)}

@@ -20,6 +20,7 @@ class User(BaseModel):
     role: Role
     is_active: bool
     must_change_password: bool
+    onboarding_completed: bool = False
     sessions_valid_after: int
     created_at: int
     updated_at: int

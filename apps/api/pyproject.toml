@@ -1,8 +1,8 @@
 [project]
 name = "insightxpert-api"
-version = "0.1.0"
+version = "0.1.0"  # DECISION(D-081): Version 0.1.0 is SemVer placeholder — no formal bump criteria yet
 description = "insightxpert.ai — FastAPI backend orchestrating the text-to-SQL pipeline"
-requires-python = ">=3.12,<3.13"
+requires-python = ">=3.12,<3.13"  # DECISION(D-082): Python >=3.12,<3.13 — PEP 695 type params, TaskGroup; 3.13 excluded due to library-compat risk
 dependencies = [
   "fastapi>=0.115",
   "uvicorn[standard]>=0.30",
@@ -23,6 +23,7 @@ dependencies = [
   "alembic>=1.18.4",
   "sqlalchemy>=2.0.49",
   "pandas>=3.0.2",
+  "openpyxl>=3.1",
   "scipy>=1.17.1",
   "apscheduler>=3.10,<4.0",
   "croniter>=2.0",
@@ -43,6 +44,7 @@ dev = [
   "mypy>=1.11",
 ]
 
+# DECISION(D-087): uv package manager (fast Rust resolver, lockfile); hatchling build backend
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
@@ -50,6 +52,7 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/insightxpert_api"]
 
+# DECISION(D-086): ruff for lint+format (not flake8+black), mypy strict mode, pytest-asyncio auto mode
 [tool.ruff]
 line-length = 100
 target-version = "py312"
@@ -67,6 +70,7 @@ strict = true
 plugins = ["pydantic.mypy"]
 exclude = ["src/insightxpert_api/vendored/"]
 
+# DECISION(D-085): @pytest.mark.gemini for live API tests — gated behind GEMINI_API_KEY_REAL; skipped in CI
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]

@@ -8,6 +8,7 @@ export interface FeatureToggles {
   agent_process_sidebar: boolean;
   clarification_enabled: boolean;
   stats_context_injection: boolean;
+  onboarding_enabled: boolean;
 }
 
 export interface OrgBranding {

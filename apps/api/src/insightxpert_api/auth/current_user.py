@@ -27,6 +27,8 @@ from .session import SessionSigner
 
 CACHE_TTL = 30
 
+# DECISION(D-036): In-process dict caches with 30s TTL (no Redis) — module-level dict for user lookup
+# DECISION(D-065): In-process dict cache with 30s TTL — saves 300-800ms on /me hot path
 _cache: dict[str, tuple[UserWithHash, float]] = {}
 
 
@@ -55,8 +57,12 @@ class CurrentUser:
     role: Literal["admin", "user"]
     is_active: bool
     must_change_password: bool
+    onboarding_completed: bool = False
 
 
+# DECISION(D-026): Dual auth transport — HttpOnly cookie (ix_session) for
+# browser UX AND Authorization: Bearer header for API clients. Same
+# itsdangerous token format, same verification path.
 def _extract_token(request: Request, cookie_name: str) -> str | None:
     token = request.cookies.get(cookie_name)
     if token:
@@ -88,6 +94,7 @@ def get_current_user(
         role=row.role,
         is_active=row.is_active,
         must_change_password=row.must_change_password,
+        onboarding_completed=row.onboarding_completed,
     )
 
 

@@ -36,7 +36,7 @@ export default function DatabasesPage() {
             <div className="rounded-lg border border-dashed border-border p-8 text-center">
               <p className="text-sm font-medium">No databases yet</p>
               <p className="mt-1 text-xs text-muted-foreground">
-                Upload a SQLite file from the chat sidebar to get started.
+                Upload a CSV or Excel file from the chat sidebar to get started.
               </p>
             </div>
           ) : (

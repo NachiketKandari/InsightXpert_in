@@ -50,6 +50,8 @@ async def login(
     settings: Settings = Depends(get_settings),
 ) -> LoginResponse:
     user = service.authenticate(body.email, body.password)
+    # DECISION(D-025): Flat error response shape {"detail": "message"} —
+    # FastAPI's default. Not RFC 7807 Problem Details. Chosen for MVP simplicity.
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="unauthorized")
     # Ensure iat >= sessions_valid_after so the freshly-issued token is always valid.
@@ -83,6 +85,7 @@ class MeResponse(BaseModel):
     role: str
     is_active: bool
     must_change_password: bool
+    onboarding_completed: bool = False
 
 
 @router.get("/me", response_model=MeResponse)
@@ -96,7 +99,24 @@ async def me(cu: CurrentUser = Depends(get_current_user)) -> MeResponse:
         role=cu.role,
         is_active=cu.is_active,
         must_change_password=cu.must_change_password,
+        onboarding_completed=cu.onboarding_completed,
     )
+
+
+# --- onboarding-complete -------------------------------------------------
+
+
+@router.post("/me/onboarding-complete")
+async def complete_onboarding(
+    cu: CurrentUser = Depends(get_current_user),
+) -> dict[str, str]:
+    """Mark the current user's onboarding tour as completed."""
+    from ..auth.current_user import bump_session_cache
+    from ..users.repository import update_user
+
+    update_user(cu.id, {"onboarding_completed": 1})
+    bump_session_cache(cu.id)
+    return {"status": "ok"}
 
 
 # --- change-password ------------------------------------------------------

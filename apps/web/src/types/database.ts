@@ -27,6 +27,27 @@ export interface DatabaseListItem {
 export interface DatabaseUploadResponse {
   db_id: string;
   source: string;
+  profile_required?: boolean;
+}
+
+// --- Upload preview (read-only, before upload) ----------------------------
+
+export interface PreviewColumn {
+  name: string;
+  inferred_type: string;
+  sample_values: string[];
+  null_count: number;
+  distinct_count: number;
+}
+
+export interface UploadPreviewResponse {
+  columns: PreviewColumn[];
+  preview_rows: Record<string, string>[];
+  row_count: number;
+  encoding: string | null;
+  sheet_name: string | null;
+  sheet_names: string[] | null;
+  file_size_bytes: number;
 }
 
 export interface SchemaResponse {

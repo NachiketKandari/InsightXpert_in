@@ -42,7 +42,7 @@ export function DatabasePickerPanel() {
   if (databases.length === 0) {
     return (
       <div className="mt-6 text-center text-xs text-muted-foreground/70">
-        No databases available. Upload a CSV or SQLite file from the header menu.
+        No databases available. Upload a CSV or Excel file from the header menu.
       </div>
     );
   }

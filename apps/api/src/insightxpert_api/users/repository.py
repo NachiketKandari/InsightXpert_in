@@ -3,6 +3,7 @@
 All email storage is lowercased at write time; lookups lower() at the app
 boundary so behavior is case-insensitive.
 """
+# DECISION(D-030): Repository/Service split — table.py (schema), repository.py (data access), service.py (business logic)
 
 from __future__ import annotations
 
@@ -23,6 +24,7 @@ def _row_to_user_with_hash(row) -> UserWithHash:
         role=row.role,
         is_active=bool(row.is_active),
         must_change_password=bool(row.must_change_password),
+        onboarding_completed=bool(getattr(row, "onboarding_completed", 0)),
         sessions_valid_after=row.sessions_valid_after,
         created_at=row.created_at,
         updated_at=row.updated_at,
@@ -43,6 +45,7 @@ def insert_user(u: UserWithHash) -> None:
             created_at=u.created_at,
             updated_at=u.updated_at,
             last_seen_at=u.last_seen_at,
+            onboarding_completed=1 if u.onboarding_completed else 0,
         ))
 
 

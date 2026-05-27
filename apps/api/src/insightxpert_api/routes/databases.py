@@ -1,10 +1,11 @@
 """Database routes.
 
-Six endpoints backing the FE dataset selector + upload + profile flows:
+Endpoints backing the FE dataset selector + upload + profile flows:
 
   * ``GET /api/v1/databases`` — list bundled + session-uploaded DBs.
   * ``POST /api/v1/databases/upload`` — multipart SQLite upload.
-  * ``POST /api/v1/databases/upload-csv`` — CSV→SQLite conversion upload.
+  * ``POST /api/v1/databases/upload-csv`` — CSV/Excel→SQLite conversion upload.
+  * ``POST /api/v1/databases/upload-preview`` — preview CSV/Excel before upload.
   * ``GET /api/v1/databases/{db_id}/schema`` — DDL + table list.
   * ``GET /api/v1/databases/{db_id}/profile`` — cached profile (404 if unprofiled).
   * ``POST /api/v1/databases/{db_id}/profile`` — SSE-driven profiling run.
@@ -105,6 +106,25 @@ class DatabaseListItem(BaseModel):
 class UploadResponse(BaseModel):
     db_id: str
     source: str
+    profile_required: bool = False
+
+
+class PreviewColumn(BaseModel):
+    name: str
+    inferred_type: str
+    sample_values: list[str]
+    null_count: int
+    distinct_count: int
+
+
+class UploadPreviewResponse(BaseModel):
+    columns: list[PreviewColumn]
+    preview_rows: list[dict[str, str]]
+    row_count: int
+    encoding: str | None = None
+    sheet_name: str | None = None
+    sheet_names: list[str] | None = None
+    file_size_bytes: int
 
 
 class SchemaResponse(BaseModel):
@@ -252,30 +272,134 @@ async def upload_database(
     return UploadResponse(db_id=ref.db_id, source=ref.source)
 
 
-def _csv_to_sqlite(csv_bytes: bytes, db_id: str) -> bytes:
-    """Parse a CSV and write it to an in-memory SQLite, return serialised bytes.
+def _file_to_dataframe(raw_bytes: bytes, filename: str) -> tuple["pd.DataFrame", dict]:
+    """Parse CSV or Excel file into a DataFrame with metadata.
 
-    Type-inference strategy (reuse-manifest: Private/InsightXpert/src/insightxpert/profiler/profiler.py):
-      * Use ``pandas.read_csv`` with ``dtype=object`` for a lossless first pass.
-      * Then coerce columns with ``pd.to_numeric``; if the non-null coercion
-        is integer-exact, use INTEGER; if float, use REAL; otherwise TEXT.
-      * Boolean-looking columns (true/false/1/0 only, case-insensitive) map to INTEGER.
-      * Datetime-looking columns (``pd.to_datetime`` succeeds on >50% of non-null
-        values) map to TEXT with ISO-8601 stringification (SQLite has no native type).
-      * The table name is derived from ``db_id`` — same slug that the user supplied.
-
-    The serialised SQLite file is returned as bytes so the caller can store it
-    via :meth:`DatabaseService.save_upload` exactly like a native SQLite upload.
+    Returns (dataframe, metadata) where metadata includes encoding, sheet info,
+    and original row count. Does NOT sanitise column names — that happens in
+    ``_dataframe_to_sqlite`` so preview can show original names.
     """
     import pandas as pd  # always available (in pyproject.toml dependencies)
 
-    try:
-        df = pd.read_csv(io.BytesIO(csv_bytes), dtype=object)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"malformed_csv: {exc}") from exc
+    ext = Path(filename).suffix.lower()
+    meta: dict = {}
+
+    if ext in (".xlsx", ".xls"):
+        if ext == ".xls":
+            raise HTTPException(
+                status_code=400,
+                detail="Legacy .xls format is not supported. Please save as .xlsx or .csv and try again.",
+            )
+        try:
+            xls = pd.ExcelFile(io.BytesIO(raw_bytes))
+        except ImportError:
+            raise HTTPException(
+                status_code=400,
+                detail="Excel support requires openpyxl. Please install it.",
+            )
+        except Exception as exc:
+            msg = str(exc)
+            if "password" in msg.lower() or "encrypted" in msg.lower():
+                raise HTTPException(status_code=400, detail="This Excel file is password-protected. Please remove the password and try again.")
+            if "corrupt" in msg.lower() or "not a valid" in msg.lower():
+                raise HTTPException(status_code=400, detail="This file appears to be corrupted or unsupported. Please check the file and try again.")
+            raise HTTPException(status_code=400, detail=f"Could not read Excel file: {msg}") from exc
+
+        sheet_names: list = xls.sheet_names
+        meta["sheet_names"] = sheet_names
+        sheet_name = sheet_names[0]
+        meta["sheet_name"] = sheet_name
+
+        try:
+            df = pd.read_excel(xls, sheet_name=sheet_name, dtype=object)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Could not read sheet '{sheet_name}': {exc}") from exc
+        finally:
+            xls.close()
+
+        if len(sheet_names) > 1:
+            log.info("multi_sheet_excel", filename=filename, sheets=sheet_names, using=sheet_name)
+
+        meta["original_rows"] = len(df)
+        return df, meta
+
+    # CSV path — encoding detection via fallback chain.
+    encodings = ["utf-8", "latin-1", "cp1252"]
+    last_exc: Exception | None = None
+    for enc in encodings:
+        try:
+            df = pd.read_csv(io.BytesIO(raw_bytes), dtype=object, encoding=enc)
+            meta["encoding"] = enc
+            break
+        except UnicodeDecodeError as exc:
+            last_exc = exc
+            continue
+        except pd.errors.EmptyDataError:
+            raise HTTPException(status_code=400, detail="File has no data rows.")
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"malformed_csv: {exc}") from exc
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Could not detect file encoding. Try saving as UTF-8 CSV or .xlsx.",
+        ) from last_exc
 
     if df.empty and len(df.columns) == 0:
-        raise HTTPException(status_code=400, detail="malformed_csv: empty file or no columns")
+        raise HTTPException(status_code=400, detail="File has no data rows.")
+
+    meta["original_rows"] = len(df)
+    return df, meta
+
+
+def _infer_column_types(df: "pd.DataFrame") -> dict[str, str]:
+    """Infer SQLite types for each column in a DataFrame.
+
+    Strategy (same as legacy _csv_to_sqlite):
+      * Boolean-looking columns → INTEGER
+      * Numeric columns → INTEGER (if exact) or REAL
+      * Datetime-looking columns (>50% parse) → DATETIME
+      * Everything else → TEXT
+    """
+    import pandas as pd
+
+    col_types: dict[str, str] = {}
+    for col in df.columns:
+        series = df[col].dropna()
+        if series.empty:
+            col_types[col] = "TEXT"
+            continue
+
+        bool_vals = {"true", "false", "1", "0"}
+        str_series = series.astype(str).str.lower()
+        if set(str_series.unique()).issubset(bool_vals):
+            col_types[col] = "INTEGER"
+            continue
+
+        numeric = pd.to_numeric(series, errors="coerce")
+        non_null = numeric.dropna()
+        if len(non_null) == len(series):
+            if (non_null == non_null.astype("int64")).all():
+                col_types[col] = "INTEGER"
+            else:
+                col_types[col] = "REAL"
+            continue
+
+        dt = pd.to_datetime(series, errors="coerce", utc=False)
+        if dt.notna().sum() / len(series) > 0.5:
+            col_types[col] = "DATETIME"
+            continue
+
+        col_types[col] = "TEXT"
+    return col_types
+
+
+def _dataframe_to_sqlite(df: "pd.DataFrame", db_id: str) -> bytes:
+    """Write a DataFrame to an in-memory SQLite, return serialised bytes.
+
+    Sanitises column names, deduplicates, infers types, creates table, and
+    inserts rows in batches. The table name is derived from ``db_id``.
+    """
+    import pandas as pd
 
     # Sanitise column names: strip whitespace, replace non-alphanumeric with _.
     rename_map = {}
@@ -284,7 +408,7 @@ def _csv_to_sqlite(csv_bytes: bytes, db_id: str) -> bytes:
         if not safe or safe[0].isdigit():
             safe = f"col_{safe}"
         rename_map[col] = safe
-    df.rename(columns=rename_map, inplace=True)
+    df = df.rename(columns=rename_map)
 
     # Deduplicate column names in case sanitisation produced collisions.
     seen: dict[str, int] = {}
@@ -296,49 +420,16 @@ def _csv_to_sqlite(csv_bytes: bytes, db_id: str) -> bytes:
         else:
             seen[col] = 0
             final_cols.append(col)
-    df.columns = final_cols  # type: ignore[assignment]
+    df.columns = pd.Index(final_cols)
 
-    # Infer SQLite types per column.
-    col_types: dict[str, str] = {}
-    for col in df.columns:
-        series = df[col].dropna()
-        if series.empty:
-            col_types[col] = "TEXT"
-            continue
-
-        # Boolean check first (before numeric, since 0/1 would match numeric too).
-        bool_vals = {"true", "false", "1", "0"}
-        if set(series.str.lower().unique()).issubset(bool_vals):
-            col_types[col] = "INTEGER"
-            continue
-
-        numeric = pd.to_numeric(series, errors="coerce")
-        non_null = numeric.dropna()
-        if len(non_null) == len(series):
-            # All non-null values coerce cleanly.
-            if (non_null == non_null.astype("int64")).all():
-                col_types[col] = "INTEGER"
-            else:
-                col_types[col] = "REAL"
-            continue
-
-        # Try datetime (accept if >50% of non-null values parse successfully).
-        dt = pd.to_datetime(series, errors="coerce", utc=False)
-        if dt.notna().sum() / len(series) > 0.5:
-            col_types[col] = "DATETIME"
-            continue
-
-        col_types[col] = "TEXT"
+    col_types = _infer_column_types(df)
 
     # Build the in-memory SQLite.
     con = sqlite3.connect(":memory:")
     table_name = re.sub(r"[^a-z0-9_]", "_", db_id.lower())
-    cols_ddl = ", ".join(
-        f'"{col}" {col_types[col]}' for col in df.columns
-    )
+    cols_ddl = ", ".join(f'"{col}" {col_types[col]}' for col in df.columns)
     con.execute(f'CREATE TABLE "{table_name}" ({cols_ddl})')
 
-    # Insert rows in batches; coerce values to correct Python types for SQLite.
     def _coerce(val: object, col_type: str) -> object:
         if val is None or (isinstance(val, float) and val != val):
             return None
@@ -358,9 +449,7 @@ def _csv_to_sqlite(csv_bytes: bytes, db_id: str) -> bytes:
     col_list = ", ".join(f'"{c}"' for c in df.columns)
     batch: list[tuple[object, ...]] = []
     for row in df.itertuples(index=False, name=None):
-        batch.append(
-            tuple(_coerce(v, col_types[c]) for v, c in zip(row, df.columns))
-        )
+        batch.append(tuple(_coerce(v, col_types[c]) for v, c in zip(row, df.columns)))
         if len(batch) >= 500:
             con.executemany(
                 f'INSERT INTO "{table_name}" ({col_list}) VALUES ({placeholders})',
@@ -385,16 +474,26 @@ async def upload_csv(
     cu: CurrentUser = Depends(get_current_user),
     settings: Settings = Depends(get_settings),
 ) -> UploadResponse:
-    """Convert an uploaded CSV to a single-table SQLite and register it.
+    """Convert an uploaded CSV or Excel file to a single-table SQLite and register it.
 
-    Mirrors ``upload_database`` defences (MF-PR-1/2/4):
+    Supports ``.csv``, ``.xlsx``, and ``.xls``. Mirrors ``upload_database``
+    defences (MF-PR-1/2/4):
       * Ownership collision check BEFORE reading the body.
       * Chunked read with running size check → 413 before OOM.
       * Empty body → 400.
-      * Malformed CSV → 400.
+      * Malformed CSV/Excel → 400.
       * db_id validation (path-traversal guard).
     """
     _validate_db_id(db_id)
+
+    # Validate file extension early.
+    filename = file.filename or "upload.csv"
+    ext = Path(filename).suffix.lower()
+    if ext not in (".csv", ".xlsx", ".xls"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type '{ext}'. Please upload .csv, .xlsx, or .xls.",
+        )
 
     # MF-PR-4: collision check before reading body.
     existing = await asyncio.to_thread(databases_repo.get, db_id)
@@ -425,17 +524,95 @@ async def upload_csv(
     if first_chunk:
         raise HTTPException(status_code=400, detail="invalid_file")
 
-    csv_bytes = b"".join(chunks)
+    raw_bytes = b"".join(chunks)
 
-    # Parse CSV → SQLite (blocking CPU work; run in thread pool).
-    sqlite_bytes = await asyncio.to_thread(_csv_to_sqlite, csv_bytes, db_id)
+    # Parse file → DataFrame (blocking CPU work; run in thread pool).
+    df, _meta = await asyncio.to_thread(_file_to_dataframe, raw_bytes, filename)
+
+    # Convert DataFrame → SQLite.
+    sqlite_bytes = await asyncio.to_thread(_dataframe_to_sqlite, df, db_id)
 
     svc = _db_svc(settings)
     ref = svc.save_upload(cu.id, db_id, sqlite_bytes)
     await asyncio.to_thread(
         visibility_service.upsert_private, db_id, cu.id, len(sqlite_bytes)
     )
-    return UploadResponse(db_id=ref.db_id, source=ref.source)
+    return UploadResponse(db_id=ref.db_id, source=ref.source, profile_required=True)
+
+
+@router.post("/upload-preview", response_model=UploadPreviewResponse)
+async def upload_preview(
+    file: UploadFile = File(...),
+    cu: CurrentUser = Depends(get_current_user),
+    settings: Settings = Depends(get_settings),
+) -> UploadPreviewResponse:
+    """Preview a CSV or Excel file before uploading.
+
+    Returns column metadata, inferred types, sample values, row count,
+    and sheet information. Read-only — nothing is persisted.
+    """
+    import pandas as pd
+
+    filename = file.filename or "upload.csv"
+    ext = Path(filename).suffix.lower()
+    if ext not in (".csv", ".xlsx", ".xls"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type '{ext}'. Please upload .csv, .xlsx, or .xls.",
+        )
+
+    max_bytes = settings.max_upload_mb * 1024 * 1024
+    chunks: list[bytes] = []
+    size = 0
+    first_chunk = True
+    while True:
+        chunk = await file.read(1 << 20)
+        if not chunk:
+            break
+        first_chunk = False
+        size += len(chunk)
+        if size > max_bytes:
+            raise HTTPException(status_code=413, detail="upload_too_large")
+        chunks.append(chunk)
+
+    if first_chunk:
+        raise HTTPException(status_code=400, detail="invalid_file")
+
+    raw_bytes = b"".join(chunks)
+
+    df, meta = await asyncio.to_thread(_file_to_dataframe, raw_bytes, filename)
+    col_types = _infer_column_types(df)
+
+    columns: list[PreviewColumn] = []
+    for col in df.columns:
+        series = df[col]
+        non_null = series.dropna()
+        # Sample: first 3 + last 2 non-null values.
+        nn_vals = non_null.astype(str).tolist()
+        sample = nn_vals[:3] + nn_vals[-2:] if len(nn_vals) > 5 else nn_vals[:5]
+        columns.append(
+            PreviewColumn(
+                name=str(col),
+                inferred_type=col_types.get(col, "TEXT"),
+                sample_values=sample,
+                null_count=int(series.isna().sum()),
+                distinct_count=int(series.nunique()),
+            )
+        )
+
+    preview_rows: list[dict[str, str]] = (
+        df.head(5).fillna("").astype(str).to_dict(orient="records")
+    )
+
+    return UploadPreviewResponse(
+        columns=columns,
+        preview_rows=preview_rows,
+        row_count=len(df),
+        encoding=meta.get("encoding"),
+        sheet_name=meta.get("sheet_name"),
+        sheet_names=meta.get("sheet_names"),
+        file_size_bytes=len(raw_bytes),
+    )
 
 
 @router.get("/{db_id}/schema", response_model=SchemaResponse)
