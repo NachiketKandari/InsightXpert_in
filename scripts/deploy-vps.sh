@@ -3,7 +3,7 @@
 # Run this ON your Hostinger VPS as nachiket
 set -euo pipefail
 
-APP_BASE="/opt/insightxpert-new"
+APP_BASE="/home/nachiket/services/insightxpert-api"
 
 echo "=== 1. Create app directory structure ==="
 mkdir -p "${APP_BASE}"/{Databases,indices,storage}
@@ -24,7 +24,6 @@ docker build -t insightxpert-api:latest .
 
 echo ""
 echo "=== 4. Create the .env file ==="
-# You MUST edit this file with your real values before starting the container!
 cat > "${APP_BASE}/.env" << 'ENVEOF'
 # --- Runtime ---
 APP_ENV=production
@@ -35,14 +34,12 @@ CORS_ORIGINS='["https://insightxpert.in","https://www.insightxpert.in"]'
 
 # --- Supabase (use YOUR real values from 1Password / previous .env) ---
 DATABASE_URL=postgresql+psycopg://postgres.rwnxgohpmmuyfjeghhaj:<YOUR_SUPABASE_PASSWORD>@aws-1-ap-northeast-1.pooler.supabase.com:6543/postgres
-DATABASE_DIRECT_URL=postgresql+psycopg://postgres:<YOUR_SUPABASE_PASSWORD>@db.rwnxgohpmmuyfjeghhaj.supabase.co:5432/postgres?sslmode=require
+DATABASE_DIRECT_URL=postgresql+psycopg://postgres.rwnxgohpmmuyfjeghhaj:<YOUR_SUPABASE_PASSWORD>@aws-1-ap-northeast-1.pooler.supabase.com:6543/postgres
 
 # --- Auth ---
 SESSION_SECRET=<GENERATE_A_RANDOM_32_CHAR_STRING>
 BOOTSTRAP_ADMIN_EMAIL=admin@insightxpert.ai
 BOOTSTRAP_ADMIN_PASSWORD=<SET_A_STRONG_ADMIN_PASSWORD>
-BOOTSTRAP_USER_EMAIL=user@insightxpert.ai
-BOOTSTRAP_USER_PASSWORD=<SET_A_STRONG_USER_PASSWORD>
 REGISTRATION_ENABLED=true
 
 # --- LLM ---
@@ -60,7 +57,7 @@ MAX_UPLOAD_MB=50
 SQL_ROW_LIMIT=1000
 SQL_TIMEOUT_SECONDS=30
 
-# --- Encryption (generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())") ---
+# --- Encryption ---
 CREDENTIAL_ENCRYPTION_KEY=<GENERATE_A_FERNET_KEY>
 
 # --- Observability ---
@@ -80,22 +77,21 @@ fi
 
 echo ""
 echo "=== 6. Create docker-compose.yml ==="
-cat > "${APP_BASE}/docker-compose.yml" << 'COMPOSEEOF'
-version: "3.8"
+cat > "${APP_BASE}/docker-compose.yml" << COMPOSEEOF
 services:
   api:
     image: insightxpert-api:latest
     ports:
       - "127.0.0.1:8080:8080"
     env_file:
-      - /opt/insightxpert-new/.env
+      - ${APP_BASE}/.env
     volumes:
-      - /opt/insightxpert-new/Databases:/app/Databases:ro
-      - /opt/insightxpert-new/indices:/app/indices
-      - /opt/insightxpert-new/storage:/app/tmp/storage
+      - ${APP_BASE}/Databases:/app/Databases:ro
+      - ${APP_BASE}/indices:/app/indices
+      - ${APP_BASE}/storage:/app/tmp/storage
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/api/v1/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/api/v1/health')"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -111,7 +107,3 @@ echo "=== Done! ==="
 echo "Check: curl http://localhost:8080/api/v1/health"
 echo "Public: https://api.insightxpert.in/api/v1/health"
 echo "(Caddy handles SSL and reverse proxy — already configured)"
-echo ""
-echo "=== IMPORTANT: Before running ==="
-echo "1. Edit ${APP_BASE}/.env with your real secrets"
-echo "2. Run: bash ${APP_BASE}/repo/scripts/deploy-vps.sh"
