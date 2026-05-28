@@ -6,17 +6,28 @@ timeout-exception classification.
 """
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass
 from typing import Any, Union
 
 from .dialects import get_adapter
+from .dialects.forbidden_sql import FORBIDDEN_SQL_RE
 from .dialects.sqlite import FORBIDDEN_SQL_RE as _SQLITE_FORBIDDEN_SQL_RE
 
 # Re-exported for callers that validate SQL before a connector is constructed
-# (e.g. routes/automations.py). Sourced from the SqliteAdapter; multi-dialect
-# callers should use get_adapter(dialect).forbidden_sql_re instead.
-FORBIDDEN_SQL_RE = _SQLITE_FORBIDDEN_SQL_RE
+# (e.g. routes/automations.py). Now sourced from the canonical forbidden_sql module.
+FORBIDDEN_SQL_RE = FORBIDDEN_SQL_RE
+
+# Matches single-line (--…) and block (/* … */) SQL comments.
+_COMMENT_RE = re.compile(r"--[^\n]*|/\*.*?\*/", re.DOTALL)
+
+
+def _strip_sql_comments(sql: str) -> str:
+    """Remove single-line and block comments from *sql*, returning the bare
+    statement text so semicolons inside comments don't falsely trigger the
+    multi-statement check."""
+    return _COMMENT_RE.sub(" ", sql)
 
 
 class ForbiddenSQLError(Exception):
@@ -37,6 +48,8 @@ class QueryResult:
 class DatabaseConnector:
     """Per-request connector. Dispatches to the dialect adapter for all DB ops."""
 
+    # DECISION(D-038): DatabaseRef as SimpleNamespace — backward compat for callers passing plain string paths
+    # DECISION(D-064): SQL row limit (1000) and timeout (30s) — prevents OOM and hung queries
     def __init__(self, ref: Any, *, row_limit: int = 1000, timeout_s: int = 30) -> None:
         """``ref`` is a DatabaseRef (or a plain str path for backward compat)."""
         if isinstance(ref, str):
@@ -48,8 +61,15 @@ class DatabaseConnector:
         self._timeout = timeout_s
 
     def execute(self, sql: str) -> QueryResult:
+        # DECISION(D-053): Dual read-only enforcement — regex guard (here) + DB-level PRAGMA/session
         if self._adapter.forbidden_sql_re.search(sql):
             raise ForbiddenSQLError("write statements are not allowed")
+
+        # Multi-statement check — strip single-line (--) and block (/* */)
+        # comments, then reject if more than one statement remains.
+        stripped = _strip_sql_comments(sql)
+        if stripped.count(";") > 0:
+            raise ForbiddenSQLError("multi-statement SQL is not allowed")
 
         start = time.perf_counter()
         con = self._adapter.open_readonly(self._ref)

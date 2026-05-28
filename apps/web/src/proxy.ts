@@ -10,7 +10,7 @@
 
 import { NextResponse, type NextRequest } from "next/server";
 
-const PUBLIC_PATHS = ["/login", "/change-password"];
+const PUBLIC_PATHS = ["/login", "/register", "/change-password"];
 const SESSION_COOKIE = process.env.NEXT_PUBLIC_SESSION_COOKIE_NAME || "ix_session";
 
 function isPublic(pathname: string): boolean {

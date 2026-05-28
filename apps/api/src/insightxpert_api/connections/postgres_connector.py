@@ -2,7 +2,7 @@
 
 Two layers of write protection (D3 in the plan — belt + suspenders):
 
-1. ``_FORBIDDEN_SQL`` regex — fast pre-flight reject of obvious DDL/DML.
+1. ``FORBIDDEN_SQL_RE`` regex — fast pre-flight reject of obvious DDL/DML.
 2. ``default_transaction_read_only=on`` set as a session option in
    ``connect_args``. Even if the regex misses something (e.g. ``CREATE TEMP
    TABLE x AS SELECT 1``), Postgres rejects the write before it commits.
@@ -20,13 +20,11 @@ from typing import Any
 
 from sqlalchemy import create_engine, text
 
+from ..db.dialects.forbidden_sql import FORBIDDEN_SQL_RE
 from .types import PostgresConnection
 
 
-_FORBIDDEN_SQL = re.compile(
-    r"\b(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|GRANT|REVOKE|CREATE|REPLACE|VACUUM|ANALYZE)\b",
-    re.IGNORECASE,
-)
+_FORBIDDEN_SQL = FORBIDDEN_SQL_RE
 
 
 @dataclass(frozen=True)

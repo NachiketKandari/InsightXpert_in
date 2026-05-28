@@ -40,6 +40,23 @@ export async function logout(): Promise<void> {
   await apiFetch("/api/v1/auth/logout", { method: "POST" });
 }
 
+export async function register(
+  email: string,
+  password: string,
+): Promise<CurrentUser> {
+  const res = await apiFetch("/api/v1/auth/register", {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    if (res.status === 409) throw new Error("An account with this email already exists.");
+    if (res.status === 422) throw new Error(detail || "Password must be at least 8 characters.");
+    throw new Error(`Registration failed: ${res.status} ${detail}`);
+  }
+  return res.json();
+}
+
 export async function changePassword(
   current_password: string,
   new_password: string,

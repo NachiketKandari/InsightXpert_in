@@ -22,7 +22,10 @@ from ..connections.encryption import encrypt
 from ..connections.postgres_connector import PostgresConnector
 from ..connections.types import LibsqlConnection, PostgresConnection
 from ..databases import repository as databases_repo
+from ..logging import get_logger
 from ..profiling import repository as profiles_repo
+
+_log = get_logger("connections")
 
 
 router = APIRouter(prefix="/api/v1/connections", tags=["connections"])
@@ -60,7 +63,11 @@ async def test_connection(
         try:
             tables = conn.list_tables()
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"connection failed: {e}")
+            _log.warning("connection test failed: %s", e)
+            raise HTTPException(
+                status_code=400,
+                detail="connection failed: unable to reach host or invalid credentials",
+            )
         finally:
             conn.dispose()
         return {"ok": True, "tables": tables}

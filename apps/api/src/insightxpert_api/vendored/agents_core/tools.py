@@ -48,7 +48,7 @@ class RunSqlTool(Tool):
         sql = args["sql"]
 
         # Block write operations
-        if FORBIDDEN_SQL_RE.match(sql):
+        if FORBIDDEN_SQL_RE.search(sql):
             return json.dumps({"error": "Write operations (INSERT, UPDATE, DELETE, DROP, etc.) are not allowed."})
 
         # Enforce table-level access control

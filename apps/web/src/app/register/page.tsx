@@ -1,8 +1,8 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useState } from "react";
+import Link from "next/link";
 import { Eye, EyeOff } from "lucide-react";
 
 import { AppLogo } from "@/components/ui/app-logo";
@@ -16,23 +16,24 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { login } from "@/lib/auth-api";
+import { register } from "@/lib/auth-api";
 
-export default function LoginPage() {
+export default function RegisterPage() {
   return (
     <Suspense fallback={null}>
-      <LoginForm />
+      <RegisterForm />
     </Suspense>
   );
 }
 
-function LoginForm() {
+function RegisterForm() {
   const router = useRouter();
   const search = useSearchParams();
   const next = search.get("next") || "/";
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -42,16 +43,22 @@ function LoginForm() {
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+
+    if (password.length < 8) {
+      setError("Password must be at least 8 characters.");
+      return;
+    }
+    if (password !== confirmPassword) {
+      setError("Passwords do not match.");
+      return;
+    }
+
     setSubmitting(true);
     try {
-      const user = await login(email, password);
-      if (user.must_change_password) {
-        router.replace(`/change-password?next=${encodeURIComponent(next)}`);
-      } else {
-        router.replace(next);
-      }
-    } catch {
-      setError("Invalid email or password.");
+      await register(email, password);
+      router.replace(next);
+    } catch (err: any) {
+      setError(err.message || "Registration failed.");
     } finally {
       setSubmitting(false);
     }
@@ -67,7 +74,7 @@ function LoginForm() {
               Insight<span className="text-primary dark:text-cyan-accent">Xpert</span>
             </span>
           </CardTitle>
-          <CardDescription>Sign in to your account</CardDescription>
+          <CardDescription>Create a new account</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={onSubmit} className="flex flex-col gap-4">
@@ -89,8 +96,8 @@ function LoginForm() {
                 <Input
                   id="password"
                   type={showPassword ? "text" : "password"}
-                  placeholder="Enter your password"
-                  autoComplete="current-password"
+                  placeholder="At least 8 characters"
+                  autoComplete="new-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   required
@@ -111,16 +118,28 @@ function LoginForm() {
                 </button>
               </div>
             </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="confirm-password">Confirm Password</Label>
+              <Input
+                id="confirm-password"
+                type={showPassword ? "text" : "password"}
+                placeholder="Re-enter your password"
+                autoComplete="new-password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                required
+              />
+            </div>
             <Button type="submit" className="w-full" disabled={submitting}>
-              {submitting ? "Signing in…" : "Sign in"}
+              {submitting ? "Creating account…" : "Create account"}
             </Button>
             {error ? (
               <p className="text-sm text-center text-destructive">{error}</p>
             ) : null}
             <p className="text-sm text-center text-muted-foreground">
-              Don&apos;t have an account?{" "}
-              <Link href="/register" className="text-primary hover:underline">
-                Create one
+              Already have an account?{" "}
+              <Link href="/login" className="text-primary hover:underline">
+                Sign in
               </Link>
             </p>
           </form>

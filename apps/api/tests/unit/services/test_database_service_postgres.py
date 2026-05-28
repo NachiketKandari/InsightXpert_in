@@ -28,6 +28,7 @@ def test_list_unions_postgres_rows_from_databases_table(
         [
             {
                 "db_id": "toxicology_pg",
+                "kind": "postgres",
                 "visibility": "public",
                 "connection_url_env_var": "DATABASE_URL_TOXICOLOGY_PG",
                 "dialect": "postgres",
@@ -59,6 +60,7 @@ def test_missing_env_var_skips_row(
         [
             {
                 "db_id": "toxicology_pg",
+                "kind": "postgres",
                 "visibility": "public",
                 "connection_url_env_var": "DATABASE_URL_TOXICOLOGY_PG",
                 "dialect": "postgres",

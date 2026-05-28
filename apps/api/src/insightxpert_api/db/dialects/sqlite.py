@@ -5,7 +5,6 @@ come straight from ``db/connector.py``.
 """
 from __future__ import annotations
 
-import re
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -14,14 +13,7 @@ from ...vendored.pipeline_core.db import Database, SQLiteDatabase
 from ...vendored.pipeline_core.profiler.schema_extractor import SchemaExtractor
 from . import DIALECTS
 from .base import DialectAdapter, ProfilingQueryPack
-
-# Two patterns ORed. PRAGMA=write is split out so the trailing \b only applies to
-# the keyword variant (PRAGMA foo = bar ends on non-word chars, which would fail \b).
-FORBIDDEN_SQL_RE = re.compile(
-    r"(?:\b(?:INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|REPLACE|MERGE|GRANT|"
-    r"REVOKE|ATTACH|DETACH)\b)|(?:\bPRAGMA\s+\w+\s*=)",
-    re.IGNORECASE,
-)
+from .forbidden_sql import FORBIDDEN_SQL_WITH_PRAGMA_RE as FORBIDDEN_SQL_RE
 
 _PROFILING = ProfilingQueryPack(
     null_count='SELECT COUNT(*) FROM "{table}" WHERE "{col}" IS NULL',

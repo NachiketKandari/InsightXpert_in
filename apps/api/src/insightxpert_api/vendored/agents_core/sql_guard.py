@@ -14,10 +14,9 @@ import re
 
 # Matches write operations that should never be allowed through the agent tools.
 # The analyst tools are read-only; writes go through dedicated API endpoints.
-FORBIDDEN_SQL_RE = re.compile(
-    r"^\s*(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|REPLACE|ATTACH|DETACH)\b",
-    re.IGNORECASE,
-)
+# Uses the canonical forbidden-SQL regex (word-boundary matching) so write
+# keywords are caught anywhere in the SQL string, not just at the start.
+from ...db.dialects.forbidden_sql import FORBIDDEN_SQL_RE
 
 # Matches CTE alias names: WITH <alias> AS (...)
 # Used to exclude CTE aliases from the set of "real" table references.
@@ -75,7 +74,7 @@ def validate_tables(sql: str, allowed: set[str]) -> str | None:
         message string describing the violation.
     """
     # Check for write operations first
-    if FORBIDDEN_SQL_RE.match(sql):
+    if FORBIDDEN_SQL_RE.search(sql):
         return "Write operations (INSERT, UPDATE, DELETE, DROP, etc.) are not allowed."
 
     referenced = extract_tables(sql)

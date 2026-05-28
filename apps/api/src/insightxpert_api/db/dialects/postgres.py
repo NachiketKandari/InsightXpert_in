@@ -6,26 +6,13 @@ and idle-in-transaction timeout set at connection open.
 """
 from __future__ import annotations
 
-import re
 from typing import Any
 
 import psycopg
 
 from . import DIALECTS
 from .base import DialectAdapter, ProfilingQueryPack
-
-# The regex intentionally excludes SQLite-only keywords (ATTACH / DETACH /
-# PRAGMA) and adds Postgres-specific write forms (COPY ... FROM, GRANT / REVOKE,
-# TRUNCATE). Placed as a module-level constant so routes that pre-validate SQL
-# without constructing a connector can import it directly.
-FORBIDDEN_SQL_RE = re.compile(
-    r"\b("
-    r"INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|REPLACE|MERGE|"
-    r"GRANT|REVOKE|SECURITY\s+DEFINER"
-    r")\b|"
-    r"\bCOPY\b\s+\S+\s+\bFROM\b",
-    re.IGNORECASE,
-)
+from .forbidden_sql import FORBIDDEN_SQL_RE
 
 _PROFILING = ProfilingQueryPack(
     null_count=(
@@ -58,6 +45,9 @@ class PostgresAdapter:
                 "-c idle_in_transaction_session_timeout=10000"
             ),
             autocommit=True,
+            keepalives_idle=30,
+            keepalives_interval=10,
+            keepalives_count=3,
         )
         return conn
 

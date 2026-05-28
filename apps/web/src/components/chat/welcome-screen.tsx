@@ -71,11 +71,12 @@ export function WelcomeScreen({ onSendMessage, onStop, isStreaming }: WelcomeScr
   const { voiceState, voiceError, toggleVoice, clearVoiceText } = useVoiceInput(setValue);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [onboardingCompleted, setOnboardingCompleted] = useState(true); // default true = don't flash tour
+  const [onboardingLoading, setOnboardingLoading] = useState(true); // gate tour until fetch settles
   const configFeatures = useClientConfigStore((s) => s.config?.features);
   const onboardingEnabled = (configFeatures as Record<string, boolean> | undefined)?.["onboarding_enabled"] ?? true;
   const selectedDbId = useChatStore((s) => s.selectedDbId);
   const { data: sampleData, profileQuery, ensure } = useSampleQuestions(selectedDbId ?? undefined);
-  const { data: databases = [] } = useDatabases();
+  const { data: databases = [], isLoading: databasesLoading } = useDatabases();
   const queryClient = useQueryClient();
 
   // Post-upload profiling flow — inline state machine (no useProfileRun hook,
@@ -307,7 +308,8 @@ export function WelcomeScreen({ onSendMessage, onStop, isStreaming }: WelcomeScr
           setOnboardingCompleted(data.onboarding_completed ?? true);
         }
       })
-      .catch(() => { /* leave as default */ });
+      .catch(() => { /* leave as default */ })
+      .finally(() => { if (!cancelled) setOnboardingLoading(false); });
     return () => { cancelled = true; };
   }, []);
 
@@ -562,6 +564,7 @@ export function WelcomeScreen({ onSendMessage, onStop, isStreaming }: WelcomeScr
         ]}
         featureEnabled={onboardingEnabled}
         onboardingCompleted={onboardingCompleted}
+        loading={onboardingLoading || databasesLoading}
       />
     </div>
   );

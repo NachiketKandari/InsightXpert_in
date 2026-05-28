@@ -38,6 +38,19 @@ class DatabaseRef:
     connection_url: str | None = None
     connection_url_env_var: str | None = None
 
+    def __repr__(self) -> str:
+        url = self.connection_url
+        if url:
+            scheme_end = url.find("://")
+            if scheme_end != -1:
+                url = url[: scheme_end + 3] + "***"
+            else:
+                url = "***"
+        return (
+            f"DatabaseRef(db_id={self.db_id!r}, source={self.source!r}, "
+            f"dialect={self.dialect!r}, connection_url={url})"
+        )
+
 
 class _LazyDatabaseRef:
     """A DatabaseRef whose ``local_path`` is hydrated from the object store on first access.
@@ -277,7 +290,7 @@ class DatabaseService:
         from ..databases import repository as databases_repo
         from ..db.connector import resolve_connector as _resolve
 
-        row = databases_repo.get(db_id)
+        row = databases_repo.get_with_config(db_id)
         kind = (row or {}).get("kind") or "sqlite_file"
 
         if kind == "sqlite_file":

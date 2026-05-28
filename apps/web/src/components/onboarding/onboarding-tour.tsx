@@ -55,6 +55,8 @@ export interface OnboardingTourProps {
   featureEnabled: boolean;
   /** Per-user flag — if true, user has already completed the tour. */
   onboardingCompleted: boolean;
+  /** When true, the tour stays hidden until all async preconditions settle. */
+  loading?: boolean;
 }
 
 export function OnboardingTour({
@@ -62,6 +64,7 @@ export function OnboardingTour({
   targetSelectors,
   featureEnabled,
   onboardingCompleted,
+  loading = false,
 }: OnboardingTourProps) {
   const [visible, setVisible] = useState(false);
   const [step, setStep] = useState(0);
@@ -70,10 +73,10 @@ export function OnboardingTour({
   const [completing, setCompleting] = useState(false);
   const rafRef = useRef<number>(0);
 
-  // Show the tour only if: structural pre-condition (no DBs), admin hasn't
-  // killed the feature, and user hasn't already completed it (checked both
-  // locally and via server flag).
-  const shouldShow = enabled && featureEnabled && !onboardingCompleted && !hasLocalCompleted();
+  // Show the tour only if: async preconditions have settled, structural
+  // pre-condition (no DBs), admin hasn't killed the feature, and user hasn't
+  // already completed it (checked both locally and via server flag).
+  const shouldShow = !loading && enabled && featureEnabled && !onboardingCompleted && !hasLocalCompleted();
 
   // Initialize.
   useEffect(() => {

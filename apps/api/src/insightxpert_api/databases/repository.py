@@ -15,8 +15,32 @@ from sqlalchemy import delete as sa_delete
 from ..db.engine import get_engine
 from .table import database_shares, databases_table
 
+# Columns safe to return to any caller — excludes connection_config_encrypted.
+_PUBLIC_COLS = [
+    databases_table.c.db_id,
+    databases_table.c.owner_user_id,
+    databases_table.c.visibility,
+    databases_table.c.size_bytes,
+    databases_table.c.created_at,
+    databases_table.c.kind,
+    databases_table.c.pipeline_mode_default,
+]
+
 
 def get(db_id: str) -> dict[str, Any] | None:
+    """Return public columns for *db_id*, or None.  The encrypted connection
+    config is NOT included — use :func:`get_with_config` when you need it."""
+    with get_engine().connect() as conn:
+        row = conn.execute(
+            select(*_PUBLIC_COLS).where(databases_table.c.db_id == db_id)
+        ).first()
+    return dict(row._mapping) if row else None
+
+
+def get_with_config(db_id: str) -> dict[str, Any] | None:
+    """Like :func:`get` but includes ``connection_config_encrypted``.
+    Only call this when you actually need to decrypt and use the connection
+    string (e.g. DatabaseService.resolve_connector)."""
     with get_engine().connect() as conn:
         row = conn.execute(
             select(databases_table).where(databases_table.c.db_id == db_id)
