@@ -50,6 +50,10 @@ apps/api/Databases/**/*.sqlite
 .ruff_cache/
 .mypy_cache/
 
+# Docs and conversation logs — kept locally, not pushed to GitHub
+docs/
+conversations/
+
 # Worktrees
 .worktrees/
 # Superpowers / agent artifacts
