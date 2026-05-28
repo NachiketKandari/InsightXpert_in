@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
 
+import { useQueryClient } from "@tanstack/react-query";
 import { AppLogo } from "@/components/ui/app-logo";
 import { Button } from "@/components/ui/button";
 import {
@@ -30,6 +31,7 @@ function LoginForm() {
   const router = useRouter();
   const search = useSearchParams();
   const next = search.get("next") || "/";
+  const queryClient = useQueryClient();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -45,10 +47,13 @@ function LoginForm() {
     setSubmitting(true);
     try {
       const user = await login(email, password);
+      queryClient.clear();
+      sessionStorage.clear();
+      localStorage.removeItem("insightxpert_onboarding_seen");
       if (user.must_change_password) {
-        router.replace(`/change-password?next=${encodeURIComponent(next)}`);
+        window.location.replace(`/change-password?next=${encodeURIComponent(next)}`);
       } else {
-        router.replace(next);
+        window.location.replace(next);
       }
     } catch {
       setError("Invalid email or password.");

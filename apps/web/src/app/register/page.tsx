@@ -5,6 +5,7 @@ import { Suspense, useCallback, useState } from "react";
 import Link from "next/link";
 import { Eye, EyeOff } from "lucide-react";
 
+import { useQueryClient } from "@tanstack/react-query";
 import { AppLogo } from "@/components/ui/app-logo";
 import { Button } from "@/components/ui/button";
 import {
@@ -30,6 +31,7 @@ function RegisterForm() {
   const router = useRouter();
   const search = useSearchParams();
   const next = search.get("next") || "/";
+  const queryClient = useQueryClient();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -56,7 +58,10 @@ function RegisterForm() {
     setSubmitting(true);
     try {
       await register(email, password);
-      router.replace(next);
+      queryClient.clear();
+      sessionStorage.clear();
+      localStorage.removeItem("insightxpert_onboarding_seen");
+      window.location.replace(next);
     } catch (err: any) {
       setError(err.message || "Registration failed.");
     } finally {

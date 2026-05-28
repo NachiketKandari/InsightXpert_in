@@ -4,6 +4,7 @@ import React from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { LogOut, Activity, Sun, Moon, Settings, ListChecks, ChevronsUpDown, Zap, Database } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { AUTOMATIONS_ENABLED } from "@/lib/automations/feature-flag";
 import { logout } from "@/lib/auth-api";
 import { useCurrentUser } from "@/hooks/use-current-user";
@@ -47,9 +48,9 @@ function getDisplayName(email: string): string {
 export const UserMenu = React.memo(function UserMenu() {
   const { user, isAdmin } = useCurrentUser();
   const { config } = useClientConfig();
+  const queryClient = useQueryClient();
   const router = useRouter();
   const isMobile = useIsMobile();
-  const toggleRightSidebar = useChatStore((s) => s.toggleRightSidebar);
   const { theme, toggle: toggleTheme } = useTheme();
   const setSampleQuestionsOpen = useChatStore((s) => s.setSampleQuestionsOpen);
 
@@ -60,7 +61,10 @@ export const UserMenu = React.memo(function UserMenu() {
 
   const handleLogout = async () => {
     await logout();
-    router.replace("/login");
+    queryClient.clear();
+    sessionStorage.clear();
+    localStorage.removeItem("insightxpert_onboarding_seen");
+    window.location.replace("/login");
   };
 
   return (
@@ -97,15 +101,6 @@ export const UserMenu = React.memo(function UserMenu() {
             </div>
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
-          {isMobile && (
-            <>
-              <DropdownMenuItem onClick={toggleRightSidebar}>
-                <Activity className="size-4" />
-                Agent Process
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-            </>
-          )}
           {isAdmin && (
             <DropdownMenuItem asChild>
               <Link href="/admin">

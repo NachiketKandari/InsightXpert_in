@@ -407,7 +407,7 @@ export function WelcomeScreen({ onSendMessage, onStop, isStreaming }: WelcomeScr
       <DatabasePickerPanel />
 
       {/* Upload CTA — when no databases exist, give a prominent upload button. */}
-      {databases.length === 0 && (
+      {!databasesLoading && databases.length === 0 && (
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
