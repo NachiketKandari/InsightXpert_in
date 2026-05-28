@@ -12,9 +12,14 @@ if [ -n "${SUPABASE_SERVICE_KEY}" ] && [ -n "${SUPABASE_PROJECT_REF}" ]; then
            formula_1.sqlite toxicology.sqlite \
            financial.sqlite.gz european_football_2.sqlite.gz; do
     echo "  → ${f}"
-    curl -sfSL -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}" \
-      -o "${DB_DIR}/${f}" "${BASE}/${f}"
-    # Decompress gzipped databases
+    python3 -c "
+import urllib.request, os
+url = '${BASE}/${f}'
+req = urllib.request.Request(url, headers={'Authorization': 'Bearer ${SUPABASE_SERVICE_KEY}'})
+with urllib.request.urlopen(req) as r, open('${DB_DIR}/${f}', 'wb') as w:
+    w.write(r.read())
+print(f'    downloaded {os.path.getsize(\"${DB_DIR}/${f}\")} bytes')
+"
     case "${f}" in
       *.gz) gunzip -f "${DB_DIR}/${f}"; echo "    decompressed" ;;
     esac
