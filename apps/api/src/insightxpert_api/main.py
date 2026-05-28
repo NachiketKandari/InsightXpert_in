@@ -111,17 +111,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     log.info("api.starting", env=settings.app_env, port=settings.port)
 
     import asyncio
-    from pathlib import Path
-    from alembic import command
-    from alembic.config import Config
     from .users import bootstrap as users_bootstrap
 
-    api_dir = Path(__file__).resolve().parents[2]  # apps/api
-    cfg = Config(str(api_dir / "alembic.ini"))
-    cfg.set_main_option("script_location", str(api_dir / "alembic"))
-    # Escape `%` for configparser so URL-encoded passwords (e.g. `%40` for `@`) survive.
-    cfg.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))
-    await asyncio.to_thread(command.upgrade, cfg, "head")
+    # Alembic migration moved to entrypoint.sh (pre-start script) — avoids
+    # hanging inside the uvicorn lifespan thread pool.
     await asyncio.to_thread(users_bootstrap.run)
 
     from .audit.queue import get_queue as _get_audit_queue

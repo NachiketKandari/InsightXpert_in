@@ -1,40 +1,31 @@
 #!/usr/bin/env bash
-# insightxpert.in — VPS Backend Setup Script
-# Run this ON your Hostinger VPS as root (ssh root@187.127.166.171)
+# insightxpert.in — VPS Backend Setup Script (NEW backend on port 8080)
+# Run this ON your Hostinger VPS as nachiket
 set -euo pipefail
 
-echo "=== 1. Install Docker ==="
-if ! command -v docker &>/dev/null; then
-  curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
-  sh /tmp/get-docker.sh
-  systemctl enable docker
-  echo "Docker installed."
-else
-  echo "Docker already installed: $(docker --version)"
-fi
+APP_BASE="/opt/insightxpert-new"
+
+echo "=== 1. Create app directory structure ==="
+mkdir -p "${APP_BASE}"/{Databases,indices,storage}
+cd "${APP_BASE}"
 
 echo ""
-echo "=== 2. Create app directory structure ==="
-mkdir -p /opt/insightxpert/{Databases,indices,storage}
-cd /opt/insightxpert
-
-echo ""
-echo "=== 3. Clone repo and build Docker image ==="
-if [ ! -d /opt/insightxpert/repo ]; then
-  git clone https://github.com/NachiketKandari/InsightXpert.in.git /opt/insightxpert/repo
+echo "=== 2. Clone repo ==="
+if [ ! -d "${APP_BASE}/repo" ]; then
+  git clone git@github.com:NachiketKandari/InsightXpert.in.git "${APP_BASE}/repo"
 fi
-cd /opt/insightxpert/repo
+cd "${APP_BASE}/repo"
 git pull origin main
 cd apps/api
 
 echo ""
-echo "=== 4. Build Docker image ==="
+echo "=== 3. Build Docker image ==="
 docker build -t insightxpert-api:latest .
 
 echo ""
-echo "=== 5. Create the .env file ==="
+echo "=== 4. Create the .env file ==="
 # You MUST edit this file with your real values before starting the container!
-cat > /opt/insightxpert/.env << 'ENVEOF'
+cat > "${APP_BASE}/.env" << 'ENVEOF'
 # --- Runtime ---
 APP_ENV=production
 PORT=8080
@@ -60,9 +51,9 @@ GEMINI_API_KEY=<YOUR_GEMINI_API_KEY>
 DEEPSEEK_API_KEY=<YOUR_DEEPSEEK_API_KEY>
 
 # --- Paths ---
-BUNDLED_DBS_DIR=/opt/insightxpert/Databases
-INDICES_DIR=/opt/insightxpert/indices
-LOCAL_STORAGE_DIR=/opt/insightxpert/storage
+BUNDLED_DBS_DIR=/app/Databases
+INDICES_DIR=/app/indices
+LOCAL_STORAGE_DIR=/app/tmp/storage
 
 # --- Pipeline ---
 MAX_UPLOAD_MB=50
@@ -77,19 +68,19 @@ SENTRY_DSN=<YOUR_SENTRY_DSN>
 SENTRY_TRACES_SAMPLE_RATE=0.1
 ENVEOF
 
-echo ".env template written to /opt/insightxpert/.env"
-echo ">>> EDIT /opt/insightxpert/.env WITH YOUR REAL VALUES <<<"
+echo ".env template written to ${APP_BASE}/.env"
+echo ">>> EDIT ${APP_BASE}/.env WITH YOUR REAL VALUES <<<"
 
 echo ""
-echo "=== 6. Copy bundled databases ==="
-if [ -d /opt/insightxpert/repo/apps/api/Databases ]; then
-  cp -r /opt/insightxpert/repo/apps/api/Databases/* /opt/insightxpert/Databases/
+echo "=== 5. Copy bundled databases ==="
+if [ -d "${APP_BASE}/repo/apps/api/Databases" ]; then
+  cp -r "${APP_BASE}/repo/apps/api/Databases"/* "${APP_BASE}/Databases/" 2>/dev/null || true
   echo "Bundled databases copied."
 fi
 
 echo ""
-echo "=== 7. Create docker-compose.yml ==="
-cat > /opt/insightxpert/docker-compose.yml << 'COMPOSEEOF'
+echo "=== 6. Create docker-compose.yml ==="
+cat > "${APP_BASE}/docker-compose.yml" << 'COMPOSEEOF'
 version: "3.8"
 services:
   api:
@@ -97,11 +88,11 @@ services:
     ports:
       - "127.0.0.1:8080:8080"
     env_file:
-      - /opt/insightxpert/.env
+      - /opt/insightxpert-new/.env
     volumes:
-      - /opt/insightxpert/Databases:/app/Databases:ro
-      - /opt/insightxpert/indices:/app/indices
-      - /opt/insightxpert/storage:/app/tmp/storage
+      - /opt/insightxpert-new/Databases:/app/Databases:ro
+      - /opt/insightxpert-new/indices:/app/indices
+      - /opt/insightxpert-new/storage:/app/tmp/storage
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/api/v1/health"]
@@ -111,59 +102,16 @@ services:
 COMPOSEEOF
 
 echo ""
-echo "=== 8. Install nginx ==="
-if ! command -v nginx &>/dev/null; then
-  apt-get update -qq && apt-get install -y -qq nginx
-fi
-
-cat > /etc/nginx/sites-available/insightxpert << 'NGINXEOF'
-server {
-    listen 80;
-    server_name api.insightxpert.in;
-
-    client_max_body_size 50m;
-
-    location / {
-        proxy_pass http://127.0.0.1:8080;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-
-        # SSE support — disable buffering for streaming responses
-        proxy_buffering off;
-        proxy_cache off;
-        proxy_read_timeout 3600s;
-        proxy_send_timeout 3600s;
-    }
-}
-NGINXEOF
-
-ln -sf /etc/nginx/sites-available/insightxpert /etc/nginx/sites-enabled/
-rm -f /etc/nginx/sites-enabled/default
-nginx -t && systemctl reload nginx
-echo "nginx configured."
-
-echo ""
-echo "=== 9. Install certbot and get SSL ==="
-if ! command -v certbot &>/dev/null; then
-  apt-get update -qq && apt-get install -y -qq certbot python3-certbot-nginx
-fi
-certbot --nginx -d api.insightxpert.in --non-interactive --agree-tos --email admin@insightxpert.in || echo "Certbot failed — DNS for api.insightxpert.in may not be set up yet. Run this step after DNS is configured:"
-echo "  certbot --nginx -d api.insightxpert.in"
-
-echo ""
-echo "=== 10. Start the container ==="
-cd /opt/insightxpert
+echo "=== 7. Start the container ==="
+cd "${APP_BASE}"
 docker compose up -d
 
 echo ""
 echo "=== Done! ==="
-echo "Check: curl https://api.insightxpert.in/api/v1/health"
-echo "(Or: curl http://localhost:8080/api/v1/health on the VPS)"
+echo "Check: curl http://localhost:8080/api/v1/health"
+echo "Public: https://api.insightxpert.in/api/v1/health"
+echo "(Caddy handles SSL and reverse proxy — already configured)"
 echo ""
-echo "=== IMPORTANT: Before running this script ==="
-echo "1. Edit /opt/insightxpert/.env with your real secrets"
-echo "2. Point DNS A record for api.insightxpert.in → $(curl -s ifconfig.me || echo 'YOUR_VPS_IP')"
-echo "3. Wait for DNS to propagate before running certbot"
+echo "=== IMPORTANT: Before running ==="
+echo "1. Edit ${APP_BASE}/.env with your real secrets"
+echo "2. Run: bash ${APP_BASE}/repo/scripts/deploy-vps.sh"

@@ -18,6 +18,10 @@ RUN uv sync --frozen --no-dev --no-install-project
 
 # Then copy sources and sync again to install the project itself.
 COPY src/ ./src/
+COPY alembic.ini ./
+COPY alembic/ ./alembic/
+COPY few_shot/ ./few_shot/
+COPY entrypoint.sh ./
 RUN uv sync --frozen --no-dev
 
 # Bundled sample DBs: copied last so code changes don't bust the DB layer.
@@ -43,5 +47,5 @@ ENV PATH="/app/.venv/bin:${PATH}" \
 USER app
 EXPOSE 8080
 
-# Cloud Run honors ${PORT}; uvicorn's shell form picks it up.
-CMD ["sh", "-c", "exec uvicorn insightxpert_api.main:app --host 0.0.0.0 --port ${PORT}"]
+# Run migrations before starting uvicorn (avoids asyncio lifespan hang).
+CMD ["sh", "/app/entrypoint.sh"]
