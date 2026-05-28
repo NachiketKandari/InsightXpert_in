@@ -515,7 +515,12 @@ def render_pruned_schema(
             # Priority 2: raw sample values — always kept when cardinality is low enough.
             stats = profile_stats.get(table.name, {}).get(col.name)
             if stats and stats.sample_values and stats.distinct_count <= 20:
-                vals = ", ".join(repr(v) for v in stats.sample_values)
+                # Defence-in-depth: see schema_formatter.py for rationale.
+                truncated = [
+                    (v[:500] + "…") if isinstance(v, str) and len(v) > 500 else v
+                    for v in stats.sample_values
+                ]
+                vals = ", ".join(repr(v) for v in truncated)
                 desc_parts.append(f"Values: [{vals}]")
             # Priority 2b: quirk enum labels — additive gloss on top of raw values.
             if quirks and quirks.enum_labels:

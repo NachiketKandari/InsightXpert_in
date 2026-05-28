@@ -102,7 +102,14 @@ class SchemaFormatter:
                     # model knows what literals to use in WHERE clauses.
                     stats = profile_stats.get(table.name, {}).get(col.name)
                     if stats and stats.sample_values and stats.distinct_count <= 20:
-                        vals = ", ".join(repr(v) for v in stats.sample_values)
+                        # Defence-in-depth: cap individual sample values so a
+                        # single mis-profiled column can't blow up the prompt.
+                        # Primary prevention is in StatsCollector._should_skip_samples.
+                        truncated = [
+                            (v[:500] + "…") if isinstance(v, str) and len(v) > 500 else v
+                            for v in stats.sample_values
+                        ]
+                        vals = ", ".join(repr(v) for v in truncated)
                         desc_parts.append(f"Values: [{vals}]")
                     # Quirk enum labels (decode coded values).
                     if quirks and hasattr(quirks, "enum_labels") and quirks.enum_labels:

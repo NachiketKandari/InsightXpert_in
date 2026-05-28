@@ -226,7 +226,7 @@ class DatabaseService:
             refs.append(
                 DatabaseRef(
                     db_id=db_id_val,
-                    source=self._BUNDLED,
+                    source=kind_val,
                     local_path=None,
                     dialect=kind_val,
                     connection_url=url,

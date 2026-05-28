@@ -10,11 +10,32 @@ _SNOWFLAKE_UNORDERABLE = (
     "ARRAY", "VARIANT", "OBJECT", "STRUCT", "GEOGRAPHY", "GEOMETRY", "BINARY",
 )
 
+# Column types that store large opaque content — sampling their values is
+# wasteful and can leak cross-database data (e.g. profile_json columns in a
+# Supabase metadata DB contain profiles of unrelated databases).
+_LARGE_CONTENT_TYPES = ("JSONB", "JSON", "BYTEA", "BLOB", "LONGTEXT", "MEDIUMTEXT")
+
+# Name suffixes of columns that typically store structured/serialised data.
+_LARGE_CONTENT_SUFFIXES = (
+    "_json", "_encrypted", "_blob", "_payload", "_chunks", "_binary",
+)
+
 
 def _is_unorderable(col_type: str) -> bool:
     """True if the column type cannot be MIN/MAX/ORDER BY'd (Snowflake semi-structured)."""
     t = (col_type or "").upper()
     return any(t.startswith(u) or t == u for u in _SNOWFLAKE_UNORDERABLE)
+
+
+def _should_skip_samples(col_name: str, col_type: str) -> bool:
+    """True if this column likely stores large opaque content (JSON blobs,
+    encrypted payloads, binary data) whose raw values are not useful as
+    samples and could leak cross-database data."""
+    t = (col_type or "").upper()
+    if any(t.startswith(u) or t == u for u in _LARGE_CONTENT_TYPES):
+        return True
+    n = col_name.lower()
+    return any(n.endswith(p) for p in _LARGE_CONTENT_SUFFIXES)
 
 
 class StatsCollector:
@@ -145,16 +166,17 @@ class StatsCollector:
             except Exception as exc:
                 logger.debug("MIN/MAX failed for %s.%s: %s", table, name, exc)
 
-            try:
-                order_clause = "" if self._fast else f' ORDER BY "{name}"'
-                sample_values = [
-                    r[0] for r in db.execute(
-                        f'SELECT DISTINCT CAST("{name}" AS TEXT) FROM "{table}"'
-                        f' WHERE "{name}" IS NOT NULL{order_clause} LIMIT 20'
-                    )
-                ]
-            except Exception as exc:
-                logger.debug("Sample values failed for %s.%s: %s", table, name, exc)
+            if not _should_skip_samples(name, col.type):
+                try:
+                    order_clause = "" if self._fast else f' ORDER BY "{name}"'
+                    sample_values = [
+                        r[0] for r in db.execute(
+                            f'SELECT DISTINCT CAST("{name}" AS TEXT) FROM "{table}"'
+                            f' WHERE "{name}" IS NOT NULL{order_clause} LIMIT 20'
+                        )
+                    ]
+                except Exception as exc:
+                    logger.debug("Sample values failed for %s.%s: %s", table, name, exc)
 
         return ColumnProfile(
             name=name,

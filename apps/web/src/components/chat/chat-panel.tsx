@@ -35,13 +35,17 @@ export function ChatPanel() {
   const conversationId = conversation?.id ?? null;
 
   const currentDb = databases.find((d) => d.db_id === selectedDbId);
-  const dbKindHint: "bundled" | "uploaded" | "postgres" | "none" | "unknown" =
+  const dbKindHint: "bundled" | "uploaded" | "postgres" | "libsql" | "none" | "unknown" =
     !selectedDbId
       ? "none"
       : !currentDb
       ? "unknown"
       : currentDb.source === "uploaded"
       ? "uploaded"
+      : currentDb.source === "postgres"
+      ? "postgres"
+      : currentDb.source === "libsql"
+      ? "libsql"
       : "bundled";
 
   const handleSend = useCallback(
@@ -88,6 +92,7 @@ export function ChatPanel() {
                   size="icon"
                   onClick={() => setShareOpen(true)}
                   aria-label="Share this chat"
+                  disabled={isStreaming}
                 >
                   <Share2 className="h-4 w-4" />
                 </Button>

@@ -679,7 +679,7 @@ class ProfileRunRequest(BaseModel):
 
 async def _run_profile_v2(
     db_id: str,
-    db_path: str,
+    db_path: str | None,
     flags: ProfileFlags,
     emitter: EventEmitter,
     session_id: str,
@@ -689,12 +689,13 @@ async def _run_profile_v2(
     user_id: str | None = None,
     user_hints: str = "",
     app: object | None = None,
+    ref: object | None = None,
 ) -> None:
     try:
         profile = await run_profile_stream(
             emitter,
             db_id=db_id,
-            db_path=db_path,
+            db_path=db_path or "",
             flags=flags,
             llm=llm,
             batch_size=settings.profiling_batch_size,
@@ -705,6 +706,7 @@ async def _run_profile_v2(
             provider=settings.llm_provider,
             model=llm.model if llm and hasattr(llm, "model") else settings.gemini_chat_model,
             user_hints=user_hints,
+            ref=ref,
         )
         if profile is not None:
             prof_svc.save(session_id, db_id, profile)
@@ -927,6 +929,7 @@ async def run_profile(
             user_id=cu.id,
             user_hints=req.user_hints if req else "",
             app=request.app,
+            ref=ref,
         )
     )
     return EventSourceResponse(emitter.stream())

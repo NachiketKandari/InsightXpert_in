@@ -9,7 +9,7 @@
  * Keep narrow — only fields the UI renders. Extend as needs grow.
  */
 
-export type DatabaseSource = "bundled" | "uploaded";
+export type DatabaseSource = "bundled" | "uploaded" | "postgres" | "libsql";
 
 export interface DatabaseListItem {
   /** Stable short identifier, e.g. `california_schools` or a user upload slug. */

@@ -20,13 +20,15 @@ class PostgresDatabase(Database):
             raise ValueError(f"Postgres ref {ref.db_id!r} missing connection_url")
         self.db_id = ref.db_id
         self._conn = psycopg.connect(
-            ref.connection_url,
+            ref.connection_url.replace("+psycopg", ""),
             options=(
                 "-c default_transaction_read_only=on "
-                "-c statement_timeout=30000 "
-                "-c idle_in_transaction_session_timeout=10000"
+                "-c statement_timeout=120000"
             ),
             autocommit=True,
+            keepalives_idle=30,
+            keepalives_interval=10,
+            keepalives_count=3,
         )
 
     @property

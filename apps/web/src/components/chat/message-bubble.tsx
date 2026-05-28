@@ -6,11 +6,12 @@ import remarkGfm from "remark-gfm";
 import { motion } from "framer-motion";
 import { Loader2, Zap } from "lucide-react";
 import { ChunkRenderer } from "@/components/chunks/chunk-renderer";
+import { ProcessGroup } from "@/components/chunks/process-group";
 import { MessageActions } from "@/components/chat/message-actions";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useChatStore } from "@/stores/chat-store";
 import { useCurrentUser } from "@/hooks/use-current-user";
-import type { Message, EnrichmentTrace, OrchestratorPlan, AgentTrace } from "@/types/chat";
+import type { Message, EnrichmentTrace, OrchestratorPlan, AgentTrace, ChatChunk } from "@/types/chat";
 import { downloadMessageReport, downloadConversationReport } from "@/lib/export-report";
 
 // Chunk types whose UI renderers care about an "is this stage finished?" hint.
@@ -22,6 +23,19 @@ const COMPLETABLE_CHUNK_TYPES = new Set<string>([
   "tool_call",
   "answer",
   "sql_executing", // bug fix 2026-05-01: was missing → spinner never stopped
+]);
+
+const MILESTONE_CHUNK_TYPES = new Set<string>([
+  "sql_generated",
+  "sql", // legacy
+  "tool_result",
+  "rows_returned",
+  "answer",
+  "answer_delta",
+  "insight",
+  "answer_generated",
+  "error",
+  "clarification",
 ]);
 
 const MessageMetrics = React.memo(function MessageMetrics({ message }: { message: Message }) {
@@ -177,6 +191,36 @@ function MessageBubbleInner({
     }
   }, [message.id, activeConversationId]);
 
+  const renderedItems = useMemo(() => {
+    if (!message.chunks?.length) return [];
+
+    type RenderItem =
+      | { type: "milestone"; chunk: ChatChunk; index: number }
+      | { type: "process_group"; chunks: { chunk: ChatChunk; index: number }[] };
+
+    const items: RenderItem[] = [];
+    let currentGroup: { chunk: ChatChunk; index: number }[] = [];
+
+    message.chunks.forEach((chunk, index) => {
+      const isProcess = !MILESTONE_CHUNK_TYPES.has(chunk.type);
+      if (isProcess) {
+        currentGroup.push({ chunk, index });
+      } else {
+        if (currentGroup.length > 0) {
+          items.push({ type: "process_group", chunks: currentGroup });
+          currentGroup = [];
+        }
+        items.push({ type: "milestone", chunk, index });
+      }
+    });
+
+    if (currentGroup.length > 0) {
+      items.push({ type: "process_group", chunks: currentGroup });
+    }
+
+    return items;
+  }, [message.chunks]);
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
@@ -192,28 +236,45 @@ function MessageBubbleInner({
         <div className="w-full space-y-3">
           {message.chunks.length > 0 ? (
             <>
-              {message.chunks.map((chunk, i) => {
-                const completable = COMPLETABLE_CHUNK_TYPES.has(chunk.type);
-                return (
-                  <ChunkRenderer
-                    key={i}
-                    chunk={chunk}
-                    isComplete={
-                      completable
-                        ? i < message.chunks.length - 1 || !isStreaming
-                        : undefined
-                    }
-                    isStreaming={isStreaming && !!isLastAssistant}
-                    enrichmentTraces={enrichmentTraces}
-                    orchestratorPlan={orchestratorPlan}
-                    agentTraces={agentTraces}
-                    messageId={message.id}
-                  />
-                );
+              {renderedItems.map((item, i) => {
+                if (item.type === "milestone") {
+                  const completable = COMPLETABLE_CHUNK_TYPES.has(item.chunk.type);
+                  return (
+                    <ChunkRenderer
+                      key={`milestone-${item.index}`}
+                      chunk={item.chunk}
+                      isComplete={
+                        completable
+                          ? item.index < message.chunks.length - 1 || !isStreaming
+                          : undefined
+                      }
+                      isStreaming={isStreaming && !!isLastAssistant}
+                      enrichmentTraces={enrichmentTraces}
+                      orchestratorPlan={orchestratorPlan}
+                      agentTraces={agentTraces}
+                      messageId={message.id}
+                    />
+                  );
+                } else {
+                  const lastInGroupIdx = item.chunks[item.chunks.length - 1].index;
+                  return (
+                    <ProcessGroup
+                      key={`group-${item.chunks[0].index}`}
+                      chunks={item.chunks}
+                      isStreaming={isStreaming}
+                      isLastAssistant={!!isLastAssistant && lastInGroupIdx === message.chunks.length - 1}
+                      enrichmentTraces={enrichmentTraces}
+                      orchestratorPlan={orchestratorPlan}
+                      agentTraces={agentTraces}
+                      messageId={message.id}
+                    />
+                  );
+                }
               })}
               {isStreaming && isLastAssistant && (() => {
                 const last = message.chunks[message.chunks.length - 1];
                 if (last?.type === "answer" || last?.type === "answer_generated" || last?.type === "error") return null;
+                if (last && !MILESTONE_CHUNK_TYPES.has(last.type)) return null;
                 return (
                   <motion.div
                     initial={{ opacity: 0 }}

@@ -15,7 +15,7 @@ import { useCreateShare, useRevokeShare, useShare } from "@/hooks/use-share";
 
 export interface ShareDialogProps {
   conversationId: string;
-  dbKindHint: "bundled" | "uploaded" | "postgres" | "none" | "unknown";
+  dbKindHint: "bundled" | "uploaded" | "postgres" | "libsql" | "none" | "unknown";
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
