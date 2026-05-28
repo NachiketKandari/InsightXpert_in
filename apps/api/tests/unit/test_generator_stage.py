@@ -66,3 +66,32 @@ async def test_generator_falls_back_to_raw_response():
     ctx.state["schema_text"] = "s"
     sql = await stage.run(ctx, None)
     assert sql == "SELECT 1"
+
+
+@pytest.mark.asyncio
+async def test_generator_stage_bypass():
+    llm = MagicMock()
+    llm.async_generate = MagicMock()
+
+    stage = SqlGeneratorStage(llm=llm, prompt_path=CLEAN_PROMPT)
+
+    emitter = EventEmitter(conversation_id="c")
+    ctx = PipelineContext(session_id="s", conversation_id="c", emitter=emitter)
+    ctx.state["question"] = "how many users?"
+    ctx.state["schema_text"] = 'Table: "users"'
+    ctx.state["sql"] = "SELECT COUNT(*) FROM users"
+    ctx.state["bypass_sql_generation"] = True
+
+    sql = await stage.run(ctx, None)
+    await emitter.close()
+
+    assert sql == "SELECT COUNT(*) FROM users"
+    llm.async_generate.assert_not_called()
+
+    frames = []
+    async for f in emitter.stream():
+        frames.append(f)
+    joined = "".join(frames)
+    assert ChunkType.SQL_GENERATED.value in joined
+    assert '"iteration": 0' in joined
+

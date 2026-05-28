@@ -77,6 +77,13 @@ class Settings(BaseSettings):
     bootstrap_user_email: str | None = None
     bootstrap_user_password: str | None = None
 
+    # Public registration gate — set false to disable self-signup
+    registration_enabled: bool = True
+
+    # Auth endpoints rate limiting (per-IP requests per minute)
+    auth_rate_limit_per_minute: int = 10
+    auth_rate_limit_enabled: bool = True
+
     # --- llm ---------------------------------------------------------------
     gemini_api_key: str
     gemini_chat_model: str = "gemini-2.5-flash"
@@ -98,6 +105,7 @@ class Settings(BaseSettings):
     sql_row_limit: int = 1000
     sql_timeout_seconds: int = 30
     max_refinement_iterations: int = 2
+    single_sql_column_threshold: int = 25
 
     # --- orchestration (B2) ------------------------------------------------
     # Read by the vendored orchestrator_loop — see agents_core/orchestrator.py.
@@ -117,7 +125,7 @@ class Settings(BaseSettings):
     # --- profiling ---------------------------------------------------------
     # Columns per LLM call in the batched summary / quirk generators. One
     # prompt requests JSON keyed by column name. Drops summary-pass cost
-    # from 2×columns LLM calls to ceil(columns / batch_size).
+    # from 2 * columns LLM calls to ceil(columns / batch_size).
     profiling_batch_size: int = 20
     # Escape hatch — force the vendored per-column path (1 LLM call per
     # column per artifact). Expensive, kept as a safety valve.

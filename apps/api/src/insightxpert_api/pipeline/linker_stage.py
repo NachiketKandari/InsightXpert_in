@@ -63,16 +63,27 @@ class SchemaLinkerStage:
         llm: LLMProvider,
         prompt_path: str,
         indices_dir: str = "",
+        single_sql_column_threshold: int | None = None,
     ) -> None:
         self._llm = llm
         self._tpl = Template(Path(prompt_path).read_text())
         self._indices_dir = indices_dir
+        self._single_sql_column_threshold = single_sql_column_threshold
 
     async def run(self, ctx: PipelineContext, _: object) -> dict[str, Any]:
         question: str = ctx.state["question"]
         profile: DatabaseProfile = ctx.state["profile"]
         db_id: str = ctx.state.get("db_id", profile.db_id)
         schema: DatabaseSchema = ctx.state.get("schema") or self._extract_schema(ctx)
+
+        from ..config import get_settings
+        threshold = (
+            self._single_sql_column_threshold
+            if self._single_sql_column_threshold is not None
+            else get_settings().single_sql_column_threshold
+        )
+        total_columns = sum(len(t.columns) for t in schema.tables)
+        single_sql = total_columns < threshold
 
         # Resolve index paths at runtime from indices_dir + db_id.
         lsh_path: str | None = None
@@ -95,7 +106,12 @@ class SchemaLinkerStage:
         )
 
         schema_text_full = SchemaFormatter().format(schema, profile, metadata_mode="profiling")
-        prompt = self._tpl.render(question=question, evidence="", schema_text=schema_text_full)
+        prompt = self._tpl.render(
+            question=question,
+            evidence="",
+            schema_text=schema_text_full,
+            single_sql=single_sql,
+        )
         raw = await asyncio.wait_for(self._llm.async_generate(prompt), timeout=90.0)
 
         candidates = [m.strip().rstrip(";").strip() for m in _FENCE_RE.findall(raw)]
@@ -104,6 +120,47 @@ class SchemaLinkerStage:
             ChunkType.CANDIDATE_SQLS_GENERATED,
             CandidateSQLsGeneratedPayload(candidates=candidates),
         )
+
+        if single_sql:
+            # 1. Extract fields from the candidate.
+            all_extracted = []
+            for sql in candidates:
+                ef = TrialQueryGenerator._parse_fields(sql)
+                ef.sql = sql
+                all_extracted.append(ef)
+            tables, columns, _ = union_fields(all_extracted, schema)
+
+            column_sources: dict[tuple[str, str], set[str]] = defaultdict(set)
+            for tc in columns:
+                column_sources[tc].add("trial_sql")
+
+            serialized_sources = {
+                f"{t}.{c}": sorted(srcs) for (t, c), srcs in sorted(column_sources.items())
+            }
+            schema_text = schema_text_full
+
+            final_payload = LinkedSchemaFinalPayload(
+                schema_text=schema_text,
+                linked_tables=sorted(tables),
+                linked_columns=sorted(f"{t}.{c}" for t, c in columns),
+                column_sources=serialized_sources,
+            )
+            await self._emit(ctx, ChunkType.LINKED_SCHEMA_FINAL, final_payload)
+
+            result = {
+                "schema_text": schema_text,
+                "linked_tables": sorted(tables),
+                "linked_columns": sorted(f"{t}.{c}" for t, c in columns),
+                "column_sources": serialized_sources,
+            }
+            ctx.state["schema_text"] = schema_text
+            ctx.state["column_sources"] = serialized_sources
+            ctx.state["linked_tables"] = result["linked_tables"]
+            ctx.state["linked_columns"] = result["linked_columns"]
+            if candidates:
+                ctx.state["sql"] = candidates[0]
+                ctx.state["bypass_sql_generation"] = True
+            return result
 
         # 1. Extract fields from each candidate.
         all_extracted = []

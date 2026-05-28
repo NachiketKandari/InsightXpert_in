@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import { useAdminFeatures } from "@/hooks/use-admin-features";
 import { useAdminOverview } from "@/hooks/use-admin-overview";
 import { FeatureTogglesEditor } from "@/components/admin/feature-toggles";
+import { ThresholdEditor } from "@/components/admin/threshold-editor";
 import { apiCall } from "@/lib/api";
 import type { FeatureToggles } from "@/types/admin";
 
@@ -155,6 +156,10 @@ export default function OverviewPage() {
           />
         </div>
       )}
+
+      <div className="rounded-lg border border-border bg-card p-4">
+        <ThresholdEditor />
+      </div>
     </div>
   );
 }

@@ -79,6 +79,7 @@ def default_pipeline(
             llm=llm,
             prompt_path=_vendored_prompt("prompts", "single_prompt_linking_clean.j2"),
             indices_dir=settings.indices_dir,
+            single_sql_column_threshold=settings.single_sql_column_threshold,
         )
     pipeline = Pipeline([
         ProfilerStage(db_svc=db_svc, prof_svc=prof_svc, llm=llm,

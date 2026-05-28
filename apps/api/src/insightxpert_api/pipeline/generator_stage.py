@@ -29,14 +29,7 @@ def _prompt_name_for_dialect(dialect: str) -> str:
     return "sql_generation" if variant == "sqlite" else f"sql_generation_{variant}"
 
 
-def _prompt_name_for_ref(ref: object) -> str:
-    """Return prompt name stem (without .j2) for a DatabaseRef-like object.
-
-    Accepts any object with a ``.dialect`` attribute; used by tests that pass a
-    MagicMock ref.
-    """
-    dialect: str = getattr(ref, "dialect", "sqlite")
-    return _prompt_name_for_dialect(dialect)
+# Test helper moved to tests; see test_sql_generator_prompt_dispatch.py
 
 
 class SqlGeneratorStage:
@@ -65,6 +58,14 @@ class SqlGeneratorStage:
         return Template(self._default_prompt_path.read_text())
 
     async def run(self, ctx: PipelineContext, _: object) -> str:
+        if ctx.state.get("bypass_sql_generation"):
+            sql = ctx.state.get("sql", "")
+            if ctx.emitter is not None:
+                await ctx.emitter.emit(
+                    ChunkType.SQL_GENERATED, SQLGeneratedPayload(sql=sql, iteration=0)
+                )
+            return sql
+
         dialect: str = ctx.state.get("db_dialect", "sqlite")
         tpl = self._resolve_template(dialect)
         # Preflight may have stashed a per-DB similar BIRD-train example here;

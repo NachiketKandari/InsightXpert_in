@@ -1,4 +1,4 @@
-You are an expert SQL developer specializing in SQLite. Given a database schema and a natural language question, generate 5 diverse candidate SQL SELECT queries that might answer the question.
+You are an expert SQL developer specializing in SQLite. Given a database schema and a natural language question, generate {% if single_sql %}a SQL SELECT query{% else %}5 diverse candidate SQL SELECT queries{% endif %} that might answer the question.
 
 == Database Schema ==
 {{ schema_text }}
@@ -6,9 +6,15 @@ You are an expert SQL developer specializing in SQLite. Given a database schema 
 == Question ==
 {{ question }}
 
-Generate exactly 5 candidate SQL queries. Each query should explore a different approach — different join paths, column selections, aggregation strategies, or interpretations of the question. Use the column descriptions from database schema to understand what each column contains.
+Generate {% if single_sql %}exactly 1 SQL query{% else %}exactly 5 candidate SQL queries. Each query should explore a different approach — different join paths, column selections, aggregation strategies, or interpretations of the question{% endif %}. Use the column descriptions from database schema to understand what each column contains.
 
-Return each query in a numbered fenced code block as shown below.
+Return {% if single_sql %}the query in a fenced code block as shown below.
+
+Query 1:
+```sql
+...
+```
+{% else %}each query in a numbered fenced code block as shown below.
 
 Query 1:
 ```sql
@@ -34,3 +40,5 @@ Query 5:
 ```sql
 ...
 ```
+{% endif %}
+

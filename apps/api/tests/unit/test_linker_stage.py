@@ -59,7 +59,7 @@ async def test_linker_emits_events_and_populates_state():
     llm.async_generate = _gen
     # No vector/LSH index → semantic + literals matches are empty but events still fire.
 
-    stage = SchemaLinkerStage(llm=llm, prompt_path=CLEAN_PROMPT)
+    stage = SchemaLinkerStage(llm=llm, prompt_path=CLEAN_PROMPT, single_sql_column_threshold=0)
 
     emitter = EventEmitter(conversation_id="c")
     ctx = PipelineContext(session_id="s", conversation_id="c", emitter=emitter)
@@ -91,3 +91,55 @@ async def test_linker_emits_events_and_populates_state():
     ]
     positions = [joined.index(f'"type": "{ev}"') for ev in expected_order]
     assert positions == sorted(positions)
+
+
+@pytest.mark.asyncio
+async def test_linker_fast_path():
+    llm = MagicMock()
+
+    async def _gen(prompt: str, **_):
+        assert "a SQL SELECT query" in prompt
+        assert "exactly 1 SQL query" in prompt
+        return "Query 1:\n```sql\nSELECT id FROM users\n```\n"
+
+    llm.async_generate = _gen
+
+    stage = SchemaLinkerStage(llm=llm, prompt_path=CLEAN_PROMPT, single_sql_column_threshold=25)
+
+    emitter = EventEmitter(conversation_id="c")
+    ctx = PipelineContext(session_id="s", conversation_id="c", emitter=emitter)
+    ctx.state["question"] = "how many users?"
+    ctx.state["db_id"] = "demo"
+    ctx.state["profile"] = _fake_profile()
+
+    result = await stage.run(ctx, None)
+    await emitter.close()
+
+    assert ctx.state.get("bypass_sql_generation") is True
+    assert ctx.state.get("sql") == "SELECT id FROM users"
+    assert "schema_text" in result
+    assert "users" in result["linked_tables"]
+
+    frames = []
+    async for f in emitter.stream():
+        frames.append(f)
+    joined = "".join(frames)
+
+    # Assert SSE events fired in order, but intermediate ones are skipped.
+    expected_order = [
+        ChunkType.SCHEMA_LINKING_STARTED.value,
+        ChunkType.CANDIDATE_SQLS_GENERATED.value,
+        ChunkType.LINKED_SCHEMA_FINAL.value,
+    ]
+    positions = [joined.index(f'"type": "{ev}"') for ev in expected_order]
+    assert positions == sorted(positions)
+
+    # Assert skipped events do not fire.
+    skipped_events = [
+        ChunkType.LITERALS_EXTRACTED.value,
+        ChunkType.SEMANTIC_MATCHES.value,
+        ChunkType.JOIN_PATHS_ADDED.value,
+    ]
+    for ev in skipped_events:
+        assert f'"type": "{ev}"' not in joined
+

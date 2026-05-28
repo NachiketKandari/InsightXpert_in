@@ -61,7 +61,7 @@ class SwitchRequest(BaseModel):
 async def get_config(
     response: Response,
     _user: object = Depends(get_current_user),
-    settings: Settings = Depends(get_settings),
+    settings: Settings = Depends(get_settings),  # noqa: B008
 ) -> ConfigResponse:
     response.headers["Cache-Control"] = "private, max-age=60"
     return ConfigResponse(
@@ -78,7 +78,7 @@ async def get_config(
 async def switch_model(
     body: SwitchRequest,
     _user: object = Depends(get_current_user),
-    settings: Settings = Depends(get_settings),
+    settings: Settings = Depends(get_settings),  # noqa: B008
 ) -> ConfigResponse:
     allowed = _CHAT_MODELS.get(body.provider)
     if allowed is None:
@@ -140,3 +140,33 @@ async def update_feature(
         )
     _FEATURES[body.feature] = body.enabled
     return {"features": dict(_FEATURES)}
+
+
+class ThresholdRequest(BaseModel):
+    threshold: int
+
+
+@router.get("/threshold")
+async def get_threshold(
+    _user: object = Depends(get_current_user),
+    settings: Settings = Depends(get_settings),  # noqa: B008
+) -> dict[str, int]:
+    """Return the column threshold for single-prompt schema linking."""
+    return {"threshold": settings.single_sql_column_threshold}
+
+
+@router.post("/threshold")
+async def update_threshold(
+    body: ThresholdRequest,
+    _admin: object = Depends(require_admin),
+    settings: Settings = Depends(get_settings),  # noqa: B008
+) -> dict[str, int]:
+    """Update the column threshold for single-prompt schema linking (admin only)."""
+    if body.threshold < 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Threshold must be a non-negative integer.",
+        )
+    settings.single_sql_column_threshold = body.threshold
+    return {"threshold": settings.single_sql_column_threshold}
+
