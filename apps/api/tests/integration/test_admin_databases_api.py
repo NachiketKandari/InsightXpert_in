@@ -22,20 +22,20 @@ def test_admin_list_shows_bundled_as_public(admin_client):
     r = client.get("/api/v1/admin/databases/")
     assert r.status_code == 200
     rows = r.json()
-    # 7 SQLite bundled DBs + 1 Postgres (toxicology_pg) seeded by 20260425_0002.
-    assert len(rows) == 8
     by_id = {row["db_id"] for row in rows}
-    assert "california_schools" in by_id
-    assert "formula_1" in by_id
+    # Seeded DBs always present. Bundled DBs (california_schools, formula_1,
+    # etc.) only present when fetch-bundled-dbs.sh has been run.
     assert "transactions" in by_id
     assert "toxicology_pg" in by_id
+    assert len(rows) >= 2
     for row in rows:
         assert row["visibility"] == "public"
         assert row["owner_user_id"] is None
         assert row["owner_email"] is None
         assert row["shared_with"] == []
-        # Postgres-backed DBs have no local file, so size_bytes is NULL.
-        if row["db_id"] == "toxicology_pg":
+        # Seeded DBs (transactions, toxicology_pg) have no local file;
+        # bundled DBs loaded from disk will report a concrete size.
+        if row["db_id"] in ("transactions", "toxicology_pg"):
             assert row["size_bytes"] is None
         else:
             assert isinstance(row["size_bytes"], int)
@@ -50,9 +50,9 @@ def test_admin_list_reflects_share_list(admin_client):
     )
     other_id = invited.user.id
 
-    # Flip california_schools to shared with that user.
+    # Use a seeded DB (always present) instead of a bundled one.
     set_r = client.post(
-        "/api/v1/databases/california_schools/visibility",
+        "/api/v1/databases/transactions/visibility",
         json={"visibility": "shared", "shared_with": [other_id]},
     )
     assert set_r.status_code == 200
@@ -60,17 +60,17 @@ def test_admin_list_reflects_share_list(admin_client):
     r = client.get("/api/v1/admin/databases/")
     assert r.status_code == 200
     rows = r.json()
-    ca = next(row for row in rows if row["db_id"] == "california_schools")
-    assert ca["visibility"] == "shared"
-    shared = ca["shared_with"]
+    tx = next(row for row in rows if row["db_id"] == "transactions")
+    assert tx["visibility"] == "shared"
+    shared = tx["shared_with"]
     assert len(shared) == 1
     assert shared[0]["user_id"] == other_id
     assert shared[0]["email"] == "sharee@example.com"
 
     # Untouched DBs are unaffected.
-    formula = next(row for row in rows if row["db_id"] == "formula_1")
-    assert formula["visibility"] == "public"
-    assert formula["shared_with"] == []
+    tox = next(row for row in rows if row["db_id"] == "toxicology_pg")
+    assert tox["visibility"] == "public"
+    assert tox["shared_with"] == []
 
 
 def test_admin_list_owner_email_for_uploaded_db(admin_client, fresh_db):

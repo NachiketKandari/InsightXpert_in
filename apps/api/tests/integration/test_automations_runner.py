@@ -3,13 +3,28 @@
 Uses the bundled ``toxicology.sqlite`` — molecule table. A trigger that
 fires produces a run with status=success + a notification row; a trigger
 that does not fire produces a run with status=no_trigger + no notification.
+
+Skipped when bundled databases are not present (e.g. in CI without
+fetch-bundled-dbs.sh).
 """
 
 from __future__ import annotations
 
 import json
+from pathlib import Path
+
+import pytest
 
 from insightxpert_api.automations import repository, runner
+
+# These tests need a real SQLite file to execute queries against.
+_BUNDLED_DIR = Path(__file__).resolve().parents[2] / "Databases" / "_shared"
+_HAS_BUNDLED_DBS = (_BUNDLED_DIR / "toxicology.sqlite").exists()
+
+pytestmark = pytest.mark.skipif(
+    not _HAS_BUNDLED_DBS,
+    reason="Bundled databases not present — run scripts/fetch-bundled-dbs.sh first",
+)
 
 
 def _create(client, **overrides):

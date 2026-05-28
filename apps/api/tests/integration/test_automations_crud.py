@@ -8,7 +8,7 @@ def _create_payload(**overrides):
         "name": "tx check",
         "nl_query": "count rows",
         "sql_queries": ["SELECT COUNT(*) AS n FROM molecule"],
-        "db_id": "toxicology",
+        "db_id": "toxicology_pg",
         "schedule_preset": "daily",
         "trigger_conditions": [
             {"type": "threshold", "operator": "gt", "value": 0, "column": "n"}
