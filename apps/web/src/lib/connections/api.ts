@@ -92,16 +92,3 @@ export async function createConnection(
   return { ok: false, error: detail };
 }
 
-export async function listConnections(): Promise<ConnectionListItem[]> {
-  const res = await apiFetch("/api/v1/connections");
-  if (!res.ok) return [];
-  return (await res.json()) as ConnectionListItem[];
-}
-
-export async function deleteConnection(dbId: string): Promise<boolean> {
-  const res = await apiFetch(
-    `/api/v1/connections/${encodeURIComponent(dbId)}`,
-    { method: "DELETE" },
-  );
-  return res.ok || res.status === 204;
-}

@@ -20,10 +20,6 @@ class Pipeline:
             raise ValueError("Pipeline requires at least one stage")
         self._stages = stages
 
-    @property
-    def stages(self) -> list[Stage]:
-        return list(self._stages)
-
     async def run_scalar(self, ctx: PipelineContext, seed: Any) -> Any:
         """Run stages sequentially, passing each stage's output as the next stage's input.
 

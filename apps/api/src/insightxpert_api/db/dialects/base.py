@@ -1,3 +1,6 @@
+# DECISION(D-006): DialectAdapter strategy pattern — Protocol + registry for
+# multi-dialect SQL (SQLite, Postgres). Four dispatch seams: open, schema,
+# validate, prompt. One file per dialect, no call-site churn.
 """DialectAdapter protocol — the contract every dialect implements."""
 from __future__ import annotations
 
@@ -24,6 +27,7 @@ class ProfilingQueryPack:
     sample_rows: str
 
 
+# DECISION(D-031): Protocol-based adapters (not ABC) — structural subtyping via typing.Protocol for adapters
 @runtime_checkable
 class DialectAdapter(Protocol):
     """Contract for a query-target dialect.

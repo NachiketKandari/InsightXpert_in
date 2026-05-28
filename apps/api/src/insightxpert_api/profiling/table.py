@@ -19,6 +19,7 @@ database_profiles = sa.Table(
         server_default="base",
     ),
     sa.Column("owner_user_id", sa.String(length=36), nullable=True),
+    # DECISION(D-012): JSONB for profiles and chunks — flexible evolving schemas, no migrations for new fields
     sa.Column("profile_json", sa.Text(), nullable=False),
     sa.Column("generated_at", sa.Integer(), nullable=False),
     sa.Column("generated_by", sa.String(length=36), nullable=True),

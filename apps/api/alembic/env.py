@@ -1,5 +1,7 @@
 """Alembic environment. URL comes from app settings; target_metadata is our shared MetaData."""
 
+# DECISION(D-015): Alembic migration naming convention — YYYY_MM_DD_NNNN_description.py format
+
 from __future__ import annotations
 
 from logging.config import fileConfig

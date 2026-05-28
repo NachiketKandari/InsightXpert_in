@@ -1,999 +1,668 @@
-# Design Patterns in InsightXpert
+# Design Patterns in InsightXpert.ai
 
-A comprehensive catalog of every design pattern used across the full stack, why each was chosen, and why it's a good fit for this project.
+A catalog of the key design patterns that define the architecture. Each pattern covers what it is, where it lives, why it is used, and what tradeoffs it makes.
 
 ---
 
 ## Table of Contents
 
-1. [Backend Architecture](#1-backend-architecture)
-2. [Configuration & Environment](#2-configuration--environment)
-3. [Database & Persistence](#3-database--persistence)
-4. [Authentication & Authorization](#4-authentication--authorization)
-5. [LLM Integration](#5-llm-integration)
-6. [Agent & Tool System](#6-agent--tool-system)
-7. [API Layer & Streaming](#7-api-layer--streaming)
-8. [RAG & Vector Store](#8-rag--vector-store)
-9. [Conversation Management](#9-conversation-management)
-10. [Automations](#10-automations)
-11. [Frontend State Management](#11-frontend-state-management)
-12. [Frontend Component Patterns](#12-frontend-component-patterns)
-13. [Frontend Performance](#13-frontend-performance)
-14. [Infrastructure & Deployment](#14-infrastructure--deployment)
-15. [Error Handling](#15-error-handling)
-16. [Observability](#16-observability)
+1. [Stage Protocol](#1-stage-protocol)
+2. [DialectAdapter Pattern](#2-dialectadapter-pattern)
+3. [Repository/Service Split](#3-repositoryservice-split)
+4. [LLM Factory Pattern](#4-llm-factory-pattern)
+5. [Protocol-Based Adapters](#5-protocol-based-adapters)
+6. [Two-Engine Pool Architecture](#6-two-engine-pool-architecture)
+7. [SSE Chunk Taxonomy](#7-sse-chunk-taxonomy)
+8. [Async Batching Queue](#8-async-batching-queue)
+9. [Error-as-Flag Pipeline](#9-error-as-flag-pipeline)
+10. [In-Process Caching with TTL](#10-in-process-caching-with-ttl)
+11. [Preflight Parallelism](#11-preflight-parallelism)
+12. [Fire-and-Forget Persistence](#12-fire-and-forget-persistence)
 
 ---
 
-## 1. Backend Architecture
+## 1. Stage Protocol
 
-### 1.1 Async Context Manager Lifespan
+**Docs:** `docs/decisions/D-004-stage-protocol.md`
 
-**Files:** `backend/src/insightxpert/main.py:357-517`
+### Pattern
 
-**Pattern:** FastAPI's `@asynccontextmanager` with `async def lifespan(app)` manages the entire application lifecycle — startup resources before `yield`, cleanup after.
+The pipeline is composed of stages that conform to a structural protocol:
 
-**Implementation:**
 ```python
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Startup: DB → migrations → sync → RAG → LLM → scheduler
-    yield
-    # Shutdown: close connections, stop scheduler
+class ProfilerStage:
+    name: str = "profiler"
+
+    async def run(self, ctx: PipelineContext, current: Any) -> Any:
+        ...
 ```
 
-**Why it's used:** The app has ~8 interdependent resources (DB engines, sync managers, RAG store, LLM, scheduler) that must initialize in order and clean up on shutdown.
+Each stage:
+- Has a `name` class attribute (used in SSE `STATUS` chunks and logging).
+- Implements `async def run(ctx, current) -> Any` where `current` is the previous stage's return value.
+- Reads from and writes to a shared `PipelineContext` (a dict-like object on `ctx.state`).
+- Emits SSE chunks via `ctx.emit(chunk_type, payload)`.
+- Either returns a value (passed to the next stage as `current`) or sets `ctx.state["error"]` to signal failure.
 
-**Why it's good:** Guarantees resource cleanup even on crashes. Sequential initialization with per-stage error handling means a RAG timeout doesn't prevent the server from starting — it degrades gracefully. The alternative (scattered `@app.on_event` handlers) doesn't compose well and was deprecated by FastAPI.
+### Why Structural Subtyping
 
----
+Stages are not forced to inherit from a base class. The `Pipeline.run_scalar()` method simply iterates over a list of objects and calls `.run(ctx, current)` on each. This is structural subtyping (duck typing) rather than nominal subtyping (ABC inheritance).
 
-### 1.2 Lazy Initialization with Background Tasks
+**Advantages:**
+- Stages can be written without importing any base class.
+- No fragile base class problem -- stages are fully self-contained.
+- Easy to mock/test: any object with `name` and `async def run(...)` works.
 
-**Files:** `backend/src/insightxpert/main.py:440-483`
+### Pipeline Construction
 
-**Pattern:** RAG bootstrap runs as `asyncio.create_task()` with a timeout, so the server becomes ready before training completes.
-
-**Why it's used:** RAG training reads DDL, documentation, and example queries into ChromaDB — this can take 10-30s on cold start.
-
-**Why it's good:** The server starts accepting HTTP requests immediately. If RAG training times out (configurable via `RAG_BOOTSTRAP_TIMEOUT_SECONDS`), the server warns but doesn't crash. Users get degraded (less-accurate) results rather than a 503.
-
----
-
-### 1.3 Middleware Stack (CORS + GZip)
-
-**Files:** `backend/src/insightxpert/main.py:523-530`
-
-**Pattern:** Cross-cutting concerns handled as middleware layers — CORS for cross-origin browser requests, GZip for response compression.
-
-**Why it's used:** The frontend (Firebase Hosting) and backend (Cloud Run) are on different domains. Chat responses can be large (10K+ row results).
-
-**Why it's good:** Centralized, declarative, and invisible to route handlers. Every response gets compressed and CORS-compliant headers without any per-route code.
-
----
-
-## 2. Configuration & Environment
-
-### 2.1 Pydantic Settings with Validators
-
-**Files:** `backend/src/insightxpert/config.py`
-
-**Pattern:** `Settings(BaseSettings)` loads from `.env.local`, with field validators (normalize empty strings, validate log levels) and model validators (warn on insecure defaults).
-
-**Why it's used:** The app has ~30 config variables across LLM providers, databases, auth, and agent behavior.
-
-**Why it's good:**
-- **Type safety:** Every config value is typed and validated before the server starts. A typo in `LOG_LEVEL` fails fast at boot, not at the first log call.
-- **Single source of truth:** All env vars documented in one file with defaults.
-- **Security checks:** Model validators warn if `SECRET_KEY` is too short or `ADMIN_SEED_PASSWORD` is weak — catches insecure deployments early.
-
----
-
-### 2.2 Feature Toggles (JSON in DB)
-
-**Files:** `backend/src/insightxpert/auth/models.py:46-63`, `backend/src/insightxpert/admin/models.py`
-
-**Pattern:** `FeatureToggles` and `OrgBranding` are Pydantic models stored as JSON blobs in the `app_settings` table. Per-organization overrides layer on top of global defaults.
-
-**Why it's used:** Different organizations may need different features (SQL executor, clarification, agent modes) without schema migrations.
-
-**Why it's good:** Adding a new feature toggle is a one-line Pydantic field addition — no `ALTER TABLE`, no migration file. The `_resolve_user_features()` function applies a clean layering: global defaults → org overrides → hardcoded gates.
-
----
-
-### 2.3 TTL Config Cache
-
-**Files:** `backend/src/insightxpert/api/routes.py:60-75`
-
-**Pattern:** Admin config cached in-memory with a 60-second TTL. On cache miss, reads from DB and stores `(timestamp, config)` tuple.
+Stages are assembled in `pipeline/__init__.py`:
 
 ```python
-_config_cache: dict[str, tuple[float, ClientConfig]] = {}
-_CONFIG_TTL = 60.0
+def default_pipeline() -> Pipeline:
+    return Pipeline([
+        ProfilerStage(),
+        SchemaLinkerStage(),  # or FullSchemaStage()
+        SqlGeneratorStage(),
+        SqlValidatorStage(),
+        SqlExecutorStage(),
+        SqlRefinerStage(),
+        AnswerSynthesizerStage(),
+    ])
 ```
 
-**Why it's used:** Every chat request needs the admin config to resolve feature flags. Without caching, that's a DB read per message.
+The second stage is selected at construction time based on `pipeline_mode`: `"linked"` -> `SchemaLinkerStage`, `"full_schema"` -> `FullSchemaStage`.
 
-**Why it's good:** Eliminates ~99% of config DB queries. 60s TTL means config changes propagate within a minute. No cache invalidation complexity — time-based expiry is simple and predictable.
+### Tradeoffs
 
----
-
-## 3. Database & Persistence
-
-### 3.1 Database Adapter/Wrapper
-
-**Files:** `backend/src/insightxpert/db/connector.py`
-
-**Pattern:** `DatabaseConnector` wraps a SQLAlchemy engine with dialect-aware logic — URL normalization, connection pool strategy, read-only pragmas, and timeout handling.
-
-**Why it's used:** The app supports both local SQLite and remote Turso (libSQL over HTTPS). Each has different pooling needs, URL schemes, and failure modes.
-
-**Why it's good:** Route handlers and tools call `db.execute(sql)` without knowing whether they're hitting a local file or a remote HTTP endpoint. The connector handles:
-- URL scheme translation (`libsql://` → `sqlite+libsql://`)
-- Pool strategy (connection pool for local, `NullPool` for remote)
-- SQLite-specific pragmas (WAL mode, foreign keys)
+- **Pro**: No inheritance hierarchy to refactor when adding stages.
+- **Pro**: Stages can be mixed and matched, swapped, or reordered freely.
+- **Con**: No compile-time check that a stage implements `run()` -- though this is caught immediately at first invocation.
 
 ---
 
-### 3.2 Dialect-Aware Connection Pooling
+## 2. DialectAdapter Pattern
 
-**Files:** `backend/src/insightxpert/db/connector.py:67-72`
+**Docs:** `docs/decisions/D-006-dialect-adapter-strategy.md`
 
-**Pattern:**
-- **Local SQLite:** `pool_size=5, max_overflow=10, pool_pre_ping=True`
-- **Remote Turso:** `NullPool` (fresh HTTP connection per request)
+### Pattern
 
-**Why it's used:** The libSQL driver raises `ValueError` (not a DBAPI error) when a pooled Turso connection's stream expires server-side. SQLAlchemy's pool health checks can't catch non-DBAPI errors.
+SQL generation, execution, and validation vary by database engine (SQLite vs PostgreSQL). The `DialectAdapter` pattern encapsulates these differences behind a common protocol:
 
-**Why it's good:** Prevents the "stream not found" 500 errors that plagued early versions. Local SQLite gets efficient connection reuse; Turso gets the only strategy that works reliably with its HTTP-based protocol.
-
----
-
-### 3.3 Async-to-Sync Bridging (`asyncio.to_thread`)
-
-**Files:** `auth/dependencies.py:69,76`, `auth/routes.py:46`, `api/routes.py:147`, and ~20 more endpoints
-
-**Pattern:** Every synchronous SQLite/SQLAlchemy call is wrapped in `await asyncio.to_thread(sync_func, ...)`.
-
-**Why it's used:** FastAPI runs on an async event loop. SQLite's C driver is synchronous — a 50ms query blocks the entire event loop, freezing all concurrent requests.
-
-**Why it's good:** Moves blocking I/O to a thread pool worker, keeping the event loop free for other requests. The pattern is explicit and auditable — every DB call site is visibly wrapped. The alternative (using an async DB driver) isn't available for SQLite/libSQL.
-
----
-
-### 3.4 Bidirectional Background Sync
-
-**Files:** `backend/src/insightxpert/db/sync.py`
-
-**Pattern:** `TursoSyncManager` implements three-phase sync:
-1. **Startup pull:** Bulk-load Turso → local SQLite (hydrate auth tables)
-2. **Background push:** Every 30s, push changed rows local → Turso (timestamp-based change detection)
-3. **Delete propagation:** `_sync_deletes` table tracks deletions for async push
-
-**Why it's used:** The app needs sub-millisecond query latency (local SQLite) with durable cloud backup (Turso).
-
-**Why it's good:**
-- **Column intersection sync:** Only pushes columns that exist in both DBs, handling schema drift gracefully
-- **FK-safe insertion order:** Tables synced in dependency order (parents before children)
-- **Idempotent:** Re-running sync produces the same result — safe for crash recovery
-- **Optional:** If `TURSO_URL` is empty, the app runs in pure local mode with zero sync overhead
-
----
-
-### 3.5 Idempotent Schema Migrations
-
-**Files:** `backend/src/insightxpert/main.py:36-113`
-
-**Pattern:** `_migrate_schema()` checks column existence before `ALTER TABLE ADD COLUMN`. Indexes use `CREATE INDEX IF NOT EXISTS`. Runs on every startup.
-
-**Why it's used:** The app evolves its schema frequently (new columns for features, stats, automations) without a traditional migration tool like Alembic.
-
-**Why it's good:** Zero migration state to track. Safe to run 1000 times. A new column is a one-line addition to `_MIGRATION_COLUMNS` — shared between local migrations and Turso sync. The tradeoff (no down-migrations) is acceptable for a startup-stage product.
-
----
-
-### 3.6 Delete Tracking via Logging Table
-
-**Files:** `backend/src/insightxpert/auth/models.py:28-43`
-
-**Pattern:** `_record_delete()` writes to `_sync_deletes` table instead of relying on the absence of rows.
-
-**Why it's used:** Background sync can't detect deletions by comparing snapshots — a missing row could mean "deleted" or "not yet synced."
-
-**Why it's good:** Explicit delete records enable reliable propagation to Turso. Provides an audit trail. Allows recovery if sync fails mid-flight.
-
----
-
-### 3.7 SQLite Pragmas for Safety
-
-**Files:** `backend/src/insightxpert/db/connector.py:13-18, 103-123`
-
-**Pattern:** Every new connection runs:
-- `PRAGMA foreign_keys = ON` (enforce referential integrity)
-- `PRAGMA journal_mode = WAL` (concurrent reads during writes)
-- `PRAGMA query_only = ON` (for analytics queries — prevents accidental writes)
-
-**Why it's used:** SQLite defaults are permissive — foreign keys are off, journal mode is DELETE (locks entire DB on writes).
-
-**Why it's good:** WAL mode enables the chat API to read while the sync manager writes. Read-only pragma on analytics queries provides defense-in-depth against SQL injection or LLM-generated DML.
-
----
-
-## 4. Authentication & Authorization
-
-### 4.1 JWT in HttpOnly Cookies
-
-**Files:** `backend/src/insightxpert/auth/security.py`, `auth/routes.py:20-27,61-70`, `auth/dependencies.py:45-77`
-
-**Pattern:** HS256-signed JWT stored in `__session` HttpOnly cookie. Token contains `{sub: user_id, email, exp}`.
-
-**Why it's used:** The SPA frontend needs stateless auth that works across page reloads without client-side token management.
-
-**Why it's good:**
-- **HttpOnly:** JavaScript can't access the token — prevents XSS-based token theft
-- **Stateless:** No server-side session store needed
-- **Auto-sent:** Browser includes cookies automatically — no manual `Authorization` header in fetch calls
-- **Cross-site aware:** `_cookie_flags()` detects HTTPS and cross-origin requests, sets `SameSite=None` only when needed
-
----
-
-### 4.2 Bcrypt Password Hashing
-
-**Files:** `backend/src/insightxpert/auth/security.py:11-16`
-
-**Pattern:** `hash_password()` uses bcrypt with auto-generated salt. `verify_password()` uses bcrypt's constant-time comparison.
-
-**Why it's used:** Passwords must be stored irreversibly with resistance to rainbow tables and timing attacks.
-
-**Why it's good:** Bcrypt is intentionally slow (adaptive cost factor), making brute-force attacks impractical. Constant-time comparison prevents timing side-channels. The auto-salt means no developer can forget to salt a password.
-
----
-
-### 4.3 FastAPI Dependency Injection for Auth
-
-**Files:** `backend/src/insightxpert/auth/dependencies.py`
-
-**Pattern:** `get_current_user()` is an async FastAPI dependency that extracts the JWT from cookies, decodes it, fetches the user from DB, and fire-and-forgets a `last_active` timestamp update.
-
-**Why it's used:** Every protected endpoint needs the current user. Dependency injection lets routes declare `user = Depends(get_current_user)` and get a fully-resolved `User` object.
-
-**Why it's good:**
-- **Single responsibility:** Auth logic in one place, not scattered across 30 endpoints
-- **Testable:** Can override the dependency in tests with a mock user
-- **Composable:** `_get_admin_context()` builds on `get_current_user()` to add admin-specific context
-
----
-
-### 4.4 Domain-Based Admin Detection
-
-**Files:** `backend/src/insightxpert/auth/permissions.py`
-
-**Pattern:** `is_admin_user()` checks two things: the explicit `user.is_admin` flag, and whether the user's email domain is in the `admin_domains` config list.
-
-**Why it's used:** Auto-promoting all `@insightxpert.ai` users as admin without per-user DB entries.
-
-**Why it's good:** New team members get admin access automatically. No manual user management for the core team. The explicit `is_admin` flag still exists for granting admin to external users.
-
----
-
-### 4.5 Multi-Level Admin Scope
-
-**Files:** `backend/src/insightxpert/admin/routes.py:43-76`
-
-**Pattern:** Two admin tiers:
-- **Super-admin:** `user.org_id = NULL` → sees all users and conversations
-- **Org-scoped admin:** `user.org_id = "org_123"` → sees only users in their org
-
-**Why it's used:** The platform serves multiple organizations. Org admins should manage their own users without seeing others.
-
-**Why it's good:** Scope checking happens once in `_get_admin_context()`, then all admin endpoints use `_assert_user_in_scope()` and `_assert_conversation_in_scope()`. Adding a new admin endpoint gets scope checks for free.
-
----
-
-## 5. LLM Integration
-
-### 5.1 Protocol-Based Provider Abstraction
-
-**Files:** `backend/src/insightxpert/llm/base.py:34-41`
-
-**Pattern:** `@runtime_checkable` Protocol defines `LLMProvider`:
 ```python
-class LLMProvider(Protocol):
+class DialectAdapter(Protocol):
+    dialect_name: str
+
+    def validate_sql(self, sql: str) -> bool: ...
+    def get_tables_query(self) -> str: ...
+    def get_schema_query(self, table: str) -> str: ...
+    def format_limit(self, sql: str, limit: int) -> str: ...
+    def pragma_for_read_only(self) -> str | None: ...
+```
+
+### Registry
+
+Dialects are registered in a mapping:
+
+```python
+_DIALECT_REGISTRY: dict[str, DialectAdapter] = {
+    "sqlite": SQLiteAdapter(),
+    "postgres": PostgresAdapter(),
+}
+```
+
+### One File Per Dialect
+
+Each dialect has its own module with a single adapter class:
+- `dialects/sqlite.py` -- `SQLiteAdapter`
+- `dialects/postgres.py` -- `PostgresAdapter`
+
+### Call-Site Usage
+
+```python
+adapter = get_adapter(db_kind)  # looks up in registry
+sql = adapter.format_limit(sql, row_limit)
+is_valid = adapter.validate_sql(sql)
+```
+
+Adding a new dialect (e.g., MySQL) requires: one new file with an adapter class + one registry entry. No call-site code changes.
+
+### Tradeoffs
+
+- **Pro**: All dialect-specific logic is co-located in one file per dialect.
+- **Pro**: Zero call-site churn when adding a new dialect.
+- **Pro**: Protocol-based: adapters don't inherit from a base class.
+- **Con**: Protocol methods must be manually kept in sync across dialects (structural, no compiler enforcement).
+
+---
+
+## 3. Repository/Service Split
+
+**Docs:** `docs/decisions/D-030-repository-service-split.md`
+
+### Pattern
+
+Every domain module separates data access (repository) from business logic (service):
+
+```
+table.py       # SQLAlchemy Table definition (metadata)
+repository.py  # Raw SQL operations (returns plain dicts)
+service.py     # Business logic (uses Pydantic models)
+```
+
+### Example: Users Module
+
+```
+users/table.py      # users table: columns, constraints, indices
+users/repository.py # insert_user, get_by_id, get_by_email, list_users, update_user, delete_user
+users/service.py    # invite, authenticate, change_password, set_role, set_active, delete
+```
+
+### Rules
+
+1. **Repositories** never import Pydantic models. They accept and return plain Python dicts/tuples.
+2. **Services** never touch SQLAlchemy directly. They call repository methods.
+3. **Tables** only define the SQL schema, no behavior.
+
+### Why
+
+- **Testability**: Services can be tested with a mock repository; repositories can be tested against a real database.
+- **Cohesion**: Business rules (LastAdminError, email lowercasing, session invalidation on password change) live in one place.
+- **No leaky ORM**: Pydantic DTOs don't depend on SQLAlchemy.
+
+### Tradeoffs
+
+- **Pro**: Clear separation of concerns. Services are framework-agnostic.
+- **Pro**: Easy to add a new query method without touching business logic.
+- **Con**: More files per domain (3 instead of 1). Accepted tradeoff for maintainability.
+
+---
+
+## 4. LLM Factory Pattern
+
+**Docs:** `docs/decisions/D-007-provider-agnostic-llm-factory.md`
+
+### Pattern
+
+A single factory function creates the appropriate LLM provider without call-site knowledge of which provider is in use:
+
+```python
+def create_chat_llm(settings: Settings) -> ChatLLM:
+    provider = settings.llm_provider  # "gemini" or "deepseek"
+    if provider == "gemini":
+        return GeminiLLM(api_key=settings.gemini_api_key, model=settings.gemini_chat_model)
+    if provider == "deepseek":
+        return DeepSeekLLM(api_key=settings.deepseek_api_key, model=settings.deepseek_chat_model)
+```
+
+### Provider-Neutral Interface
+
+All providers implement a shared interface:
+
+```python
+class ChatLLM(Protocol):
     model: str
-    async def chat(self, messages, tools=None) -> LLMResponse: ...
+
+    async def async_generate(self, prompt: str) -> str: ...
+    async def async_generate_stream(self, prompt: str) -> AsyncGenerator[str, None]: ...
+    async def async_embed(self, text: str) -> list[float]: ...
+
+    @property
+    def input_tokens_used(self) -> int: ...
+    @property
+    def output_tokens_used(self) -> int: ...
 ```
 
-**Why it's used:** The app supports Gemini and Ollama, with potential for more providers.
+### Token Tracking
 
-**Why it's good:** Python Protocols enable structural (duck) typing — any class with a `model` property and `chat()` method satisfies the interface, no inheritance required. This is more Pythonic than abstract base classes and allows third-party classes to conform without modification.
+A single `ChatLLM` instance is created per chat turn and shared across all pipeline stages. Its `input_tokens_used` / `output_tokens_used` accumulators are incremented by every LLM call. The route layer reads them once at the end for the terminal `metrics` chunk.
 
----
+### Cost Attribution
 
-### 5.2 Factory Pattern with Lazy Imports
+LLM usage is tracked via `record_llm_usage()` with versioned pricing:
 
-**Files:** `backend/src/insightxpert/llm/factory.py`
-
-**Pattern:** `create_llm(provider, settings)` uses conditional imports inside branches:
 ```python
-if provider == "gemini":
-    from insightxpert.llm.gemini import GeminiProvider
-    return GeminiProvider(...)
-```
-
-**Why it's used:** Gemini and Ollama have different SDK dependencies. Importing both at module level wastes memory and may fail if one SDK isn't installed.
-
-**Why it's good:** Lazy imports mean only the selected provider's SDK is loaded. Adding a new provider is a new `elif` branch + a new module. The factory is the single point of provider construction — no provider-specific code leaks into the rest of the app.
-
----
-
-### 5.3 Message Format Translation
-
-**Files:** `backend/src/insightxpert/llm/gemini.py`
-
-**Pattern:** `GeminiProvider._convert_messages()` and `_convert_tools()` translate between an internal OpenAI-like format and Gemini's native format.
-
-**Why it's used:** The agent system uses a single internal message format. Each LLM provider has its own wire format (Gemini uses `Content(role="model")`, `FunctionDeclaration`, etc.).
-
-**Why it's good:** The entire agent/tool/orchestrator stack is provider-agnostic. Switching from Gemini to Ollama doesn't change a single line outside the LLM layer. Translation logic is co-located with the provider implementation.
-
----
-
-### 5.4 Token Counting Wrapper
-
-**Files:** `backend/src/insightxpert/api/routes.py:78-94`
-
-**Pattern:** `_TokenCountingLLM` wraps any `LLMProvider`, intercepting `chat()` responses to accumulate `input_tokens` and `output_tokens`.
-
-**Why it's used:** Token usage needs to be tracked per-chat-request for metrics, without modifying provider implementations.
-
-**Why it's good:** Classic Decorator pattern — transparent to the caller, works with any provider, accumulates across multi-turn tool loops. The wrapper is created per-request, so there's no shared mutable state.
-
----
-
-## 6. Agent & Tool System
-
-### 6.1 Abstract Tool + Registry
-
-**Files:** `backend/src/insightxpert/agents/tool_base.py`
-
-**Pattern:** Abstract `Tool` base class with `name`, `description`, `get_args_schema()`, `execute()`. `ToolRegistry` stores tools by name, generates LLM-compatible schemas, and dispatches execution.
-
-**Why it's used:** The LLM needs a standardized way to discover and call tools (run_sql, visualize, etc.).
-
-**Why it's good:**
-- **Self-documenting:** `get_definition()` auto-generates the JSON schema the LLM needs for function calling
-- **Pluggable:** Register a new tool with `registry.register(MyTool())` — no changes elsewhere
-- **Error-safe:** `ToolRegistry.execute()` catches exceptions and returns error strings to the LLM instead of crashing
-
----
-
-### 6.2 Tool Context Dataclass
-
-**Files:** `backend/src/insightxpert/agents/tool_base.py:17-23`
-
-**Pattern:** `@dataclass ToolContext` bundles dependencies (DB connector, RAG store) and execution state (row limit, prior results, prior SQL).
-
-**Why it's used:** Tools need access to shared resources without global state or passing 6 parameters to every `execute()` call.
-
-**Why it's good:** Type-safe, explicit, immutable after construction. The context is created per-request and passed through the tool chain — no hidden coupling. Adding a new dependency is a new field, not a signature change across all tools.
-
----
-
-### 6.3 Shared Agent Tool Loop
-
-**Files:** `backend/src/insightxpert/agents/common.py:32-130`
-
-**Pattern:** `agent_tool_loop()` is an async generator implementing the standard agentic loop: call LLM → if tool calls, execute and append results → repeat until text response or max iterations.
-
-**Why it's used:** Both the analyst agent and statistician agent follow the same loop structure. Without this, each agent would duplicate ~100 lines of loop logic.
-
-**Why it's good:** DRY — the loop, error handling, and chunk yielding are written once. Each agent just provides its system prompt and tool set. The generator pattern (`async for chunk in agent_tool_loop(...)`) integrates naturally with SSE streaming.
-
----
-
-### 6.4 Multi-Phase Orchestrator
-
-**Files:** `backend/src/insightxpert/agents/orchestrator.py:44-195`
-
-**Pattern:** `orchestrator_loop()` orchestrates a pipeline:
-- **Phase 0:** Optional clarification check
-- **Phase 1:** Analyst agent (always runs, generates SQL and results)
-- **Phase 2:** Conditional downstream agent (statistician or advanced) that receives Phase 1's SQL and results
-
-**Why it's used:** Complex analytics often need two stages — first get the data (analyst), then analyze it (statistician).
-
-**Why it's good:** Mode-driven routing (`"analyst"`, `"auto"`, `"statistician"`, `"advanced"`) lets the same orchestrator handle simple and complex queries. Phase 1 results are captured via chunk interception (not re-executed), so the downstream agent gets concrete data without a second DB query.
-
----
-
-### 6.5 Result Capture via Chunk Interception
-
-**Files:** `backend/src/insightxpert/agents/orchestrator.py:131-155`
-
-**Pattern:** While consuming analyst chunks for SSE output, the orchestrator intercepts `type=="sql"` and `type=="tool_result"` chunks to capture the last SQL statement and result rows.
-
-**Why it's used:** The downstream agent needs the analyst's results without re-running the query.
-
-**Why it's good:** Zero-copy — the results flow through the SSE stream to the client AND get captured for the next phase. No intermediate storage or re-execution needed.
-
----
-
-## 7. API Layer & Streaming
-
-### 7.1 Server-Sent Events (SSE)
-
-**Files:** `backend/src/insightxpert/api/routes.py` (chat_sse endpoint)
-
-**Pattern:** `EventSourceResponse` from `sse-starlette` wraps an async generator that yields `ChatChunk` objects as SSE events. Terminal signal is `data: [DONE]`.
-
-**Why it's used:** Chat responses are multi-second operations with multiple phases (SQL generation → execution → visualization → summary). Users need real-time feedback.
-
-**Why it's good:** SSE is simpler than WebSockets for server-to-client streaming — no connection upgrade, no bidirectional state management. Works through proxies and load balancers. The `[DONE]` sentinel enables clean client-side stream termination.
-
----
-
-### 7.2 Fire-and-Forget Persistence
-
-**Files:** `backend/src/insightxpert/api/routes.py:273-285`
-
-**Pattern:** After yielding `[DONE]` to the client, persistence runs as `asyncio.ensure_future(asyncio.to_thread(_persist_response, ...))`.
-
-**Why it's used:** Persisting large responses (with chunk blobs) to Turso via HTTPS could take 15-20 seconds. This was the root cause of the 37s vs 17s latency gap.
-
-**Why it's good:** The client sees `[DONE]` immediately after the last chunk. Persistence happens in the background. If it fails, the conversation is still in memory — the next request can retry.
-
----
-
-### 7.3 Feature Resolution with Layered Overrides
-
-**Files:** `backend/src/insightxpert/api/routes.py:97-116`
-
-**Pattern:** `_resolve_user_features()` applies three layers:
-1. Global defaults from admin config
-2. Org-specific overrides (if user has org_id and is not admin)
-3. Hardcoded gates (e.g., `clarification_enabled = False`)
-
-**Why it's used:** Different organizations need different features, but some features need a kill switch regardless of config.
-
-**Why it's good:** Clean separation of config sources. The layering order is explicit and predictable. Hardcoded gates serve as circuit breakers for features that aren't production-ready.
-
----
-
-### 7.4 SQL Query Validation (Regex Allowlist)
-
-**Files:** `backend/src/insightxpert/api/routes.py:527-544`
-
-**Pattern:** `_FORBIDDEN_SQL` regex matches DML/DDL keywords (INSERT, UPDATE, DELETE, DROP, ALTER, CREATE). The SQL executor endpoint rejects matches with HTTP 403.
-
-**Why it's used:** The SQL executor lets users run arbitrary queries against the analytics DB. Write operations must be blocked.
-
-**Why it's good:** Simple, fast, and auditable. Combined with SQLite's `PRAGMA query_only = ON` at the connection level, this provides defense-in-depth. The regex catches obvious DML; the pragma catches anything the regex misses.
-
----
-
-### 7.5 Response Payload Truncation
-
-**Files:** `backend/src/insightxpert/api/routes.py:607-631`
-
-**Pattern:** `_truncate_chunks()` limits historical result sets to 50 rows, setting `truncated=True` and `original_row_count` for transparency.
-
-**Why it's used:** Conversation history can include 10K+ row results. Loading full results for every historical message wastes bandwidth and memory.
-
-**Why it's good:** Keeps history payloads small while preserving metadata about the original result size. The client can indicate truncation in the UI.
-
----
-
-## 8. RAG & Vector Store
-
-### 8.1 Content-Addressable Deduplication
-
-**Files:** `backend/src/insightxpert/rag/store.py:61-76`
-
-**Pattern:** `VectorStore._make_id()` derives a deterministic ID from `SHA-256(content)[:16]`. All writes use ChromaDB's `upsert()` keyed by this hash.
-
-**Why it's used:** RAG training runs on every server startup. Without deduplication, the vector store would accumulate duplicate embeddings.
-
-**Why it's good:** Idempotent writes — restarting the server 100 times produces the same vector store state. Content changes get new IDs automatically. No stale embeddings from previous content versions.
-
----
-
-### 8.2 Multi-Collection Separation
-
-**Files:** `backend/src/insightxpert/rag/store.py:43-59`
-
-**Pattern:** Four ChromaDB collections: `qa_pairs` (few-shot examples), `ddl` (schema), `docs` (business context), `findings` (reserved).
-
-**Why it's used:** Different types of context need independent retrieval — a schema question shouldn't surface business documentation.
-
-**Why it's good:** Semantic search isolation. Each collection can have different embedding strategies or retrieval counts. Collections can be rebuilt independently.
-
----
-
-### 8.3 Bootstrap Trainer with Fallback
-
-**Files:** `backend/src/insightxpert/training/trainer.py`
-
-**Pattern:** `Trainer.train_insightxpert()` tries DB-based training first (from `DatasetService`), then falls back to hardcoded Python files (`training/schema.py`, `training/documentation.py`, `training/queries.py`).
-
-**Why it's used:** The app needs RAG context even if the datasets DB table is empty (first run, fresh deployment).
-
-**Why it's good:** Always works — DB-driven when datasets exist, hardcoded when they don't. Hardcoded files are version-controlled, so the baseline training data is always available.
-
----
-
-## 9. Conversation Management
-
-### 9.1 Dual-Store Pattern (In-Memory + Persistent)
-
-**Files:**
-- In-memory: `backend/src/insightxpert/memory/conversation_store.py`
-- Persistent: `backend/src/insightxpert/auth/conversation_store.py`
-
-**Pattern:** Two conversation stores:
-- **In-memory:** `OrderedDict` with LRU eviction and TTL expiry. Sub-millisecond lookups. Used for LLM context window.
-- **Persistent (SQLite):** Durable, searchable, survives restarts. Used for history and audit.
-
-**Why it's used:** LLM context retrieval must be fast (every message). But conversations must also survive server restarts.
-
-**Why it's good:** Best of both worlds — memory-speed for the hot path, durability for the cold path. Hydration logic in `_prepare_chat()` loads from persistent store if in-memory is empty (e.g., after a restart).
-
----
-
-### 9.2 LRU + TTL Cache
-
-**Files:** `backend/src/insightxpert/memory/conversation_store.py:24-91`
-
-**Pattern:** `OrderedDict` for LRU ordering, `updated_at` timestamps for TTL checks, `MAX_HISTORY_TURNS = 20` limits context window.
-
-**Why it's used:** Without bounds, the in-memory store would grow forever. Stale conversations waste memory and could pollute LLM context.
-
-**Why it's good:** O(1) lookups and insertions. Automatic cleanup of stale conversations (no manual expiry logic needed). The 20-turn limit prevents context window overflow.
-
----
-
-### 9.3 IST Timezone Conversion
-
-**Files:** `backend/src/insightxpert/auth/conversation_store.py:26-34`
-
-**Pattern:** `_to_ist()` converts all timestamps to Asia/Kolkata timezone before returning to the frontend.
-
-**Why it's used:** Built for the Techfest IIT Bombay challenge — all users are in India.
-
-**Why it's good:** Consistent timezone display without client-side conversion logic. Simple and explicit.
-
----
-
-## 10. Automations
-
-### 10.1 Cron-Based Job Scheduler
-
-**Files:** `backend/src/insightxpert/automations/scheduler.py:15-51`
-
-**Pattern:** `AutomationScheduler` wraps APScheduler's `AsyncIOScheduler`. Each automation is a cron-triggered job with 5-minute misfire grace time.
-
-**Why it's used:** Users can schedule recurring SQL queries (e.g., "check for fraud patterns every hour").
-
-**Why it's good:** APScheduler handles cron parsing, job persistence, and misfire recovery. The 5-minute grace time means jobs run even if the scheduler was briefly down.
-
----
-
-### 10.2 Multi-Query Chain Execution
-
-**Files:** `backend/src/insightxpert/automations/scheduler.py:82-99`
-
-**Pattern:** `_execute_automation()` runs SQL queries in sequence (topologically sorted by DAG), collects results, then evaluates triggers against the final result.
-
-**Why it's used:** Complex automations may need multiple queries (e.g., compute aggregates, then check thresholds).
-
-**Why it's good:** Composable — each SQL block is independent but ordered by dependencies. Trigger evaluation happens only on the final result, not intermediate steps.
-
----
-
-### 10.3 Denormalized + Normalized Trigger Storage
-
-**Files:** `backend/src/insightxpert/automations/service.py:33-93`
-
-**Pattern:** Trigger conditions stored both as a JSON blob on the automation (flexible) and as normalized `AutomationTrigger` rows (queryable).
-
-**Why it's used:** The JSON blob is easy to edit and display. The normalized rows enable efficient database queries (e.g., "find all automations with threshold triggers").
-
-**Why it's good:** Both representations are always in sync (written atomically). Each serves its purpose — blob for flexibility, rows for queryability.
-
----
-
-## 11. Frontend State Management
-
-### 11.1 Zustand with Persist Middleware
-
-**Files:** `frontend/src/stores/chat-store.ts`
-
-**Pattern:** Zustand store with `persist` middleware to sessionStorage. Conversations stored without messages (messages lazy-loaded per conversation).
-
-**Why it's used:** The app needs persistent state (conversation list, sidebar state) across page reloads, but full message history is too large for sessionStorage.
-
-**Why it's good:**
-- **Minimal footprint:** Only conversation metadata persists; messages load on-demand
-- **Fast hydration:** sessionStorage is synchronous — no loading spinner for the conversation list
-- **No boilerplate:** Zustand's API is ~10x less code than Redux
-
----
-
-### 11.2 Optimistic Updates with Rollback
-
-**Files:** `frontend/src/stores/notification-store.ts`, `stores/settings-store.ts`
-
-**Pattern:** Save previous state, apply update immediately, revert on API failure:
-```typescript
-const prev = get();
-set({ /* optimistic */ });
-apiCall().catch(() => set(prev));
-```
-
-**Why it's used:** Marking notifications as read and switching models should feel instant.
-
-**Why it's good:** Zero perceived latency for the user. If the API fails, the UI reverts seamlessly. No loading spinners for low-risk operations.
-
----
-
-### 11.3 Fire-and-Forget API Calls
-
-**Files:** `frontend/src/stores/chat-store.ts` (delete, rename), `components/chat/message-list.tsx` (feedback)
-
-**Pattern:** `apiFetch(url, options).catch(() => {})` — no await, no loading state.
-
-**Why it's used:** Operations like deleting a conversation or submitting feedback don't need to block the UI.
-
-**Why it's good:** The UI remains responsive even if the API is slow or offline. Acceptable for operations where eventual consistency is fine.
-
----
-
-### 11.4 Derived Selectors
-
-**Files:** `frontend/src/stores/chat-store.ts` (activeConversation), `components/chat/message-bubble.tsx` (selectIsActiveStreaming)
-
-**Pattern:** Computed values derived on-demand from store state:
-```typescript
-activeConversation: () => {
-  const { conversations, activeConversationId } = get();
-  return conversations.find(c => c.id === activeConversationId) || null;
+# metrics/pricing.py
+PRICING = {
+    "gemini-2.5-flash": ModelPricing(input_per_1m=0.30, output_per_1m=2.50),
+    "deepseek-v4-flash": ModelPricing(input_per_1m=0.14, output_per_1m=0.28),
 }
 ```
 
-**Why it's used:** Avoids storing derived state that can become stale.
+Every `query_metrics` row stamps `pricing_version` and `cost_usd`.
 
-**Why it's good:** Always consistent with source state. No synchronization bugs. Zustand's fine-grained subscriptions ensure components only re-render when the derived value actually changes.
+### Tradeoffs
 
----
-
-### 11.5 Topological Sort for Workflow DAG
-
-**Files:** `frontend/src/stores/automation-store.ts:30-72`
-
-**Pattern:** Kahn's algorithm sorts workflow SQL blocks by dependency edges. Disconnected blocks fall back to Y-position order.
-
-**Why it's used:** Automation workflows are visual DAGs (directed acyclic graphs). SQL queries must execute in dependency order.
-
-**Why it's good:** Handles complex multi-block workflows correctly. The Y-position fallback means even unconnected blocks have a predictable order (top-to-bottom visual layout).
+- **Pro**: Switching providers is an env var change (`LLM_PROVIDER=deepseek`).
+- **Pro**: Adding a new provider is one new module + one factory branch.
+- **Pro**: Token tracking is transparent to pipeline code -- the shared instance accumulates automatically.
+- **Con**: The factory uses conditional branches, not a registry. For 2-3 providers this is fine.
 
 ---
 
-## 12. Frontend Component Patterns
+## 5. Protocol-Based Adapters
 
-### 12.1 Chunk Type Dispatch
+**Docs:** `docs/decisions/D-031-protocol-based-adapters.md`
 
-**Files:** `frontend/src/components/chunks/chunk-renderer.tsx:76-159`
+### Pattern
 
-**Pattern:** Switch on `chunk.type` to render type-specific components:
-- `status` → progress indicator
-- `sql` → code block
-- `tool_result` → data table + chart
-- `answer` → markdown renderer
-- `clarification` → interactive buttons
-- `error` → error message
+Throughout the codebase, adapters and abstractions use Python Protocols (structural subtyping) rather than abstract base classes:
 
-**Why it's used:** The SSE stream produces heterogeneous chunks. Each type needs different rendering.
+```python
+from typing import Protocol, runtime_checkable
 
-**Why it's good:** Clean separation — each chunk type has its own component. Adding a new chunk type is a new case in the switch + a new component file.
-
----
-
-### 12.2 Responsive Layout with Framer Motion
-
-**Files:** `frontend/src/components/layout/app-shell.tsx`
-
-**Pattern:** Desktop: `AnimatePresence` + `motion.aside` for sidebars. Mobile: Radix `Sheet` (slide-in panels).
-
-**Why it's used:** Desktop users expect persistent sidebars. Mobile users need full-screen content with slide-in panels.
-
-**Why it's good:** `useIsMobile()` hook switches between layouts at the component level, not with CSS media queries. Framer Motion provides smooth width animations (308px → 0) that CSS `display: none` can't match.
-
----
-
-### 12.3 Stable Callback Wrappers
-
-**Files:** `frontend/src/components/chat/message-bubble.tsx:93-98`, `message-list.tsx:37-49`
-
-**Pattern:** Parent provides a stable `onFeedback(messageId, type, comment)` callback. Each `MessageBubble` wraps it with `useCallback` to bind its specific `message.id`:
-```typescript
-const handleFeedbackForMsg = useCallback(
-  (type, comment) => onFeedback?.(message.id, type, comment),
-  [message.id, onFeedback],
-);
+@runtime_checkable
+class ObjectStore(Protocol):
+    async def put_bytes(self, key: str, data: bytes) -> None: ...
+    async def get_bytes(self, key: str) -> bytes | None: ...
+    def exists(self, key: str) -> bool: ...
+    async def list(self, prefix: str) -> list[str]: ...
+    async def delete(self, key: str) -> None: ...
 ```
 
-**Why it's used:** Without stable callbacks, every parent re-render creates new function references, breaking `React.memo` on child components.
+### Implementations
 
-**Why it's good:** Enables effective memoization. The parent's callback is stable (defined once with `useCallback([], [])`). Each child's wrapper is stable per message ID. Together, they prevent cascade re-renders when sibling messages update.
+| Protocol | Implementations |
+|---|---|
+| `ObjectStore` | `LocalStorage` (filesystem), `GCSStorage` (Google Cloud Storage) |
+| `ChatLLM` | `GeminiLLM`, `DeepSeekLLM` |
+| `DialectAdapter` | `SQLiteAdapter`, `PostgresAdapter` |
 
----
+### Factory Selection
 
-### 12.4 Zustand Subscription in useEffect
-
-**Files:** `frontend/src/components/chat/message-input.tsx`
-
-**Pattern:** Direct Zustand subscription to watch for `pendingInput`:
-```typescript
-useEffect(() => {
-  return useChatStore.subscribe((state) => {
-    if (state.pendingInput) {
-      state.setPendingInput(null);
-      // auto-fill and optionally auto-send
-    }
-  });
-}, [onSend]);
+```python
+def build_store(settings: Settings) -> ObjectStore:
+    return GCSStorage(settings.gcs_bucket) if settings.gcs_bucket else LocalStorage(settings.local_storage_dir)
 ```
 
-**Why it's used:** The clarification "Just answer" button sets `pendingInput` in the store. The input component needs to react to this without causing a render loop.
+### Why Protocols Over ABCs
 
-**Why it's good:** Direct subscription avoids the selector → re-render → effect cycle. The component only processes the event once, then clears `pendingInput`. Clean unsubscribe on unmount.
+- **No inheritance required**: Third-party code can satisfy the protocol without our base class.
+- **`@runtime_checkable`**: `isinstance(obj, ObjectStore)` works for structural checking.
+- **Lighter weight**: No metaclass conflicts, no `__init_subclass__` hooks.
 
----
+### Tradeoffs
 
-## 13. Frontend Performance
-
-### 13.1 React.memo with Custom Comparators
-
-**Files:** `message-bubble.tsx:194-202`, `answer-chunk.tsx:114`, `chart-block.tsx:260`
-
-**Pattern:** Expensive components wrapped with `React.memo` and custom equality functions that compare only the props that matter.
-
-**Why it's used:** A chat with 50 messages re-renders the entire list when any message updates. Without memo, markdown parsing, chart rendering, and DOM diffing run for all 50 messages.
-
-**Why it's good:** Only the changed message re-renders. Custom comparators ensure memo doesn't break on reference-unequal-but-value-equal props.
+- **Pro**: Maximum flexibility -- any object with the right methods works.
+- **Pro**: No dependency on a shared base class module.
+- **Con**: No default method implementations (ABCs can provide those).
+- **Con**: Method signature mismatches are runtime errors, not type-checker errors (unless using mypy/pyright with protocol checking).
 
 ---
 
-### 13.2 Lazy Chart Loading with IntersectionObserver
+## 6. Two-Engine Pool Architecture
 
-**Files:** `frontend/src/components/chunks/chart-block.tsx:266-295`
+**Docs:** `docs/decisions/D-060-two-engine-pool-architecture.md`
 
-**Pattern:** Charts render only when near the viewport (200px margin). Streaming charts skip the observer (`eager={true}`).
+### Pattern
 
-**Why it's used:** Recharts rendering is expensive. A conversation with 20 charts would cause significant jank on load.
+The metadata database has two independent SQLAlchemy engine singletons:
 
-**Why it's good:** Off-screen charts pay zero cost. The 200px margin pre-loads just before the user scrolls to them, so there's no visible delay. Streaming charts render immediately (the user is watching them).
+| Engine | Pool Size | Overflow | Timeout | Used By |
+|---|---|---|---|---|
+| Request | 15 | 10 | 10s | All HTTP route handlers |
+| Background | 2 | 0 | 30s | Automation scheduler/runner |
+
+### Why Two Pools
+
+Without isolation, a burst of automation runs could exhaust all connections in the shared pool, starving user-facing requests. The two-pool design guarantees that user requests always have connections available, and background work is capped at 2 connections.
+
+### Lazy Initialization
+
+```python
+# db/engine.py
+_request_engine: Engine | None = None
+
+def get_request_engine() -> Engine:
+    global _request_engine
+    if _request_engine is None:
+        _request_engine = _create_engine(pool_size=15, max_overflow=10, pool_timeout=10)
+    return _request_engine
+```
+
+Engines are created on first access, not at import time.
+
+### Test Hook
+
+```python
+def reset_engine_cache() -> None:
+    """Dispose and clear both engine singletons. Used by tests between runs."""
+```
+
+### Pgbouncer Compatibility
+
+For Postgres with pgbouncer transaction pooling:
+- `pool_pre_ping = False` (pgbouncer handles connection health).
+- `prepare_threshold = None` via psycopg3 `connect_args` (prepared statements are incompatible with transaction pooling).
+- Alembic migrations use a separate direct (non-pooler) URL.
+
+### Tradeoffs
+
+- **Pro**: Request-serving and background work are fully isolated.
+- **Pro**: Background pool sizing is independent of request pool.
+- **Con**: Two pools = two sets of connections = higher total connection count.
+- **Con**: With pgbouncer, the isolation is partially redundant (pgbouncer already pools).
 
 ---
 
-### 13.3 Microtask Batching in SSE Client
+## 7. SSE Chunk Taxonomy
 
-**Files:** `frontend/src/lib/sse-client.ts:25-37`
+**Docs:** `docs/decisions/D-005-sse-streaming-chunk-taxonomy.md`, `docs/decisions/D-022-sse-envelope-shape.md`
 
-**Pattern:** SSE chunks are queued and drained via `queueMicrotask()`:
-```typescript
-function enqueue(data) {
-  chunkQueue.push(data);
-  if (!draining) {
-    draining = true;
-    queueMicrotask(drainQueue);
-  }
+### Pattern
+
+Every event sent over the SSE connection uses a typed envelope:
+
+```json
+{
+    "type": "sql_generated",
+    "data": {"sql": "SELECT ...", "iteration": 0},
+    "conversation_id": "abc123...",
+    "timestamp": 1711910400.123
 }
 ```
 
-**Why it's used:** A single `reader.read()` call may contain multiple SSE events. Processing each one individually causes multiple React state updates.
+### Chunk Types (Closed Set)
 
-**Why it's good:** All chunks from the same read are processed in one microtask. React 18's automatic batching then combines all state updates into a single render. This eliminated the 16ms stagger between chunks that was causing visible jitter.
+The `ChunkType` enum defines every valid type:
 
----
+**Pipeline progress:**
+| Type | Emitted By | Payload |
+|---|---|---|
+| `status` | Pipeline runner | `{label: str}` |
+| `profile_loaded` | ProfilerStage | `{db_id, table_count, column_count, from_cache}` |
+| `schema_linking_started` | SchemaLinkerStage | `{}` |
+| `candidate_sqls_generated` | SchemaLinkerStage | `{candidates: [...]}` |
+| `literals_extracted` | SchemaLinkerStage | `{literals: [...]}` |
+| `semantic_matches` | SchemaLinkerStage | `{columns: [...]}` |
+| `join_paths_added` | SchemaLinkerStage | `{paths: [...]}` |
+| `linked_schema_final` | SchemaLinkerStage | `{schema_text: str}` |
+| `sql_generated` | SqlGeneratorStage | `{sql: str, iteration: int}` |
+| `sql_executing` | SqlExecutorStage | `{}` |
+| `rows_returned` | SqlExecutorStage | `{columns, rows, row_count, execution_time_ms}` |
+| `answer_delta` | AnswerSynthesizerStage | `{text: str}` (incremental) |
+| `answer_generated` | Route epilogue | `{answer: str}` (canonical full text) |
 
-### 13.4 Smart Auto-Scroll Dependencies
+**Orchestrator-specific:**
+| Type | Emitted By | Payload |
+|---|---|---|
+| `tool_call` | Analyst adapter | `{tool_name: str}` |
+| `tool_result` | Analyst adapter | `{tool_name, data}` |
+| `orchestrator_plan` | Orchestrator | `{tasks: [...]}` |
+| `enrichment_trace` | DAG executor | `{task_id, status, result}` |
+| `insight` | Synthesizer | `{title, content, categories, citations}` |
 
-**Files:** `frontend/src/components/chat/message-list.tsx:20`, `hooks/use-auto-scroll.ts`
+**Terminal:**
+| Type | Emitted By | Payload |
+|---|---|---|
+| `metrics` | Route epilogue | `{latency_ms, prompt_tokens, output_tokens, total_tokens, model}` |
+| `error` | Any stage on failure | `{code: str, message: str}` |
 
-**Pattern:** Auto-scroll triggers on `[messages.length, lastMsgChunkCount]` — NOT on feedback, tokens, wallTimeMs, or other metadata changes.
+### Frontend Dispatch
 
-**Why it's used:** Early versions auto-scrolled on every state change, causing DOM reflow when the user was reading earlier messages.
+The `ChunkRenderer` component maps each `type` to a dedicated React component:
 
-**Why it's good:** Only scrolls when new messages arrive or the current message grows (streaming). Metadata updates (like feedback submission or token counts) don't cause unwanted scrolling.
-
----
-
-### 13.5 SessionStorage Persistence without Messages
-
-**Files:** `frontend/src/stores/chat-store.ts`
-
-**Pattern:** Zustand's `persist` middleware saves conversation metadata to sessionStorage, but messages are excluded. Messages lazy-load from the API when a conversation is activated.
-
-**Why it's used:** A conversation with 100 messages and large tool results could be megabytes. SessionStorage has a ~5MB limit.
-
-**Why it's good:** Fast page loads (only metadata to parse). Messages load on-demand with minimal latency. No risk of hitting storage limits.
-
----
-
-## 14. Infrastructure & Deployment
-
-### 14.1 Monorepo with Independent Stacks
-
-**Structure:**
 ```
-/backend/   — Python (FastAPI, uv)
-/frontend/  — TypeScript (Next.js, npm)
-/.github/   — CI/CD (GitHub Actions)
-```
-
-**Why it's used:** Backend and frontend have different languages, package managers, and deployment targets.
-
-**Why it's good:** Single repo for atomic commits across the stack. Independent dependency management (uv vs npm). CI/CD can test and deploy each independently.
-
----
-
-### 14.2 Docker Layer Caching
-
-**Files:** `backend/Dockerfile`
-
-**Pattern:** Dependencies copied and installed before source code:
-```dockerfile
-COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev
-COPY src/ src/
+type="status"           -> StatusChunk
+type="sql_generated"     -> SqlChunk
+type="rows_returned"    -> ToolResultChunk
+type="answer_delta"     -> AnswerChunk
+type="tool_call"        -> ToolCallChunk
+type="error"            -> ErrorChunk
+type="insight"          -> InsightChunk
+...
 ```
 
-**Why it's used:** Source code changes more frequently than dependencies.
+### Tradeoffs
 
-**Why it's good:** Dependency installation is cached unless `pyproject.toml` or `uv.lock` changes. A typical code change rebuilds only the final `COPY` layer — seconds instead of minutes.
+- **Pro**: Strongly typed -- each chunk type has a specific Pydantic model for its `data` field.
+- **Pro**: FE dispatch is a simple switch on `type` -- adding a new chunk type adds one case + one component.
+- **Pro**: Human-readable JSON enables debugging via browser devtools EventStream tab.
+- **Con**: The closed enum means new chunk types require both backend and frontend changes.
+- **Con**: JSON serialization overhead per chunk. Acceptable given typical chunk counts (< 100 per request).
 
 ---
 
-### 14.3 ONNX Model Warmup at Build Time
+## 8. Async Batching Queue
 
-**Files:** `backend/Dockerfile`
+**Docs:** `docs/decisions/D-073-audit-backpressure.md`
 
-**Pattern:** Pre-downloads ChromaDB's ONNX embedding model during Docker build:
-```dockerfile
-RUN uv run python -c "from chromadb.utils...; ef(['warmup'])"
+### Pattern
+
+The audit system uses an async queue with batched writes and back-pressure:
+
+```python
+# audit/queue.py
+_queue: asyncio.Queue[AuditRow] = asyncio.Queue(maxsize=5000)
 ```
 
-**Why it's used:** ChromaDB downloads the embedding model on first use. In Cloud Run, cold starts have tight timeouts.
+### Producer (Middleware)
 
-**Why it's good:** The embedding model is baked into the Docker image. Cold starts don't need network access for model downloads.
+For every non-GET HTTP request, `AuditMiddleware` enqueues an `AuditRow`. The enqueue is non-blocking (fire-and-forget). If the queue is full, the oldest entry is dropped, and a warning is logged (rate-limited to once per 30s).
 
----
+### Consumer (Background Task)
 
-### 14.4 Workload Identity Federation (Keyless GCP Auth)
+A background `asyncio.Task` drains the queue in batches:
 
-**Files:** `.github/workflows/deploy.yml`
+- **Batch size**: 50 rows per DB insert.
+- **Batch interval**: 200ms between flushes.
+- **DB write**: Wrapped in `asyncio.to_thread` so it does not block the event loop.
 
-**Pattern:** GitHub Actions authenticates to GCP using Workload Identity Federation — no service account JSON keys in secrets.
+```python
+async def _drain_loop():
+    while True:
+        batch = []
+        try:
+            batch.append(await asyncio.wait_for(_queue.get(), timeout=0.2))
+            # Collect up to 50 more without blocking
+            while len(batch) < 50:
+                try:
+                    batch.append(_queue.get_nowait())
+                except asyncio.QueueEmpty:
+                    break
+        except asyncio.TimeoutError:
+            pass  # No new entries in 200ms, flush whatever we have
 
-**Why it's used:** JSON key files are long-lived secrets that can be leaked. WIF uses short-lived OIDC tokens.
+        if batch:
+            await asyncio.to_thread(_insert_batch, batch)
+```
 
-**Why it's good:** No secrets to rotate. Token lifetime is minutes, not years. GitHub's OIDC provider is trusted by GCP directly.
+### Shutdown
 
----
+On server shutdown, the queue's `stop()` method:
+1. Cancels the drain loop.
+2. Drains remaining entries from the queue.
+3. Flushes the final batch.
 
-### 14.5 Firebase Hosting with Cloud Run Backend
+### Guarantees
 
-**Files:** `firebase.json`
+- **Best-effort**: No delivery guarantee. Entries can be lost (queue overflow, crash before flush).
+- **Zero latency impact**: Middleware never blocks on audit I/O.
+- **Bounded memory**: Queue size cap prevents unbounded growth.
 
-**Pattern:**
-- Static frontend served from Firebase CDN
-- API requests rewritten to Cloud Run backend
-- SPA fallback: `**` → `/index.html`
-- Immutable cache headers for static assets (1 year)
+### Tradeoffs
 
-**Why it's used:** Firebase CDN provides global edge caching for the frontend. Cloud Run provides auto-scaling for the backend.
-
-**Why it's good:** Frontend loads from the nearest CDN edge (sub-100ms). API requests route directly to Cloud Run (no double-hop). Static assets are aggressively cached — only the HTML needs to be fresh.
-
----
-
-### 14.6 Conditional Static Export
-
-**Files:** `frontend/next.config.ts`
-
-**Pattern:** `NEXT_OUTPUT=export` triggers Next.js static HTML generation. Without it, Next.js runs in dev mode with API rewrites.
-
-**Why it's used:** Production deploys to Firebase Hosting (static files only). Development needs a proxy to the local backend.
-
-**Why it's good:** Same codebase, same build command, different output. No separate "static" and "dynamic" frontends to maintain.
-
----
-
-## 15. Error Handling
-
-### 15.1 Custom Exception Hierarchy
-
-**Files:** `backend/src/insightxpert/exceptions.py`
-
-**Pattern:** Base `InsightXpertError` with subclasses: `DatabaseConnectionError`, `QuerySyntaxError`, `QueryTimeoutError`, `LLMError`. Each has pre-set HTTP status codes and error codes.
-
-**Why it's used:** Different error types need different HTTP responses (400 vs 503 vs 500) and different client-side handling.
-
-**Why it's good:** Structured, type-safe error handling. Global exception handlers in `main.py` map each exception class to the correct HTTP response. Adding a new error type is a new subclass — the handler is already generic.
+- **Pro**: Audit logging adds zero latency to user requests.
+- **Pro**: Batching reduces DB write pressure (1 insert per 50 events).
+- **Con**: Eventual loss in crash scenarios -- audit is not a system of record.
+- **Con**: Oldest-drop on overflow means the most recent events are dropped, which may be more valuable during a burst.
 
 ---
 
-### 15.2 Global Exception Handlers with CORS Awareness
+## 9. Error-as-Flag Pipeline
 
-**Files:** `backend/src/insightxpert/main.py:533-603`
+### Pattern
 
-**Pattern:** Four exception handlers:
-1. `InsightXpertError` → JSON with error code
-2. `RequestValidationError` → field-level errors flattened to string
-3. `HTTPException` → CORS-aware response
-4. Generic `Exception` → 500 with CORS headers manually added
+Pipeline stages do not raise exceptions for recoverable errors. Instead, they write an error sentinel to `ctx.state["error"]`:
 
-**Why it's used:** Starlette's `ServerErrorMiddleware` (outermost) intercepts generic exceptions BEFORE `CORSMiddleware` adds headers. Without manual CORS headers, 500 errors are invisible to the browser (blocked by CORS).
+```python
+# SqlValidatorStage
+try:
+    sqlglot.parse_one(sql, dialect="sqlite")
+except Exception as e:
+    ctx.state["error"] = f"sql_validation_failed: {e}"
+    ctx.emit("error", {"code": "sql_validation_failed", "message": str(e)})
+    return None
+```
 
-**Why it's good:** Every error response is browser-readable, even 500s. No silent CORS failures. Full tracebacks logged server-side, sanitized messages sent to client.
+### Recovery Chain
 
----
+```
+SqlValidatorStage: sqlglot parse fails -> ctx.state["error"] = "..."
+SqlExecutorStage: sees "error" already set -> skips execution
+SqlRefinerStage:   sees "error" -> enters retry loop (up to 2 iterations)
+                   recovers -> clears ctx.state["error"] = None
+                   cannot recover -> leaves error set
+SynthesizerStage:  sees "error" -> skips entirely (returns "")
+```
 
-## 16. Observability
+### Why Not Exceptions
 
-### 16.1 Structured Logging with Module Names
+Exceptions abort the pipeline entirely. The error-as-flag approach allows downstream stages (specifically the refiner) to attempt recovery. If the refiner succeeds, the answer is still delivered. The user never sees a "pipeline failed" error unless all recovery attempts are exhausted.
 
-**Files:** Throughout the backend
+### Tradeoffs
 
-**Pattern:** `logging.getLogger(__name__)` per module. Formatted with ANSI colors, timestamps, and module paths. Noisy libraries (chromadb, httpcore, httpx) quieted to WARNING.
-
-**Why it's used:** A multi-module async application needs clear log attribution.
-
-**Why it's good:** Every log line identifies its source module. Color coding makes manual log reading fast. Quieting noisy libraries keeps the signal-to-noise ratio high.
-
----
-
-### 16.2 Query Timing Instrumentation
-
-**Files:** `backend/src/insightxpert/db/connector.py:100-115`
-
-**Pattern:** `execute()` measures elapsed time and logs SQL, duration, and row count.
-
-**Why it's used:** Slow queries are the #1 performance issue in data analytics apps.
-
-**Why it's good:** Every query is timed automatically — no per-query instrumentation needed. Slow queries stand out in logs immediately. Combined with the token counting wrapper, you get full end-to-end visibility: LLM time + DB time + network time.
+- **Pro**: Graceful degradation -- temporary errors are recoverable.
+- **Pro**: No try/except chains in the pipeline runner.
+- **Con**: Stages must check `ctx.state["error"]` at the beginning of `run()`. Easy to forget.
+- **Con**: Error state is implicit -- you cannot tell from a stage's signature whether it can handle errors.
 
 ---
 
-### 16.3 Client-Side Wall Clock Timing
+## 10. In-Process Caching with TTL
 
-**Files:** `frontend/src/hooks/use-sse-chat.ts:46,211`
+**Docs:** `docs/decisions/D-065-in-process-caches-30s-ttl.md`
 
-**Pattern:** Records `Date.now()` before sending, calculates `wallTimeMs = Date.now() - sendTime` after stream completes.
+### Pattern
 
-**Why it's used:** Server-side `generation_time_ms` excludes network latency and persistence time. The client's wall clock is the true user-perceived latency.
+Multiple subsystems use in-process dict caches with short TTLs:
 
-**Why it's good:** Comparing `wallTimeMs` vs `generation_time_ms` instantly reveals if latency is in the server, the network, or persistence. This is how the 37s vs 17s latency gap was diagnosed and fixed.
+| Cache | TTL | Purpose |
+|---|---|---|
+| User auth cache | 30s | Avoid DB lookup on every request |
+| Profile cache | Process lifetime + LRU | Avoid repeated profiling |
+| Admin overview cache | 30s | Avoid aggregate queries on admin page load |
+| Settings singleton | Process lifetime | Read once from env |
+
+### Profile Cache (Singleflight)
+
+The profiling cache uses per-key `asyncio.Lock` to prevent concurrent profiling of the same database:
+
+```python
+class ProfileCache:
+    _cache: dict[str, tuple[DatabaseProfile, float]]  # (profile, timestamp)
+    _locks: dict[str, asyncio.Lock]                    # per-key lock
+
+    async def aget(self, db_id: str) -> DatabaseProfile | None:
+        if db_id not in self._locks:
+            self._locks[db_id] = asyncio.Lock()
+
+        async with self._locks[db_id]:
+            # Check again inside lock (may have been populated by another waiter)
+            if db_id in self._cache:
+                return self._cache[db_id]
+
+            # Load from DB, populate cache
+            ...
+```
+
+### Why 30s TTL
+
+Short enough that config changes propagate quickly, long enough to eliminate 99%+ of redundant DB reads for hot paths (auth, admin overview).
+
+### Tradeoffs
+
+- **Pro**: Drastically reduces DB load for read-heavy paths.
+- **Pro**: No external cache dependency (Redis, Memcached).
+- **Con**: Stale reads for up to TTL duration.
+- **Con**: Lost on instance recycle (acceptable for Cloud Run with min-instances=1).
+- **Con**: No cross-instance invalidation -- config changes take up to TTL on other instances.
 
 ---
 
-## Summary: Pattern Categories
+## 11. Preflight Parallelism
 
-| Category | Count | Key Patterns |
-|----------|-------|--------------|
-| **Async Architecture** | 4 | Lifespan context manager, `asyncio.to_thread`, fire-and-forget, lazy init |
-| **Database** | 7 | Adapter wrapper, dialect pooling, WAL pragmas, bidirectional sync, idempotent migrations, delete tracking, read-only mode |
-| **Auth & Security** | 5 | JWT cookies, bcrypt, DI auth, domain admin detection, scope-based access |
-| **LLM Integration** | 4 | Protocol abstraction, factory with lazy imports, format translation, token counting wrapper |
-| **Agent System** | 5 | Tool registry, tool context, shared loop, multi-phase orchestrator, chunk interception |
-| **API & Streaming** | 5 | SSE, fire-and-forget persist, feature layering, SQL validation, payload truncation |
-| **RAG** | 3 | Content-addressable dedup, multi-collection, fallback training |
-| **Conversations** | 3 | Dual-store, LRU+TTL cache, IST conversion |
-| **Automations** | 3 | Cron scheduler, chain execution, dual storage |
-| **Frontend State** | 5 | Zustand persist, optimistic updates, fire-and-forget, derived selectors, topological sort |
-| **Frontend Components** | 4 | Chunk dispatch, responsive layout, stable callbacks, store subscriptions |
-| **Frontend Performance** | 5 | React.memo, lazy charts, microtask batching, smart scroll deps, storage without messages |
-| **Infrastructure** | 6 | Monorepo, Docker caching, ONNX warmup, WIF auth, Firebase+Cloud Run, conditional export |
-| **Error Handling** | 2 | Exception hierarchy, CORS-aware global handlers |
-| **Observability** | 3 | Structured logging, query timing, client wall clock |
-| **Total** | **64** | |
+### Pattern
+
+Before the pipeline runs, three independent operations execute concurrently via `asyncio.TaskGroup`:
+
+```python
+async def _preflight_concurrent(...):
+    async with asyncio.TaskGroup() as tg:
+        tg.create_task(prefetch_profile(ctx, db_id))
+        tg.create_task(classify_mode(ctx, llm, question))
+        tg.create_task(prefetch_few_shot_example(ctx, llm, question, db_id))
+```
+
+### Operations
+
+| Operation | I/O Type | Purpose |
+|---|---|---|
+| Profile prefetch | DB read | Load cached `DatabaseProfile` (or None) |
+| Mode classification | LLM call | Classify as "basic" or "agentic" (only when `agent_mode="auto"`) |
+| Few-shot retrieval | Embedding + vector search | Find similar BIRD-train QA pair |
+
+### Isolation
+
+Each task has its own try/except -- failure in one never cancels the others. Profile prefetch fails -> returns None (ProfilerStage handles cold-cache). Mode classification fails -> defaults to "agentic" (bias toward correctness). Few-shot fails -> returns None (prompt renders without {few_shot_example} block).
+
+### Tradeoffs
+
+- **Pro**: Cuts steady-state latency by up to 2 sequential round-trips.
+- **Pro**: Graceful degradation on any single failure.
+- **Con**: TaskGroup requires Python 3.11+. Any child failure cancels all siblings by default -- requires individual try/except for isolation.
+
+---
+
+## 12. Fire-and-Forget Persistence
+
+### Pattern
+
+After the SSE stream sends `[DONE]`, persistence runs as a background task:
+
+```python
+# In route handler, after emitter.stream() completes
+asyncio.ensure_future(
+    asyncio.to_thread(_record_conversation_snapshot, user_id, conversation_id, messages, chunks)
+)
+asyncio.ensure_future(
+    asyncio.to_thread(_record_turn, user_id, conversation_id, db_id, question, sql, metrics)
+)
+```
+
+### Why
+
+Persisting large responses (with chunk blobs containing full result rows) to Postgres can take seconds. Without fire-and-forget, the client would wait for persistence to complete before seeing `[DONE]` -- a significant latency gap the user perceives.
+
+### Guarantees
+
+- **Best-effort**: If persistence fails (e.g., DB connection lost), the conversation is still in the in-memory store. The next request can hydrate from memory.
+- **Logged**: Persistence failures are logged at warning level with context.
+- **Non-blocking**: The route handler returns `EventSourceResponse` immediately after the first chunk.
+
+### Tradeoffs
+
+- **Pro**: User-perceived latency matches LLM generation time, not LLM + persistence time.
+- **Pro**: Persistence failures do not degrade the chat experience.
+- **Con**: Possible data loss if the instance recycles between `[DONE]` and persistence completing.
+- **Con**: No mechanism to notify the client if persistence fails -- the conversation just won't appear in history after a reload.
+
+---
+
+## Summary
+
+| Pattern | What It Solves | Key Files |
+|---|---|---|
+| Stage Protocol | Swappable, composable pipeline stages | `pipeline/profiler_stage.py`, `pipeline/linker_stage.py`, etc. |
+| DialectAdapter | Multi-dialect SQL without call-site churn | `pipeline/dialects/sqlite.py`, `pipeline/dialects/postgres.py` |
+| Repository/Service Split | Separates data access from business logic | `users/table.py`, `users/repository.py`, `users/service.py` |
+| LLM Factory | Provider-agnostic LLM access | `llm/gemini.py`, `llm/deepseek.py`, `llm/factory.py` |
+| Protocol-Based Adapters | Structural subtyping over inheritance | `storage/`, `llm/`, `pipeline/dialects/` |
+| Two-Engine Pool | Isolates request-serving from background work | `db/engine.py` |
+| SSE Chunk Taxonomy | Typed streaming events for FE dispatch | `sse/chunks.py`, `sse/emitter.py` |
+| Async Batching Queue | Zero-latency audit logging | `audit/queue.py`, `audit/middleware.py` |
+| Error-as-Flag Pipeline | Recoverable pipeline errors | `pipeline/refiner_stage.py` |
+| In-Process Caching | Eliminates redundant DB reads | `profiling/cache.py`, `auth/current_user.py` |
+| Preflight Parallelism | Concurrent pre-pipeline operations | `routes/chat.py` (`_preflight_concurrent`) |
+| Fire-and-Forget Persistence | Decouples user latency from DB writes | `routes/chat.py` (post-SSE persistence) |
+
+For the complete set of architecture decisions with rationale and tradeoffs, see `docs/decisions/` (55+ records).

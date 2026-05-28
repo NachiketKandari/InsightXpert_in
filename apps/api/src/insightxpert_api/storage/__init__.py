@@ -20,6 +20,9 @@ class ObjectStore(Protocol):
     def delete(self, key: str) -> None: ...
 
 
+# DECISION(D-043): GCS for object storage in prod, local filesystem fallback
+# when GCS_BUCKET env var is empty (dev mode). Both backends satisfy the
+# ObjectStore protocol — callers are backend-agnostic.
 def build_store(settings: "Settings") -> ObjectStore:
     """Factory: return GCS if a bucket is configured, else local-fs fallback."""
     if settings.gcs_bucket:

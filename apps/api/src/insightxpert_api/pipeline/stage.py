@@ -1,3 +1,6 @@
+# DECISION(D-004): Stage Protocol for swappable pipeline — structural Protocol (PEP 544)
+# defining Stage.input/output/name/run. No base class inheritance needed; vendored
+# pipeline classes satisfy the contract without modification.
 """Stage Protocol and shared PipelineContext.
 
 A ``Stage`` is any object with a ``name`` and an async ``run(ctx, input) -> output``. The

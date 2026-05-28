@@ -16,6 +16,7 @@ from insightxpert_api.pipeline.stage import PipelineContext
 from insightxpert_api.sse.chunks import ChunkType, SQLGeneratedPayload, StatusPayload
 
 
+# DECISION(D-084): Per-test SQLite isolation — DATABASE_URL override prevents .env.local leakage to production
 @pytest.fixture(autouse=True)
 def _env(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     """Populate required env for every test."""
@@ -28,6 +29,8 @@ def _env(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     # Supabase Postgres, which tests must never touch. `fresh_db` and friends
     # may override this further; this is just the safe floor.
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path}/test.db")
+    monkeypatch.setenv("DATABASE_DIRECT_URL", "")  # force env.py fallback to DATABASE_URL
+    monkeypatch.setenv("AUTH_RATE_LIMIT_ENABLED", "false")  # disabled in tests — avoid cross-test 429
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()

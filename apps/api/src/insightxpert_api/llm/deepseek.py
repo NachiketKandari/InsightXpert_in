@@ -38,6 +38,7 @@ def _llm_semaphore() -> asyncio.Semaphore:
     return _LLM_SEMAPHORE
 
 
+# TEST-ONLY
 def _reset_llm_semaphore(n: int) -> None:
     global _LLM_SEMAPHORE
     _LLM_SEMAPHORE = asyncio.Semaphore(max(1, int(n)))

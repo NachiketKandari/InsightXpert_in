@@ -1,4 +1,8 @@
 import { defineConfig, devices } from "@playwright/test";
+import { loadEnvConfig } from "@next/env";
+
+// Load environment variables like Next.js does
+loadEnvConfig(process.cwd());
 
 export default defineConfig({
   testDir: "./e2e",

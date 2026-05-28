@@ -1,10 +1,11 @@
 "use client";
 
-import { useRef, useState, useCallback, useEffect, type KeyboardEvent } from "react";
+import { useRef, useState, useCallback, useEffect, useMemo, type KeyboardEvent } from "react";
 import { Textarea } from "@/components/ui/textarea";
 import { InputToolbar } from "./input-toolbar";
 import { useChatStore } from "@/stores/chat-store";
 import { useVoiceInput } from "@/hooks/use-voice-input";
+import { useDatabases } from "@/hooks/use-databases";
 
 interface MessageInputProps {
   onSend: (message: string) => void;
@@ -16,6 +17,13 @@ export function MessageInput({ onSend, onStop, isStreaming }: MessageInputProps)
   const [value, setValue] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { voiceState, voiceError, toggleVoice, clearVoiceText } = useVoiceInput(setValue);
+  const selectedDbId = useChatStore((s) => s.selectedDbId);
+  const { data: databases = [] } = useDatabases();
+
+  const selectedDbName = useMemo(() => {
+    if (!selectedDbId) return null;
+    return selectedDbId.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  }, [selectedDbId]);
 
   // Subscribe to pendingInput changes outside the render cycle to avoid
   // cascading setState-in-effect warnings.
@@ -64,7 +72,9 @@ export function MessageInput({ onSend, onStop, isStreaming }: MessageInputProps)
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Ask a question about your data…"
+          placeholder={selectedDbName
+            ? `Ask anything about ${selectedDbName}...`
+            : "Ask a question about your data..."}
           className="min-h-[36px] max-h-[140px] flex-1 resize-none border-0 bg-transparent px-1 py-1.5 text-sm shadow-none focus-visible:ring-0"
           rows={1}
         />

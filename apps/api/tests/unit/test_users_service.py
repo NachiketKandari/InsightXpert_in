@@ -99,3 +99,37 @@ def test_touch_last_seen_updates_column(fresh_db):
     service.touch_last_seen(invited.user.id)
     fresh = repository.get_by_id(invited.user.id)
     assert fresh is not None and fresh.last_seen_at is not None
+
+
+# --- register -----------------------------------------------------------
+
+
+def test_register_creates_active_user_without_must_change_password(fresh_db):
+    user = service.register("newuser@example.com", "securepassword")
+    assert user.email == "newuser@example.com"
+    assert user.role == "user"
+    assert user.is_active is True
+    assert user.must_change_password is False
+
+
+def test_register_duplicate_email_raises(fresh_db):
+    service.register("dup@example.com", "securepassword")
+    with pytest.raises(service.EmailAlreadyExistsError):
+        service.register("DUP@example.com", "anotherpassword")
+
+
+def test_register_short_password_raises(fresh_db):
+    with pytest.raises(service.WeakPasswordError, match="at least 8"):
+        service.register("ok@example.com", "short")
+
+
+def test_register_and_authenticate(fresh_db):
+    service.register("authme@example.com", "mypassword123")
+    user = service.authenticate("authme@example.com", "mypassword123")
+    assert user is not None
+    assert user.email == "authme@example.com"
+
+
+def test_register_and_authenticate_wrong_password(fresh_db):
+    service.register("authme2@example.com", "correctpass")
+    assert service.authenticate("authme2@example.com", "wrongpass") is None

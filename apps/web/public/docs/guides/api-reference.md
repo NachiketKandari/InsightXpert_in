@@ -1,82 +1,44 @@
-# InsightXpert REST API Reference
+# InsightXpert.ai REST API Reference
 
-**Dev base URL:** `http://localhost:8000`
-**Prod base URL:** `https://insightxpert-ai.web.app` (Firebase Hosting -> Cloud Run via rewrite)
+**Base URL:** `http://localhost:8080` (dev) or your Cloud Run service URL (prod).
+All endpoints are prefixed with `/api/v1/` unless explicitly noted otherwise.
 
 ## Authentication
 
-All endpoints except `GET /api/health`, `POST /api/auth/login`, and `POST /api/auth/register` require authentication.
+InsightXpert.ai uses **itsdangerous HMAC-signed session cookies**, not JWT.
 
-**Dual-path authentication:** The server supports two authentication methods:
-
-| Method | Where used | How it works |
+| Mechanism | Where used | How it works |
 |---|---|---|
-| `__session` HttpOnly cookie | Regular API calls (login, conversations, admin, etc.) via CDN proxy | Set automatically on login/register. First-party cookie because requests go through Firebase Hosting on the same origin. |
-| `Authorization: Bearer <token>` header | SSE streaming (`POST /api/chat`) and WebSocket (`/api/transcribe`) via direct Cloud Run | Uses the `token` field returned in the login/register response body. Required because SSE goes directly to Cloud Run (to avoid buffering), making cookies third-party. |
+| `ix_session` HttpOnly cookie | All regular API calls | Set on login. Signed via `itsdangerous.URLSafeTimedSerializer` with a server-side `SESSION_SECRET`. HttpOnly, SameSite=Lax, Secure in non-local environments. |
+| `Authorization: Bearer <token>` header | SSE streaming (`POST /api/v1/chat`) and WebSocket (`/api/transcribe`) | Fallback for clients that cannot send cookies (e.g., SSE calls bypassing the CDN proxy). The token value is the same signed session string. |
 
-The `get_current_user` dependency checks the `__session` cookie first, then falls back to the `Authorization: Bearer` header.
+The `get_current_user` dependency checks the `ix_session` cookie first, then falls back to the `Authorization: Bearer` header. Both are validated by the same `SessionSigner.verify()` method.
 
-Cross-site requests (prod frontend to Cloud Run) use `SameSite=None; Secure`. Same-site requests (dev) use `SameSite=Lax`.
+**Session details:**
+- TTL: 30 days sliding (`SESSION_TTL_SECONDS`, default 2592000)
+- Cookie name: `ix_session` (configurable via `SESSION_COOKIE_NAME`)
+- Invalidation: set `sessions_valid_after` on the user row to invalidate all prior sessions
+- Password hashing: Argon2id (via `argon2-cffi`)
 
-**401 Unauthorized** is returned when neither a valid cookie nor a valid Bearer token is present, or when the token is expired.
+### Error Response Shape
+
+All error responses share a consistent JSON body:
+
+```json
+{"detail": "Human-readable error message"}
+```
+
+Status codes: 400 (bad request), 401 (unauthorized), 403 (forbidden), 404 (not found), 409 (conflict), 422 (validation error), 429 (rate limit), 500/502/503 (server errors).
 
 ---
 
-## Error Response Format
+## 1. Auth Endpoints
 
-All error responses share a consistent JSON body regardless of which exception handler fires:
+Prefix: `/api/v1/auth`
 
-```json
-{
-  "error": "HTTP_ERROR",
-  "detail": "Human-readable message",
-  "status_code": 404
-}
-```
+### POST `/auth/login`
 
-Common `error` values: `HTTP_ERROR`, `VALIDATION_ERROR`, `INTERNAL_ERROR`, `DATABASE_ERROR`, `QUERY_SYNTAX_ERROR`, `QUERY_TIMEOUT_ERROR`.
-
----
-
-## Auth Endpoints
-
-**Prefix:** `/api/auth`
-
-### POST /api/auth/register
-
-Register a new account. Automatically logs the user in by setting the session cookie and returning a JWT token in the response body.
-
-**Request body:**
-```json
-{
-  "email": "user@example.com",
-  "password": "mysecretpassword"
-}
-```
-
-Password must be at least 8 characters.
-
-**Response** `201 Created`:
-```json
-{
-  "id": "550e8400-e29b-41d4-a716-446655440000",
-  "email": "user@example.com",
-  "is_admin": false,
-  "token": "eyJhbGciOiJIUzI1NiIs..."
-}
-```
-
-The `token` field is a JWT that can be used as a Bearer token for SSE and WebSocket endpoints.
-
-**Errors:**
-- `409 Conflict` -- email already registered
-- `422 Unprocessable Entity` -- password under 8 characters
-
----
-
-### POST /api/auth/login
-
-Authenticate an existing user. Sets the `__session` cookie on success and returns a JWT token in the response body.
+Authenticate an existing user. Sets the `ix_session` cookie on success.
 
 **Request body:**
 ```json
@@ -91,121 +53,171 @@ Authenticate an existing user. Sets the `__session` cookie on success and return
 {
   "id": "550e8400-e29b-41d4-a716-446655440000",
   "email": "user@example.com",
-  "is_admin": false,
-  "token": "eyJhbGciOiJIUzI1NiIs..."
+  "role": "user",
+  "must_change_password": false
 }
 ```
+
+Sets `Set-Cookie: ix_session=<signed-token>; HttpOnly; SameSite=Lax; Path=/; Max-Age=2592000`.
 
 **Errors:**
 - `401 Unauthorized` -- invalid email or password
 
----
-
-### GET /api/auth/me
-
-Return the currently authenticated user. The `token` field echoes back the token from the incoming request (cookie or Bearer header) rather than generating a new one.
-
-**Response** `200 OK`:
-```json
-{
-  "id": "550e8400-e29b-41d4-a716-446655440000",
-  "email": "user@example.com",
-  "is_admin": false,
-  "token": "eyJhbGciOiJIUzI1NiIs..."
-}
+```bash
+curl -X POST http://localhost:8080/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@insightxpert.ai","password":"admin123"}' \
+  -c cookies.txt
 ```
 
 ---
 
-### POST /api/auth/logout
+### POST `/auth/logout`
 
-Invalidate the session by deleting the `__session` cookie.
+Invalidate the session by clearing the `ix_session` cookie.
 
 **Response** `200 OK`:
 ```json
 {"status": "ok"}
 ```
 
----
-
-## Chat Endpoints
-
-### POST /api/chat
-
-Stream an AI response to a question via Server-Sent Events (SSE). The response is a stream of `ChatChunk` JSON objects, each on a `data:` SSE line, terminated by a `data: [DONE]` event.
-
-**Auth:** Supports both cookie and `Authorization: Bearer <token>` header. In production, this endpoint is called directly against Cloud Run (bypassing CDN proxy) to avoid SSE buffering, so Bearer token auth is the primary method.
-
-**Request body:**
-```json
-{
-  "message": "What are the top 5 merchant categories by transaction volume?",
-  "conversation_id": null,
-  "agent_mode": "agentic",
-  "skip_clarification": false
-}
+```bash
+curl -X POST http://localhost:8080/api/v1/auth/logout -b cookies.txt
 ```
-
-| Field | Type | Description |
-|---|---|---|
-| `message` | `string` | The user's question |
-| `conversation_id` | `string \| null` | Continue an existing conversation, or `null` to start a new one |
-| `agent_mode` | `"basic" \| "agentic" \| "deep"` | Analysis depth. Default: `"agentic"` |
-| `skip_clarification` | `bool` | If `true`, bypass the clarification step even when enabled. Default: `false` |
-
-Legacy mode aliases: `"auto"` -> `"agentic"`, `"statistician"` -> `"agentic"`, `"advanced"` -> `"agentic"`, `"analyst"` -> `"basic"`.
-
-**Response:** `text/event-stream`
-
-Each event is a JSON-serialized `ChatChunk` object. See the [ChatChunk Schema](#chatchunk-schema) section for all type definitions.
-
-Example SSE stream:
-```
-data: {"type":"status","content":"Analysing question...","data":{"agent":"orchestrator","phase":"start"},"conversation_id":"abc123","timestamp":1700000000.0}
-
-data: {"type":"sql","sql":"SELECT merchant_category, SUM(amount) AS total FROM transactions GROUP BY merchant_category ORDER BY total DESC LIMIT 5","conversation_id":"abc123","timestamp":1700000001.0}
-
-data: {"type":"answer","content":"The top 5 merchant categories by total transaction value are...","conversation_id":"abc123","timestamp":1700000002.0}
-
-data: {"type":"metrics","data":{"input_tokens":1234,"output_tokens":456,"generation_time_ms":2341},"conversation_id":"abc123","timestamp":1700000002.0}
-
-data: [DONE]
-```
-
-The `conversation_id` in each chunk is the ID to use for subsequent turns. If you passed `null` for `conversation_id`, use the ID from the first chunk for follow-up messages.
 
 ---
 
-### POST /api/chat/poll
+### GET `/auth/me`
 
-Non-streaming version of `/api/chat`. Runs the full pipeline to completion and returns all chunks at once.
-
-**Request body:** Same as `POST /api/chat`.
+Return the currently authenticated user.
 
 **Response** `200 OK`:
 ```json
 {
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "email": "user@example.com",
+  "role": "user",
+  "is_active": true,
+  "must_change_password": false
+}
+```
+
+**Errors:**
+- `401 Unauthorized` -- no valid session
+
+```bash
+curl http://localhost:8080/api/v1/auth/me -b cookies.txt
+```
+
+---
+
+### POST `/auth/change-password`
+
+Change the authenticated user's password. Requires the current password.
+
+**Request body:**
+```json
+{
+  "current_password": "oldpassword",
+  "new_password": "newsecurepassword"
+}
+```
+
+**Response** `200 OK`:
+```json
+{"status": "ok"}
+```
+
+**Errors:**
+- `401 Unauthorized` -- current password is incorrect
+
+---
+
+## 2. Chat Endpoints
+
+### POST `/chat` -- Streaming SSE
+
+Stream an AI-generated response to a natural-language question via Server-Sent Events. This is the primary chat endpoint.
+
+**Auth:** Session cookie or Bearer header.
+
+**Request body (`ChatRequest`):**
+```json
+{
+  "message": "What are the top 5 merchant categories by transaction volume?",
+  "db_id": "my_database",
+  "conversation_id": null,
+  "agent_mode": "auto",
+  "pipeline_mode": null
+}
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `message` | `string` | Yes | The user's question (1--4096 chars) |
+| `db_id` | `string` | Yes | Database identifier (1--128 chars) |
+| `conversation_id` | `string` | No | Continue an existing conversation, or `null` to start a new one |
+| `agent_mode` | `"basic"` \| `"agentic"` \| `"auto"` \| `null` | No | Analysis mode. `"auto"` pre-classifies the question. Default: `"auto"` |
+| `pipeline_mode` | `"linked"` \| `"full_schema"` | No | Schema linking mode. `"full_schema"` is admin-only. Default: per-DB setting or `"linked"` |
+
+**Response:** `text/event-stream`
+
+**SSE Chunk envelope:**
+```json
+{"type": "<ChunkType>", "data": {...}, "conversation_id": "...", "timestamp": 1234567890.0}
+```
+
+**Typical chunk sequence for a successful pipeline turn:**
+```
+auto_routed (optional) -> few_shot_retrieved (optional) -> status -> profile_loaded ->
+schema_linking_started -> candidate_sqls_generated -> literals_extracted -> semantic_matches ->
+join_paths_added -> linked_schema_final -> sql_generated -> sql_executing -> rows_returned ->
+answer_delta (multiple) -> answer_generated -> metrics -> [DONE]
+```
+
+**Error behavior:** If any error chunk is emitted, `answer` is skipped and the stream terminates with `[DONE]`.
+
+```bash
+curl -X POST http://localhost:8080/api/v1/chat \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <token>" \
+  -d '{"message":"How many tables are there?","db_id":"my_db"}' \
+  --no-buffer
+```
+
+---
+
+### POST `/chat/poll` -- Batch Drain
+
+Non-streaming version of `/api/v1/chat`. Runs the full pipeline to completion and returns all chunks at once. Schedules `record_turn` + `record_conversation_snapshot` as background tasks.
+
+**Request body:** Same as `POST /api/v1/chat`.
+
+**Response** `200 OK`:
+```json
+{
+  "conversation_id": "abc123",
   "chunks": [
-    {"type": "status", "content": "Analysing question...", "conversation_id": "abc123", "timestamp": 1700000000.0},
-    {"type": "sql", "sql": "SELECT ...", "conversation_id": "abc123", "timestamp": 1700000001.0},
-    {"type": "answer", "content": "The top 5...", "conversation_id": "abc123", "timestamp": 1700000002.0}
+    {"type": "status", "data": {...}, "conversation_id": "abc123", "timestamp": 1700000000.0},
+    {"type": "sql_generated", "data": {...}, "conversation_id": "abc123", "timestamp": 1700000001.0},
+    {"type": "answer_generated", "data": {...}, "conversation_id": "abc123", "timestamp": 1700000002.0}
   ]
 }
 ```
 
 ---
 
-### POST /api/chat/answer
+### POST `/chat/answer` -- Final Answer Only
 
-Run the full pipeline and return only the final answer, conversation ID, and any SQL queries that were executed. Useful for programmatic integrations that do not need the intermediate trace.
+Run the full pipeline and return only the final answer, conversation ID, and SQL queries. Returns 500 if any error chunk was emitted during processing.
 
-**Request body:** Same as `POST /api/chat`.
+**Request body:** Same as `POST /api/v1/chat`.
 
 **Response** `200 OK`:
 ```json
 {
-  "answer": "The top 5 merchant categories by total transaction value are...",
   "conversation_id": "abc123",
+  "answer": "The top 5 merchant categories by total transaction value are...",
   "sql": [
     "SELECT merchant_category, SUM(amount) AS total FROM transactions GROUP BY merchant_category ORDER BY total DESC LIMIT 5"
   ]
@@ -214,70 +226,85 @@ Run the full pipeline and return only the final answer, conversation ID, and any
 
 ---
 
-## Conversation Endpoints
+### POST `/chat/route` -- Mode Pre-Classifier
 
-### GET /api/conversations
+Classify a question as `"basic"` or `"agentic"` without running the full pipeline. Used by the frontend to show the routing decision before initiating chat.
 
-List all conversations for the current user, ordered by most recently updated.
+**Request body:**
+```json
+{
+  "question": "What is the monthly revenue trend over the last year?",
+  "db_id": "my_db"
+}
+```
 
-`Cache-Control: private, max-age=5`
+**Response** `200 OK`:
+```json
+{
+  "mode": "agentic",
+  "reason": "Requires multi-step analysis across time periods"
+}
+```
+
+Uses `gemini-2.5-flash` with temperature=0.0, max 128 tokens, strict JSON mode. The server re-classifies as defense-in-depth when the actual `/chat` call is made.
+
+---
+
+## 3. Conversation Endpoints
+
+Prefix: `/api/v1/conversations`
+
+### GET `/conversations`
+
+List all conversations for the current user, ordered by `updated_at DESC, created_at DESC`.
 
 **Response** `200 OK`:
 ```json
 [
   {
     "id": "abc123",
+    "conversation_id": "abc123",
     "title": "Top merchant categories by volume",
-    "is_starred": false,
-    "created_at": "2024-01-15T10:30:00",
-    "updated_at": "2024-01-15T10:32:00",
-    "last_message": "The top 5 merchant categories..."
+    "starred": false,
+    "db_id": "my_db",
+    "created_at": "2026-05-20T10:30:00",
+    "updated_at": "2026-05-20T10:32:00",
+    "messages": []
   }
 ]
 ```
 
+```bash
+curl http://localhost:8080/api/v1/conversations -b cookies.txt
+```
+
 ---
 
-### GET /api/conversations/search?q={keyword}
+### GET `/conversations/search?q={keyword}`
 
-Full-text search across conversation titles and message content. Returns nothing if `q` is shorter than 2 characters.
+Search conversations by title (ILIKE). Returns nothing if `q` is shorter than 2 characters.
 
 **Query parameters:**
 - `q` -- Search keyword (minimum 2 characters)
 
-**Response** `200 OK`:
-```json
-[
-  {
-    "id": "abc123",
-    "title": "Top merchant categories by volume",
-    "updated_at": "2024-01-15T10:32:00",
-    "title_match": true,
-    "matching_messages": [
-      {
-        "role": "user",
-        "snippet": "What are the top merchant categories...",
-        "created_at": "2024-01-15T10:30:00"
-      }
-    ]
-  }
-]
-```
+**Response** `200 OK` -- array of conversation objects matching the search.
 
 ---
 
-### GET /api/conversations/{id}
+### GET `/conversations/{conversation_id}`
 
-Get a conversation with all its messages. `tool_result` rows in historical chunks are truncated to 50 rows to reduce payload size; the original row count is preserved in `original_row_count`.
+Get full conversation detail with all messages and flat chunks.
 
 **Response** `200 OK`:
 ```json
 {
   "id": "abc123",
+  "conversation_id": "abc123",
   "title": "Top merchant categories by volume",
-  "is_starred": false,
-  "created_at": "2024-01-15T10:30:00",
-  "updated_at": "2024-01-15T10:32:00",
+  "starred": false,
+  "db_id": "my_db",
+  "created_at": "2026-05-20T10:30:00",
+  "updated_at": "2026-05-20T10:32:00",
   "messages": [
     {
       "id": "msg001",
@@ -286,99 +313,332 @@ Get a conversation with all its messages. `tool_result` rows in historical chunk
       "chunks": null,
       "feedback": null,
       "feedback_comment": null,
-      "input_tokens": null,
-      "output_tokens": null,
-      "generation_time_ms": null,
-      "created_at": "2024-01-15T10:30:00"
+      "created_at": "2026-05-20T10:30:00"
     },
     {
       "id": "msg002",
       "role": "assistant",
       "content": "The top 5 merchant categories are...",
       "chunks": [
-        {"type": "sql", "sql": "SELECT ...", "conversation_id": "abc123", "timestamp": 1700000001.0},
-        {"type": "answer", "content": "The top 5...", "conversation_id": "abc123", "timestamp": 1700000002.0}
+        {"type": "sql_generated", "data": {...}, "conversation_id": "abc123", "timestamp": 1700000001.0},
+        {"type": "answer_generated", "data": {...}, "conversation_id": "abc123", "timestamp": 1700000002.0}
       ],
       "feedback": null,
       "feedback_comment": null,
-      "input_tokens": 1234,
-      "output_tokens": 456,
-      "generation_time_ms": 2341,
-      "created_at": "2024-01-15T10:30:05"
+      "created_at": "2026-05-20T10:30:05"
     }
   ]
 }
 ```
 
-The `feedback` field is a boolean (`true` = thumbs up, `false` = thumbs down, `null` = no feedback).
+`feedback` is `true` (thumbs up), `false` (thumbs down), or `null` (no feedback).
 
 **Errors:**
 - `404 Not Found` -- conversation not found or belongs to another user
 
 ---
 
-### PATCH /api/conversations/{id}
+### PATCH `/conversations/{conversation_id}`
 
-Rename a conversation.
-
-**Request body:**
-```json
-{"title": "New conversation title"}
-```
-
-**Response** `200 OK`:
-```json
-{"status": "ok"}
-```
-
-**Errors:**
-- `404 Not Found`
-
----
-
-### PATCH /api/conversations/{id}/star
-
-Star or unstar a conversation.
+Update conversation metadata.
 
 **Request body:**
 ```json
-{"starred": true}
+{
+  "title": "New conversation title",
+  "starred": true
+}
 ```
 
-**Response** `200 OK`:
-```json
-{"status": "ok", "starred": true}
-```
+**Response** `200 OK` -- updated conversation object.
 
 ---
 
-### DELETE /api/conversations/{id}
+### DELETE `/conversations/{conversation_id}`
 
 Delete a conversation and all its messages.
 
+**Response:** `204 No Content`
+
+**Errors:**
+- `404 Not Found`
+
+```bash
+curl -X DELETE http://localhost:8080/api/v1/conversations/abc123 -b cookies.txt
+```
+
+---
+
+## 4. Database Endpoints
+
+Prefix: `/api/v1/databases`
+
+### GET `/databases`
+
+List all databases visible to the current user.
+
+**Response** `200 OK`:
+```json
+[
+  {
+    "db_id": "my_db",
+    "source": "upload",
+    "has_profile": true,
+    "table_count": 5,
+    "column_count": 32,
+    "row_count": 250000
+  }
+]
+```
+
+```bash
+curl http://localhost:8080/api/v1/databases -b cookies.txt
+```
+
+---
+
+### POST `/databases/upload`
+
+Upload a SQLite database file.
+
+**Request:** `multipart/form-data`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `db_id` | `string` | Yes | Database identifier |
+| `file` | `file` | Yes | SQLite database file |
+
+**Response** `201 Created`:
+```json
+{
+  "db_id": "my_db",
+  "source": "upload"
+}
+```
+
+**Upload guards:**
+- SQLite magic byte validation on the first chunk
+- Size cap enforcement (default 50 MB via `MAX_UPLOAD_MB`, returns 413 on oversize)
+- Collision check (ownership) before reading the body
+- Chunked read for memory safety
+
+**Errors:**
+- `409 Conflict` -- `db_id` already exists and is owned by another user
+- `413 Payload Too Large` -- file exceeds `MAX_UPLOAD_MB`
+- `400 Bad Request` -- not a valid SQLite file
+
+---
+
+### POST `/databases/upload-csv`
+
+Upload a CSV file to create a new database table.
+
+**Request:** `multipart/form-data`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `db_id` | `string` | Yes | Database identifier |
+| `file` | `file` | Yes | CSV file |
+
+**Response** `201 Created`:
+```json
+{
+  "db_id": "my_csv_db",
+  "source": "csv"
+}
+```
+
+CSV processing: pandas type inference (integer/real/text/datetime), sanitized column names, 500-row batch insert.
+
+---
+
+### GET `/databases/{db_id}/schema`
+
+Return the DDL and table list for a database.
+
+**Response** `200 OK`:
+```json
+{
+  "ddl": "CREATE TABLE transactions (\n  transaction_id TEXT PRIMARY KEY,\n  ...\n)",
+  "tables": ["transactions"]
+}
+```
+
+---
+
+### GET `/databases/{db_id}/profile`
+
+Return the profiling results for a database, including optional `sample_questions`.
+
+**Response** `200 OK` -- profile JSON object with column summaries, quirks, join paths, and sample questions.
+
+---
+
+### POST `/databases/{db_id}/profile`
+
+Trigger profiling for a database. Returns SSE stream with profiling progress.
+
+**Request body:**
+```json
+{
+  "with_summaries": true,
+  "with_quirks": true,
+  "with_lsh": true,
+  "with_vectors": true,
+  "confirmed": false
+}
+```
+
+**Response:** `text/event-stream` with profiling progress chunks. If expensive flags are set and `confirmed=false`, emits a single `profile_cost_estimate` chunk and waits for re-submission with `confirmed=true`.
+
+**Rate limiting:** Per-user daily cap of `PROFILE_MAX_PER_USER_PER_DAY` (default 10). Returns 429 when exceeded. Admins are exempt.
+
+---
+
+### POST `/databases/{db_id}/sample-questions/regenerate`
+
+Trigger asynchronous regeneration of sample questions for a database.
+
+**Response** `202 Accepted`:
+```json
+{"status": "regenerating"}
+```
+
+---
+
+### POST `/databases/{db_id}/visibility`
+
+Admin-only. Set database visibility and sharing permissions.
+
+**Request body:**
+```json
+{
+  "visibility": "shared",
+  "shared_with": ["user-id-1", "user-id-2"]
+}
+```
+
 **Response** `200 OK`:
 ```json
 {"status": "ok"}
 ```
 
-**Errors:**
-- `404 Not Found`
+---
+
+## 5. Connections Endpoints (BYO DB)
+
+Prefix: `/api/v1/connections`
+
+Bring-your-own external database support. Credentials are encrypted at rest with Fernet symmetric encryption.
+
+### GET `/connections`
+
+List all connections for the current user. Credential config is not returned.
+
+**Response** `200 OK`:
+```json
+[
+  {
+    "db_id": "my_postgres",
+    "kind": "postgres",
+    "created_at": "2026-05-20T10:00:00"
+  }
+]
+```
 
 ---
 
-## SQL Endpoints
+### POST `/connections`
 
-### POST /api/sql/execute
-
-Execute a read-only SQL query directly against the transactions database.
-
-Write operations are blocked via regex (`INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, `CREATE`, `TRUNCATE`, `REPLACE`, `MERGE`, `GRANT`, `REVOKE`, `ATTACH`, `DETACH`, and `PRAGMA x =`) and SQLite's `PRAGMA query_only = ON`.
-
-Results are capped at the configured `SQL_ROW_LIMIT` (default: 10,000 rows).
+Create a new external database connection.
 
 **Request body:**
 ```json
-{"sql": "SELECT transaction_type, COUNT(*) AS cnt FROM transactions GROUP BY transaction_type"}
+{
+  "db_id": "my_postgres",
+  "kind": "postgres",
+  "config": {
+    "host": "db.example.com",
+    "port": 5432,
+    "database": "analytics",
+    "user": "readonly",
+    "password": "secret"
+  }
+}
+```
+
+`db_id` pattern: `^[a-z0-9][a-z0-9_\-]{0,63}$`.
+
+**Response** `201 Created`:
+```json
+{"db_id": "my_postgres"}
+```
+
+**Security:** Postgres connections enforce `default_transaction_read_only=on` plus session-level `statement_timeout` and a write-blocking regex.
+
+---
+
+### PATCH `/connections/{db_id}`
+
+Update an existing connection's config.
+
+**Response** `200 OK` -- updated connection.
+
+---
+
+### DELETE `/connections/{db_id}`
+
+Remove a connection.
+
+**Response:** `204 No Content`
+
+---
+
+### POST `/connections/test`
+
+Test a connection without saving it. Useful for validating credentials before creating a connection.
+
+**Request body:**
+```json
+{
+  "db_id": "my_postgres",
+  "kind": "postgres",
+  "config": {
+    "host": "db.example.com",
+    "port": 5432,
+    "database": "analytics",
+    "user": "readonly",
+    "password": "secret"
+  }
+}
+```
+
+**Response** `200 OK`:
+```json
+{
+  "ok": true,
+  "tables": ["users", "orders", "products"]
+}
+```
+
+---
+
+## 6. SQL Endpoint
+
+### POST `/sql/execute`
+
+Execute a read-only SQL query directly against a database. Write operations are blocked via regex (`INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, `CREATE`, `TRUNCATE`, `REPLACE`, `MERGE`, `GRANT`, `REVOKE`, `ATTACH`, `DETACH`). Additionally, SQLite databases get `PRAGMA query_only = ON`.
+
+Results are capped at `SQL_ROW_LIMIT` (default: 1000 rows).
+
+Prefix: `/api/v1`
+
+**Request body:**
+```json
+{
+  "db_id": "my_db",
+  "sql": "SELECT transaction_type, COUNT(*) AS cnt FROM transactions GROUP BY transaction_type"
+}
 ```
 
 **Response** `200 OK`:
@@ -395,240 +655,143 @@ Results are capped at the configured `SQL_ROW_LIMIT` (default: 10,000 rows).
 ```
 
 **Errors:**
-- `400 Bad Request` -- empty SQL
-- `403 Forbidden` -- SQL contains a blocked write/admin keyword
-- `400 QUERY_SYNTAX_ERROR` -- SQL syntax error
-- `408 QUERY_TIMEOUT_ERROR` -- query exceeded `SQL_TIMEOUT_SECONDS`
-- `503 DATABASE_CONNECTION_ERROR` -- cannot reach database
-- `500 DATABASE_ERROR` -- other execution error
+- `400 Bad Request` -- empty SQL, forbidden SQL keyword, or general SQL error
+- `408 Request Timeout` -- query exceeded `SQL_TIMEOUT_SECONDS`
+
+```bash
+curl -X POST http://localhost:8080/api/v1/sql/execute \
+  -H "Content-Type: application/json" \
+  -b cookies.txt \
+  -d '{"db_id":"my_db","sql":"SELECT COUNT(*) FROM transactions"}'
+```
 
 ---
 
-### GET /api/sql/export-csv?table={table_name}
+## 7. Insights Endpoints
 
-Stream an entire table as a CSV file download. The table name is validated against the list of known tables to prevent SQL injection.
+Prefix: `/api/v1/insights`
+
+Insights are AI-generated findings synthesized from chat responses, or manually created from assistant messages.
+
+### GET `/insights`
+
+List the current user's insights.
 
 **Query parameters:**
-- `table` -- Table name (default: `transactions`). Must be a known table.
-
-**Response** `200 OK` -- `Content-Type: text/csv`, streaming
-
-The `Content-Disposition` header is `attachment; filename="insightxpert-{table}.csv"`.
-
-**Errors:**
-- `400 Bad Request` -- unknown table name
-
----
-
-## Schema & Training
-
-### GET /api/schema
-
-Return the database DDL and list of tables.
-
-`Cache-Control: private, max-age=3600`
+- `bookmarked` -- If `true`, return only bookmarked insights (default: `false`)
+- `limit` -- Number of insights (1--200, default: 50)
 
 **Response** `200 OK`:
 ```json
 {
-  "ddl": "CREATE TABLE transactions (\n  transaction_id TEXT PRIMARY KEY,\n  ...\n)",
-  "tables": ["transactions"]
-}
-```
-
----
-
-### POST /api/train
-
-Add an item to the RAG vector store. Used to improve SQL generation quality over time.
-
-**Request body:**
-```json
-{
-  "type": "qa_pair",
-  "content": "What is the total transaction amount by city?",
-  "metadata": {
-    "sql": "SELECT city, SUM(amount) FROM transactions GROUP BY city",
-    "sql_valid": true
-  }
-}
-```
-
-| `type` | `content` | `metadata` |
-|---|---|---|
-| `qa_pair` | Natural-language question | `{"sql": "...", "sql_valid": true}` |
-| `ddl` | DDL statement | `{"table_name": "transactions"}` |
-| `documentation` | Free-text business context | `{}` or any key-value pairs |
-
-**Response** `200 OK`:
-```json
-{"status": "ok", "id": "chroma-doc-id"}
-```
-
-**Errors:**
-- `200 OK` with `{"status": "error", "id": ""}` -- unknown `type` value
-
----
-
-### DELETE /api/rag
-
-Delete all RAG embeddings from all four ChromaDB collections: `qa_pairs`, `ddl`, `docs`, and `findings`.
-
-**Response** `200 OK`:
-```json
-{
-  "status": "ok",
-  "deleted": {
-    "qa_pairs": 42,
-    "ddl": 1,
-    "docs": 5,
-    "findings": 0
-  }
-}
-```
-
----
-
-## Config & Model Switching
-
-### GET /api/config
-
-Get the current LLM configuration and the list of available providers and models. Ollama is only advertised if the Ollama server is reachable and has at least one model pulled.
-
-`Cache-Control: private, max-age=60`
-
-**Response** `200 OK`:
-```json
-{
-  "current_provider": "gemini",
-  "current_model": "gemini-2.5-flash",
-  "providers": [
+  "insights": [
     {
-      "provider": "gemini",
-      "models": [
-        "gemini-3-flash-preview",
-        "gemini-3.1-pro-preview",
-        "gemini-2.5-flash",
-        "gemini-2.5-pro",
-        "gemini-2.5-flash-lite",
-        "gemini-2.0-flash",
-        "gemini-2.0-flash-lite"
-      ]
-    },
-    {
-      "provider": "ollama",
-      "models": ["llama3.2", "mistral"]
+      "id": "insight-abc",
+      "title": "Revenue concentration in top 5 merchants",
+      "summary": "The top 5 merchants account for 42% of all transaction volume...",
+      "content": "Full markdown content...",
+      "categories": ["revenue", "concentration"],
+      "bookmarked": true,
+      "user_note": "Important pattern to watch",
+      "created_at": "2026-05-20T10:30:00"
     }
-  ]
+  ],
+  "total": 12
 }
 ```
 
-`vertex_ai` appears in `providers` only when `GCP_PROJECT_ID` is configured.
-
 ---
 
-### POST /api/config/switch
+### GET `/insights/all`
 
-Switch the active LLM provider and model at runtime. The change takes effect immediately for all subsequent chat requests. If switching to Ollama, the model is validated against the Ollama server before the switch occurs. If `create_llm` fails, settings are rolled back to the previous values.
-
-**Request body:**
-```json
-{"provider": "gemini", "model": "gemini-2.5-pro"}
-```
-
-Valid `provider` values: `"gemini"`, `"ollama"`, `"vertex_ai"`.
-
-**Response** `200 OK`:
-```json
-{"provider": "gemini", "model": "gemini-2.5-pro"}
-```
-
-**Errors:**
-- `503 Service Unavailable` -- Ollama unreachable or model not found
-- `400 Bad Request` -- provider validation failed
-
----
-
-## Ollama Model Management
-
-### POST /api/ollama/pull
-
-Download an Ollama model. Streams download progress via SSE.
-
-**Request body:**
-```json
-{"model": "llama3.2"}
-```
-
-**Response:** `text/event-stream`
-
-Progress events:
-```
-data: {"status": "pulling manifest"}
-
-data: {"status": "downloading", "completed": 524288000, "total": 2048000000, "percent": 25.6, "digest": "sha256:abc..."}
-
-data: {"status": "success", "model": "llama3.2"}
-
-data: [DONE]
-```
-
-Error event:
-```
-data: {"status": "error", "detail": "model not found"}
-
-data: [DONE]
-```
-
----
-
-### GET /api/ollama/models
-
-List all locally available Ollama models.
+Admin-only cross-user insights feed.
 
 **Response** `200 OK`:
 ```json
 {
-  "models": [
-    {
-      "model": "llama3.2",
-      "size_mb": 2048.1,
-      "parameter_size": "3B",
-      "quantization": "Q4_0",
-      "family": "llama"
-    }
-  ]
+  "insights": [...]
 }
 ```
 
-**Errors:**
-- `503 Service Unavailable` -- Ollama is not reachable
-
 ---
 
-### DELETE /api/ollama/models/{model_name}
+### GET `/insights/count`
 
-Delete a locally downloaded Ollama model. The `model_name` path segment supports slashes (e.g., `llama3.2:latest`).
+Return the current user's total insight count (for badge display).
 
 **Response** `200 OK`:
 ```json
-{"status": "ok", "model": "llama3.2"}
+{"count": 12}
 ```
-
-**Errors:**
-- `400 Bad Request` -- model not found or delete failed
 
 ---
 
-## Feedback
+### POST `/insights`
 
-### POST /api/feedback
-
-Submit or update thumbs-up / thumbs-down feedback on an assistant message.
+Create a manual insight from an assistant message.
 
 **Request body:**
 ```json
 {
+  "message_id": "msg002",
+  "user_note": "Important pattern to watch"
+}
+```
+
+**Response** `200 OK`:
+```json
+{"status": "ok", "id": "insight-abc"}
+```
+
+**Errors:**
+- `404 Not Found` -- message not found
+- `403 Forbidden` -- message belongs to another user
+
+---
+
+### PATCH `/insights/{insight_id}/bookmark`
+
+Toggle bookmark on an insight.
+
+**Request body:**
+```json
+{"bookmarked": true}
+```
+
+**Response** `200 OK`:
+```json
+{"status": "ok"}
+```
+
+**Errors:**
+- `404 Not Found`
+
+---
+
+### DELETE `/insights/{insight_id}`
+
+Delete an insight.
+
+**Response** `200 OK`:
+```json
+{"status": "ok"}
+```
+
+**Errors:**
+- `404 Not Found`
+
+---
+
+## 8. Feedback Endpoint
+
+### POST `/api/v1/feedback`
+
+Submit or update thumbs-up / thumbs-down feedback on an assistant message. Best-effort: updates the most recent `query_metrics` row for the conversation, never returns 500.
+
+**Request body:**
+```json
+{
+  "conversation_id": "abc123",
   "message_id": "msg002",
   "feedback": true,
   "comment": "Great answer, very accurate."
@@ -637,9 +800,353 @@ Submit or update thumbs-up / thumbs-down feedback on an assistant message.
 
 | Field | Type | Description |
 |---|---|---|
+| `conversation_id` | `string` | The conversation ID |
 | `message_id` | `string` | The assistant message ID |
-| `feedback` | `true \| false \| null` | `true` = thumbs up, `false` = thumbs down, `null` = clear feedback |
-| `comment` | `string \| null` | Optional free-text comment |
+| `feedback` | `true` \| `false` \| `null` | `true` = thumbs up, `false` = thumbs down, `null` = clear feedback |
+| `comment` | `string` \| `null` | Optional free-text comment |
+
+**Response** `200 OK`:
+```json
+{"status": "ok"}
+```
+
+---
+
+## 9. Shared Snapshots
+
+Prefix: `/api/v1/conversations/{conversation_id}/share`
+
+Create capability-token snapshots of a conversation that can be shared via a public URL. Viewer access is tracked but does not require authentication.
+
+### POST `/share`
+
+Create a share token for a conversation.
+
+**Request body:**
+```json
+{
+  "acknowledge_uploaded": false
+}
+```
+
+**Response** `200 OK`:
+```json
+{
+  "token": "abc123def456",
+  "share_url": "/share/abc123def456",
+  "created_at": 1716200000000,
+  "expires_at": 1718800000,
+  "revoked": false,
+  "view_count": 0
+}
+```
+
+**Gating rules:**
+- Owner check: only the conversation owner can create a share
+- Sharing-disabled flag: users with `sharing_disabled=true` get 403
+- Uploaded-DB consent: sharing an uploaded SQLite chat requires `acknowledge_uploaded=true` (409 otherwise)
+- Postgres/libsql refusal: sharing chats bound to live Postgres/libsql connections is refused (403)
+
+**Errors:**
+- `404 Not Found` -- conversation not found or not owned by caller
+- `403 Forbidden` -- sharing disabled or Postgres/libsql refusal
+- `409 Conflict` -- uploaded DB requires consent
+
+---
+
+### GET `/share`
+
+Retrieve the share metadata for a conversation. Returns 404 if the conversation has never been shared.
+
+**Response** `200 OK` -- same shape as POST response.
+
+---
+
+### DELETE `/share`
+
+Soft-revoke a share token. The token remains in the database but will not resolve on the public viewer.
+
+**Response:** `204 No Content`
+
+---
+
+## 10. Public Shares
+
+Prefix: `/api/v1/public`
+
+No authentication required.
+
+### GET `/shares/{token}`
+
+View a shared conversation snapshot. Increments the view count. Sets `Cache-Control: private, max-age=0, no-store` and `X-Robots-Tag: noindex, nofollow`.
+
+**Response** `200 OK`:
+```json
+{
+  "title": "Top merchant categories by volume",
+  "dataset_name": "transactions_db",
+  "messages": [
+    {
+      "role": "user",
+      "content": "What are the top 5 merchant categories?",
+      "created_at": 1716200000000
+    },
+    {
+      "role": "assistant",
+      "content": "The top 5 merchant categories are...",
+      "created_at": 1716200005000
+    }
+  ],
+  "created_at": 1716200000000,
+  "expires_at": 1718800000
+}
+```
+
+**Visibility checks:** token exists, not revoked, not expired. Returns 404 otherwise.
+
+---
+
+## 11. Automation Endpoints
+
+Prefix: `/api/v1/automations`
+
+All automation endpoints are gated behind `AUTOMATIONS_ENABLED=true`.
+
+### GET `/automations`
+
+List automations for the current user. Paginated.
+
+**Query parameters:**
+- `limit` -- Number of items (default: 50)
+- `offset` -- Pagination offset (default: 0)
+
+**Response** `200 OK` -- paginated array of automation objects.
+
+---
+
+### POST `/automations`
+
+Create a new automation.
+
+**Request body:**
+```json
+{
+  "name": "Daily Fraud Alert",
+  "db_id": "my_db",
+  "trigger_condition": {
+    "type": "threshold",
+    "column": "fraud_count",
+    "operator": "gt",
+    "value": 100
+  },
+  "sql_queries": [
+    "SELECT COUNT(*) AS fraud_count FROM transactions WHERE is_fraud = 1 AND date(timestamp) = date('now')"
+  ],
+  "schedule": {
+    "preset": "daily"
+  }
+}
+```
+
+**Key constraints:**
+- SQL validation: only SELECT statements, no multi-statement queries
+- `db_id` validated against known databases -- returns 400 on unknown
+- Per-user cap enforced atomically via `pg_advisory_xact_lock` (Postgres) / write-lock (SQLite) -- returns 429 when exceeded
+- `AUTOMATIONS_MAX_PER_USER` (default 50)
+
+**Response** `200 OK` -- created automation object.
+
+---
+
+### GET `/automations/{id}`
+
+Get automation detail.
+
+**Response** `200 OK` -- automation object with all fields.
+
+---
+
+### PUT `/automations/{id}`
+
+Update an automation. All fields optional.
+
+**Request body:**
+```json
+{
+  "name": "Updated name",
+  "schedule": {"preset": "weekly"},
+  "sql_queries": ["SELECT COUNT(*) FROM transactions WHERE is_fraud = 1"],
+  "trigger_condition": {...},
+  "active": true
+}
+```
+
+---
+
+### DELETE `/automations/{id}`
+
+Delete an automation.
+
+**Response** `200 OK`:
+```json
+{"status": "ok"}
+```
+
+---
+
+### POST `/automations/{id}/toggle`
+
+Toggle an automation on/off.
+
+**Response** `200 OK` -- updated automation object.
+
+---
+
+### POST `/automations/{id}/runs`
+
+Manually trigger a run.
+
+**Response** `200 OK`:
+```json
+{
+  "status": "ok",
+  "ran": [
+    {
+      "id": "run-xyz",
+      "status": "success",
+      "result_json": {"fraud_count": 45},
+      "execution_time_ms": 234
+    }
+  ]
+}
+```
+
+---
+
+### GET `/automations/{id}/runs`
+
+List run history for an automation.
+
+**Query parameters:**
+- `limit` -- Number of runs to return
+
+**Response** `200 OK` -- array of run objects.
+
+---
+
+### GET `/automations/{id}/runs/{run_id}`
+
+Get a specific run's detail.
+
+**Response** `200 OK` -- single run object.
+
+---
+
+### POST `/automations/compile-trigger`
+
+Compile a natural-language trigger description into structured JSON.
+
+**Request body:**
+```json
+{
+  "nl_text": "Alert when total fraud transactions exceed 1000",
+  "available_columns": ["transaction_type", "amount", "is_fraud"]
+}
+```
+
+**Response** `200 OK` -- compiled trigger condition JSON.
+
+---
+
+### POST `/automations/generate-sql`
+
+Generate SQL from a natural-language prompt.
+
+**Request body:**
+```json
+{"prompt": "Find transactions where the average amount per merchant exceeds 5000"}
+```
+
+**Response** `200 OK`:
+```json
+{"sql": "SELECT merchant_id, AVG(amount) ..."}
+```
+
+---
+
+### Automation Templates (sub-router: `/api/v1/automations/templates`)
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/` | List templates (paginated) |
+| POST | `/` | Create template |
+| GET | `/{id}` | Get template detail |
+| PUT | `/{id}` | Update template |
+| DELETE | `/{id}` | Delete template |
+
+---
+
+## 12. Notification Endpoints
+
+Prefix: `/api/v1/notifications`
+
+Gated behind `AUTOMATIONS_ENABLED=true`.
+
+### GET `/notifications`
+
+List the current user's notifications.
+
+**Query parameters:**
+- `unread` -- If `true`, return only unread (default: `false`)
+- `limit` -- Number of notifications (1--200, default: 50)
+
+**Response** `200 OK` -- array of notification objects:
+```json
+[
+  {
+    "id": "notif-abc",
+    "title": "Alert: Daily Fraud Alert triggered",
+    "message": "fraud_count (145) exceeded threshold (100)",
+    "severity": "warning",
+    "is_read": false,
+    "automation_name": "Daily Fraud Alert",
+    "created_at": "2026-05-20T09:00:02"
+  }
+]
+```
+
+---
+
+### GET `/notifications/all`
+
+Admin-only cross-user notifications feed.
+
+**Response** `200 OK` -- array of all users' notifications.
+
+---
+
+### GET `/notifications/count`
+
+Return the current user's unread notification count.
+
+**Response** `200 OK`:
+```json
+{"count": 3}
+```
+
+---
+
+### GET `/notifications/stream`
+
+SSE stream of live notifications. Hydrates the unread backlog on connect, then pushes new notifications as they arrive via a 15-second ping interval.
+
+**Response:** `text/event-stream`
+
+---
+
+### POST `/notifications/{notification_id}/read`
+
+Mark a single notification as read.
 
 **Response** `200 OK`:
 ```json
@@ -647,83 +1154,109 @@ Submit or update thumbs-up / thumbs-down feedback on an assistant message.
 ```
 
 **Errors:**
-- `404 Not Found` -- message not found or belongs to another user
+- `404 Not Found`
 
 ---
 
-## Stats
+### POST `/notifications/mark-all-read`
 
-### GET /api/stats
+Mark all of the current user's notifications as read.
 
-Return pre-computed dataset statistics, grouped by stat group and dimension. Statistics are computed at startup and cached; this endpoint reads from the `dataset_stats` SQLite table.
+**Response** `200 OK`:
+```json
+{"status": "ok", "count": 3}
+```
+
+---
+
+## 13. Config Endpoints
+
+### GET `/api/v1/config`
+
+Get the current LLM provider and model configuration, plus available providers and their models.
 
 **Response** `200 OK`:
 ```json
 {
-  "groups": {
-    "by_type": {
-      "P2P": {
-        "count": 125000,
-        "avg_amount": 2341.5,
-        "total_amount": 292687500.0
-      },
-      "P2M": {
-        "count": 125000,
-        "avg_amount": 1876.3,
-        "total_amount": 234537500.0
-      }
+  "current_provider": "deepseek",
+  "current_model": "deepseek-v4-flash",
+  "providers": [
+    {
+      "provider": "gemini",
+      "models": [
+        "gemini-2.5-flash",
+        "gemini-2.5-pro",
+        "gemini-2.5-flash-lite",
+        "gemini-2.0-flash"
+      ]
     },
-    "by_city": {
-      "Mumbai": {"count": 45000, "avg_amount": 2100.0}
+    {
+      "provider": "deepseek",
+      "models": [
+        "deepseek-v4-flash"
+      ]
     }
-  },
-  "computed_at": "2024-01-15 09:00:00"
+  ]
 }
 ```
 
 ---
 
-## Health
+### POST `/api/v1/config/switch`
 
-### GET /api/health
+Switch the active LLM provider and model at runtime. The change takes effect immediately for subsequent requests. Note: this is an in-process switch that is lost on restart.
 
-Health check -- no authentication required. Also available at `GET /health`.
-
-**Response** `200 OK`:
+**Request body:**
 ```json
-{"status": "ok"}
+{
+  "provider": "gemini",
+  "model": "gemini-2.5-pro"
+}
 ```
+
+**Response** `200 OK` -- updated config (same shape as GET).
 
 ---
 
-## Voice Endpoints
+### GET `/api/v1/client-config` (no auth)
 
-### WebSocket /api/transcribe
+Static feature-flag map for the frontend. No authentication required.
 
-Real-time speech-to-text via Deepgram Nova-3. The client sends audio frames over a WebSocket; the server proxies them to the Deepgram streaming API and relays transcription results back to the client.
+**Response** `200 OK`:
+```json
+{
+  "features": {
+    "sql_runner": true,
+    "upload": true,
+    "profile_editor": true,
+    "voice": true,
+    "automations": false,
+    "admin": false,
+    "insights": true,
+    "notifications": false
+  },
+  "version": "0.1.0"
+}
+```
 
-**Auth:** The WebSocket is authenticated via one of:
-1. `__session` cookie (sent automatically by the browser)
-2. `token` query parameter (e.g., `ws://localhost:8000/api/transcribe?token=eyJ...`)
+Feature flags reflect the server's configuration (e.g., `automations` and `notifications` are `false` when `AUTOMATIONS_ENABLED=false`).
 
-If neither is present or valid, the WebSocket is closed with code `4001` and reason `"Not authenticated"`.
+---
 
-**Prerequisites:** The `DEEPGRAM_API_KEY` environment variable must be configured. If missing, the WebSocket is closed with code `4002` and reason `"Speech-to-text is not configured"`.
+## 14. Voice Endpoint
 
-**Protocol:**
+### WebSocket `/api/transcribe`
 
-1. Client opens WebSocket connection to `/api/transcribe`
-2. Server authenticates and connects to Deepgram Nova-3 (`wss://api.deepgram.com/v1/listen`)
-3. Client sends binary audio frames (WebM/Opus container, encoding auto-detected by Deepgram)
-4. Server relays JSON transcription results back as text messages
+Real-time speech-to-text via Deepgram Nova-3. The browser sends binary audio frames (WebM/Opus); the server proxies them to Deepgram and relays transcription results back.
 
-**Deepgram parameters:**
-- `model`: `nova-3`
-- `language`: `en`
-- `punctuate`: `true`
-- `interim_results`: `true`
-- `utterance_end_ms`: `1000`
-- `smart_format`: `true`
+**Auth:** Session cookie (`ix_session`) sent with the WebSocket handshake, or `?token=` query parameter fallback.
+
+**Close codes:**
+| Code | Reason |
+|---|---|
+| `4001` | Not authenticated -- no valid session |
+| `4002` | Speech-to-text not configured -- `DEEPGRAM_API_KEY` is empty |
+| `1011` | Deepgram upstream connection failed |
 
 **Transcription result (text message from server):**
 ```json
@@ -741,1402 +1274,245 @@ If neither is present or valid, the WebSocket is closed with code `4001` and rea
 }
 ```
 
-**Error (text message from server):**
-```json
-{"error": "Voice connection failed"}
-```
-
-The WebSocket is closed with code `1011` if the Deepgram connection fails after the initial handshake.
-
----
-
-## Document Endpoints
-
-**Prefix:** `/api/documents`
-
-Manage PDF documents uploaded for RAG-enhanced analysis. Documents are processed (text extraction), stored in the database, and optionally backed up to R2 cloud storage.
-
-### POST /api/documents/upload
-
-Upload a PDF document. The file is validated, text is extracted, and a database record is created. If R2 storage is configured, the original file is uploaded in the background.
-
-**Auth:** Any authenticated user.
-
-**Request:** `multipart/form-data`
-
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `file` | `file` | Yes | PDF file (max 20 MB) |
-| `name` | `string` | Yes | Display name for the document |
-| `description` | `string` | No | Optional description |
-| `dataset_id` | `string` | No | Associate with a dataset |
-
-**Response** `200 OK`:
-```json
-{
-  "id": "doc-abc123",
-  "name": "Q4 Financial Report",
-  "description": "Quarterly financial analysis",
-  "file_name": "q4-report.pdf",
-  "file_type": "application/pdf",
-  "file_size_bytes": 1048576,
-  "page_count": 12,
-  "dataset_id": "ds-abc",
-  "created_by": "user-id",
-  "created_at": "2024-01-15T10:30:00"
-}
-```
-
-**Errors:**
-- `400 Bad Request` -- not a PDF file, empty file, or processing failure
-- `413 Payload Too Large` -- file exceeds 20 MB
-- `503 Service Unavailable` -- document service not available
+**Deepgram parameters** (sent by the server):
+- `model`: `nova-3`
+- `language`: `en`
+- `punctuate`: `true`
+- `interim_results`: `true`
+- `utterance_end_ms`: `1000`
+- `smart_format`: `true`
 
 ---
 
-### GET /api/documents
+## 15. Health Endpoint
 
-List all documents visible to the current user. Super admins see all documents; regular users see documents they created.
+### GET `/api/v1/health`
 
-**Auth:** Any authenticated user.
-
-**Response** `200 OK` -- array of document objects.
-
----
-
-### DELETE /api/documents/{doc_id}
-
-Delete a document record and its R2 storage (if applicable). Admins can delete any document; regular users can only delete their own.
-
-**Auth:** Any authenticated user (ownership or admin required).
+Liveness/readiness probe. No authentication required.
 
 **Response** `200 OK`:
 ```json
 {"status": "ok"}
 ```
 
-**Errors:**
-- `403 Forbidden` -- not the owner and not an admin
-- `404 Not Found` -- document not found
-
----
-
-## Dataset Endpoints
-
-**Prefix:** `/api/datasets`
-
-### GET /api/datasets
-
-List all datasets (super admin only).
-
-**Auth:** Super admin required.
-
-**Response** `200 OK` -- array of dataset objects with `id`, `name`, `description`, `ddl`, `documentation`, `is_active`, `table_name`, `organization_id`, `created_by`, `created_at`, `updated_at`.
-
----
-
-### GET /api/datasets/public
-
-List datasets visible to the current user. System datasets (no `created_by`) are visible to everyone. User-uploaded datasets are visible only to the uploader and super admins.
-
-**Auth:** Any authenticated user.
-
-**Response** `200 OK`:
-```json
-[
-  {
-    "id": "ds-abc",
-    "name": "transactions",
-    "description": "250,000 Indian UPI digital payment transactions from 2024",
-    "is_active": true,
-    "table_name": "transactions",
-    "organization_id": null,
-    "created_by": null
-  }
-]
+```bash
+curl http://localhost:8080/api/v1/health
 ```
 
 ---
 
-### GET /api/datasets/public/{dataset_id}/columns
+## 16. Prometheus Metrics
 
-Return column metadata for a dataset. Enforces user-scope: user-uploaded datasets can only be accessed by the owner or a super admin.
+### GET `/metrics`
 
-**Auth:** Any authenticated user (ownership enforced for user-uploaded datasets).
+Prometheus text-format metrics. No authentication required (flagged `TODO-SECURITY`).
 
-**Response** `200 OK` -- array of column objects with `column_name`, `column_type`, `description`, `domain_values`, `domain_rules`, `ordinal_position`.
+Exposed counters include:
+- `audit_queue_depth` / `audit_overflow_total`
+- `sse_active_emitters` / `sse_evicted_total`
+- `llm_calls_total{source=...}`
+- `process_resident_memory_bytes` / `process_open_fds`
 
-**Errors:**
-- `403 Forbidden` -- dataset belongs to another user and caller is not a super admin
-- `404 Not Found` -- dataset not found
-
----
-
-### POST /api/datasets/upload
-
-Upload a CSV file to create a new dataset. The dataset is created inactive and owned by the uploading user. If R2 storage is configured, the CSV is backed up in the background.
-
-**Auth:** Any authenticated user.
-
-**Request:** `multipart/form-data`
-
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `file` | `file` | Yes | CSV file (max 50 MB) |
-| `name` | `string` | Yes | Display name for the dataset |
-| `description` | `string` | No | Optional description |
-
-**Response** `200 OK`:
-```json
-{
-  "id": "ds-new123",
-  "name": "My Custom Dataset",
-  "description": "Uploaded transaction subset",
-  "table_name": "ds_new123",
-  "is_active": false,
-  "created_by": "user-id",
-  "created_at": "2024-01-15T10:30:00"
-}
-```
-
-**Errors:**
-- `400 Bad Request` -- not a CSV file, empty file, or parsing error
-- `413 Payload Too Large` -- file exceeds 50 MB
-- `503 Service Unavailable` -- dataset service not available
-
----
-
-### POST /api/datasets/{dataset_id}/confirm
-
-Confirm a dataset after upload by providing column descriptions and profiler output. Compiles rich documentation from the profiler data and user-provided descriptions. Only the dataset owner or an admin can confirm.
-
-**Auth:** Dataset owner or admin.
-
-**Request body:**
-```json
-{
-  "column_descriptions": {
-    "amount": "Transaction amount in INR",
-    "city": "City where the transaction occurred"
-  },
-  "profile": {
-    "row_count": 50000,
-    "column_count": 12,
-    "columns": [
-      {
-        "name": "amount",
-        "original_name": "Amount",
-        "inferred_type": "REAL",
-        "distinct_count": 48234,
-        "null_count": 0,
-        "null_percent": 0.0,
-        "is_unique": false,
-        "cardinality": "high",
-        "unique_values": null,
-        "min": 10.0,
-        "max": 99999.0,
-        "mean": 2341.5
-      }
-    ]
-  }
-}
-```
-
-**Response** `200 OK` -- the updated dataset object.
-
-**Errors:**
-- `403 Forbidden` -- not the owner and not an admin
-- `404 Not Found` -- dataset not found
-
----
-
-### DELETE /api/datasets/{dataset_id}
-
-Delete a dataset and its underlying data table. Owners can delete their own datasets; admins can delete any dataset. If R2 storage is configured, the backup file is cleaned up in the background.
-
-**Auth:** Dataset owner or admin.
-
-**Response** `200 OK`:
-```json
-{"status": "ok"}
-```
-
-**Errors:**
-- `403 Forbidden` -- not the owner and not an admin
-- `404 Not Found` -- dataset not found
-
----
-
-### POST /api/datasets/{dataset_id}/activate
-
-Set a dataset as the active dataset. System datasets can be activated by any authenticated user. User-uploaded datasets can only be activated by the owner or a super admin.
-
-**Auth:** Any authenticated user (ownership enforced for user-uploaded datasets).
-
-**Response** `200 OK`:
-```json
-{"status": "ok", "active_dataset_id": "ds-abc"}
-```
-
-**Errors:**
-- `403 Forbidden` -- user-uploaded dataset and caller is not owner or super admin
-- `404 Not Found` -- dataset not found
-
----
-
-### GET /api/datasets/{dataset_id}
-
-Get full dataset detail including columns and example queries (super admin only).
-
-**Auth:** Super admin required.
-
-**Errors:** `404 Not Found`
-
----
-
-### PUT /api/datasets/{dataset_id}
-
-Update dataset metadata (super admin only). All fields are optional.
-
-**Auth:** Super admin required.
-
-**Request body:**
-```json
-{
-  "name": "transactions",
-  "description": "Updated description",
-  "ddl": "CREATE TABLE transactions (...)",
-  "documentation": "Business context...",
-  "organization_id": null
-}
+```bash
+curl http://localhost:8080/metrics
 ```
 
 ---
 
-### POST /api/datasets/{dataset_id}/columns
+## 17. Admin Endpoints
 
-Add a column definition (super admin only).
+All admin endpoints require `role == "admin"` on the authenticated user. Returns 403 otherwise.
 
-**Auth:** Super admin required.
+### Overview (`/api/v1/admin/overview`)
 
-**Request body:**
-```json
-{
-  "column_name": "merchant_category",
-  "column_type": "TEXT",
-  "description": "Category of the merchant",
-  "domain_values": "Food, Travel, Entertainment, Retail",
-  "domain_rules": null,
-  "ordinal_position": 5
-}
-```
-
----
-
-### PUT /api/datasets/{dataset_id}/columns/{col_id}
-
-Update a column definition (super admin only).
-
-**Auth:** Super admin required.
-
----
-
-### POST /api/datasets/{dataset_id}/queries
-
-Add an example question-SQL pair (super admin only).
-
-**Auth:** Super admin required.
-
-**Request body:**
-```json
-{
-  "question": "What is the total transaction amount by city?",
-  "sql": "SELECT city, SUM(amount) FROM transactions GROUP BY city ORDER BY SUM(amount) DESC",
-  "category": "aggregation"
-}
-```
-
----
-
-### DELETE /api/datasets/{dataset_id}/queries/{query_id}
-
-Delete an example query (super admin only).
-
-**Auth:** Super admin required.
-
-**Response** `200 OK`:
-```json
-{"status": "ok"}
-```
-
----
-
-### POST /api/datasets/{dataset_id}/retrain
-
-Re-run RAG training for a specific dataset, reloading its DDL, documentation, and example queries into ChromaDB (super admin only).
-
-**Auth:** Super admin required.
-
-**Response** `200 OK`:
-```json
-{"status": "ok", "items_trained": 47}
-```
-
----
-
-## Admin Endpoints
-
-All admin endpoints require `is_admin=true` or an email from a configured admin domain. Org admins are scoped to their own organization's data. Super admins (no `org_id`) have unrestricted access.
-
-**Auth:** `403 Forbidden` when the authenticated user is not an admin.
-
----
-
-### GET /api/admin/users
-
-List all users with conversation and message counts. Org admins see only users in their org.
-
-**Response** `200 OK`:
-```json
-{
-  "users": [
-    {
-      "id": "550e8400...",
-      "email": "user@example.com",
-      "is_admin": false,
-      "org_id": "org-abc",
-      "conversation_count": 12,
-      "message_count": 48,
-      "last_active": "2024-01-15T10:30:00"
-    }
-  ]
-}
-```
-
----
-
-### GET /api/admin/users/{user_id}/conversations
-
-List all conversations for a specific user (org-scoped).
-
-**Response** `200 OK`:
-```json
-{
-  "conversations": [
-    {
-      "id": "abc123",
-      "title": "Top merchant categories",
-      "is_starred": false,
-      "org_id": "org-abc",
-      "created_at": "2024-01-15T10:30:00",
-      "updated_at": "2024-01-15T10:32:00"
-    }
-  ]
-}
-```
-
----
-
-### GET /api/admin/conversations/{id}
-
-Get full conversation detail including all messages and chunk data. Org admins can only access conversations belonging to their org.
-
-**Response** `200 OK` -- same shape as `GET /api/conversations/{id}` with the addition of `org_id` on the conversation.
-
----
-
-### DELETE /api/admin/conversations/{id}
-
-Delete any conversation (org-scoped).
-
-**Response** `200 OK`:
-```json
-{"status": "ok"}
-```
-
----
-
-### DELETE /api/admin/conversations/user/{user_id}
-
-Delete all conversations for a specific user (org-scoped).
-
-**Response** `200 OK`:
-```json
-{"status": "ok", "deleted_count": 12}
-```
-
----
-
-### DELETE /api/admin/conversations
-
-Delete all conversations. Super admins delete all platform conversations; org admins delete only their org's conversations.
-
-**Response** `200 OK`:
-```json
-{"status": "ok", "deleted_count": 247}
-```
-
----
-
-### GET /api/admin/config
-
-Get the full `ClientConfig` including `defaults`, `organizations`, `user_org_mappings`, and `admin_domains`.
-
-**Response** `200 OK`:
-```json
-{
-  "admin_domains": ["insightxpert.ai"],
-  "user_org_mappings": [
-    {"email": "partner@acme.com", "org_id": "org-acme"}
-  ],
-  "organizations": {
-    "org-acme": {
-      "org_id": "org-acme",
-      "org_name": "ACME Corp",
-      "features": {
-        "sql_executor": true,
-        "model_switching": false,
-        "rag_training": false,
-        "rag_retrieval": true,
-        "chart_rendering": true,
-        "conversation_export": true,
-        "agent_process_sidebar": false,
-        "clarification_enabled": true,
-        "stats_context_injection": true
-      },
-      "branding": {
-        "display_name": "ACME Analytics",
-        "logo_url": "https://acme.com/logo.png",
-        "theme": {"--primary": "#FF6B00"},
-        "color_mode": "dark"
-      }
-    }
-  },
-  "defaults": {
-    "features": { ... },
-    "branding": { ... }
-  }
-}
-```
-
----
-
-### PUT /api/admin/config
-
-Update global defaults: `admin_domains`, `user_org_mappings`, and/or `defaults`. All fields are optional; only provided fields are updated.
-
-**Auth:** Super admin required.
-
-**Request body:**
-```json
-{
-  "admin_domains": ["insightxpert.ai", "mycompany.com"],
-  "defaults": {
-    "features": {
-      "stats_context_injection": true,
-      "clarification_enabled": false
-    },
-    "branding": {}
-  }
-}
-```
-
-**Response** `200 OK` -- the full updated `ClientConfig`.
-
----
-
-### GET /api/admin/organizations
-
-List all organizations (IDs and names).
-
-**Response** `200 OK`:
-```json
-{
-  "organizations": [
-    {"org_id": "org-acme", "org_name": "ACME Corp"}
-  ]
-}
-```
-
----
-
-### POST /api/admin/organizations
-
-Create a new organization.
-
-**Auth:** Super admin required.
-
-**Request body:**
-```json
-{"org_name": "New Org"}
-```
-
-**Response** `200 OK` -- the created `OrgConfig` object.
-
----
-
-### GET /api/admin/config/{org_id}
-
-Get configuration for a specific organization.
-
-**Response** `200 OK` -- `OrgConfig` object.
-
-**Errors:** `404 Not Found`
-
----
-
-### PUT /api/admin/config/{org_id}
-
-Create or update an organization's full configuration (features and branding).
-
-**Request body:** Full `OrgConfig` object.
-```json
-{
-  "org_id": "org-acme",
-  "org_name": "ACME Corp",
-  "features": {
-    "sql_executor": true,
-    "model_switching": false,
-    "rag_training": false,
-    "rag_retrieval": true,
-    "chart_rendering": true,
-    "conversation_export": true,
-    "agent_process_sidebar": true,
-    "clarification_enabled": true,
-    "stats_context_injection": true
-  },
-  "branding": {
-    "display_name": "ACME Analytics",
-    "logo_url": "https://acme.com/logo.png",
-    "theme": null,
-    "color_mode": null
-  }
-}
-```
-
-**Response** `200 OK` -- the updated `OrgConfig`.
-
----
-
-### DELETE /api/admin/config/{org_id}
-
-Delete an organization.
-
-**Auth:** Super admin required.
-
-**Response** `200 OK`:
-```json
-{"status": "ok"}
-```
-
-**Errors:** `404 Not Found`
-
----
-
-### DELETE /api/admin/rag/qa-pairs
-
-Flush all QA pairs from ChromaDB, leaving DDL, documentation, and findings collections intact. Useful when retraining from scratch.
-
-**Auth:** Super admin required.
-
-**Response** `200 OK`:
-```json
-{"status": "ok", "deleted_count": 42}
-```
-
----
-
-### GET /api/admin/prompts
-
-List all prompt templates stored in the database.
-
-**Auth:** Super admin required.
-
-**Response** `200 OK`:
-```json
-{
-  "prompts": [
-    {
-      "id": "550e8400...",
-      "name": "analyst_system",
-      "content": "You are an expert SQL analyst...",
-      "description": "System prompt for the SQL analyst agent",
-      "is_active": true,
-      "created_at": "2024-01-15T10:00:00",
-      "updated_at": "2024-01-15T10:00:00"
-    }
-  ]
-}
-```
-
----
-
-### GET /api/admin/prompts/{name}
-
-Get a specific prompt template by name. Name must match `^[a-z][a-z0-9_]{0,99}$`.
-
-**Auth:** Super admin required.
-
-**Response** `200 OK` -- single prompt template object.
-
-**Errors:** `404 Not Found`
-
----
-
-### PUT /api/admin/prompts/{name}
-
-Create or update a prompt template (upsert).
-
-**Auth:** Super admin required.
-
-**Request body:**
-```json
-{
-  "content": "You are an expert SQL analyst for Indian payment data...",
-  "description": "System prompt for the SQL analyst agent",
-  "is_active": true
-}
-```
-
-**Response** `200 OK`:
-```json
-{"status": "ok", "name": "analyst_system"}
-```
-
----
-
-### DELETE /api/admin/prompts/{name}
-
-Delete a prompt template. The agent falls back to the bundled `.j2` file template.
-
-**Auth:** Super admin required.
-
-**Response** `200 OK`:
-```json
-{"status": "ok", "name": "analyst_system"}
-```
-
----
-
-### POST /api/admin/prompts/{name}/reset
-
-Reset a prompt template to the content of its bundled `.j2` file.
-
-**Auth:** Super admin required.
-
-**Response** `200 OK`:
-```json
-{"status": "ok", "name": "analyst_system"}
-```
-
-**Errors:** `404 Not Found` -- no `.j2` file exists for the given name
-
----
-
-## Client Config (Non-Admin)
-
-### GET /api/client-config
-
-Resolve the effective configuration for the current user. Returns the merged feature toggles and branding based on the user's organization membership.
-
-- Admin users receive all features enabled.
-- Org-mapped users receive their organization's feature set.
-- Unaffiliated users receive the global defaults.
-
-**Response** `200 OK`:
-```json
-{
-  "config": {
-    "org_id": "org-acme",
-    "org_name": "ACME Corp",
-    "features": {
-      "sql_executor": true,
-      "model_switching": false,
-      "rag_training": false,
-      "rag_retrieval": true,
-      "chart_rendering": true,
-      "conversation_export": true,
-      "agent_process_sidebar": true,
-      "clarification_enabled": true,
-      "stats_context_injection": true
-    },
-    "branding": {
-      "display_name": "ACME Analytics",
-      "logo_url": "https://acme.com/logo.png",
-      "theme": null,
-      "color_mode": null
-    }
-  },
-  "is_admin": false,
-  "org_id": "org-acme"
-}
-```
-
----
-
-## Automation Endpoints
-
-**Prefix:** `/api/automations` (admin only)
-
-Automations run SQL queries on a cron schedule and fire alert notifications when trigger conditions are met.
-
-### POST /api/automations/generate-sql
-
-Generate a SQL query from a natural-language prompt using the analyst agent (admin only).
-
-**Request body:**
-```json
-{"prompt": "Find transactions where the average amount per merchant exceeds 5000"}
-```
-
-**Response** `200 OK`:
-```json
-{
-  "sql": "SELECT merchant_id, AVG(amount) AS avg_amount FROM transactions GROUP BY merchant_id HAVING AVG(amount) > 5000",
-  "explanation": "This query groups transactions by merchant and filters..."
-}
-```
-
-**Errors:**
-- `422 Unprocessable Entity` -- no SQL could be generated from the prompt
-
----
-
-### POST /api/automations/compile-trigger
-
-Compile a natural-language trigger description into a structured condition (admin only).
-
-**Request body:**
-```json
-{
-  "nl_text": "Alert when total fraud transactions exceed 1000",
-  "available_columns": ["transaction_type", "amount", "is_fraud"]
-}
-```
-
-**Response** `200 OK` -- `TriggerCondition` object.
-
----
-
-### POST /api/automations
-
-Create an automation (admin only).
-
-**Request body:**
-```json
-{
-  "name": "Daily Fraud Alert",
-  "description": "Alert when fraud count spikes",
-  "nl_query": "Count fraud transactions today",
-  "sql_queries": [
-    "SELECT COUNT(*) AS fraud_count FROM transactions WHERE is_fraud = 1 AND date(timestamp) = date('now')"
-  ],
-  "schedule_preset": "daily",
-  "trigger_conditions": [
-    {
-      "type": "threshold",
-      "column": "fraud_count",
-      "operator": "gt",
-      "value": 100
-    }
-  ],
-  "source_conversation_id": null,
-  "source_message_id": null,
-  "workflow_graph": null
-}
-```
-
-`schedule_preset` values: `"hourly"` (`0 * * * *`), `"daily"` (`0 9 * * *`), `"weekly"` (`0 9 * * 1`), `"monthly"` (`0 9 1 * *`). Alternatively, provide `cron_expression` (5-field cron string). One is required.
-
-`sql_queries` is an ordered chain of SELECT-only queries. `sql_query` (single string) is also accepted for backward compatibility.
-
-`workflow_graph` is an optional `{ blocks, edges }` object for the visual workflow builder UI.
-
-**Trigger condition types:**
-
-| `type` | Description | Key fields |
+| Method | Path | Description |
 |---|---|---|
-| `threshold` | Fire when a column value crosses a threshold | `column`, `operator` (`gt`, `gte`, `lt`, `lte`, `eq`, `ne`), `value` |
-| `change_detection` | Fire when a value changes by a percentage | `column`, `change_percent` |
-| `row_count` | Fire based on the number of rows returned | `operator`, `value` |
-| `column_expression` | Fire based on a column expression across rows | `column`, `operator`, `value`, `scope` (`any_row`, `all_rows`) |
-| `slope` | Fire based on the trend slope across recent runs | `column`, `operator`, `value`, `slope_window` (default: 5) |
+| GET | `/` | Aggregate KPIs: `active_users_24h`, `total_users`, `chats_today`, `tokens_today`, `thumbs_ratio_7d`, `sparkline_7d[]`. Cached 30s in-process. |
 
-**Response** `200 OK` -- automation object.
+### Users (`/api/v1/admin/users`)
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/` | List all users (`id`, `email`, `role`, `is_active`, `must_change_password`, `last_seen_at`) |
+| POST | `/` | Create user with `{email, role}`. Returns `{id, email, role, temp_password}`. 409 on duplicate email. |
+| PATCH | `/{user_id}` | Update `{role?, is_active?}`. 409 if demoting the last admin. |
+| POST | `/{user_id}/reset-password` | Generate a new temporary password. Returns `{temp_password}`. |
+| DELETE | `/{user_id}` | Delete a user. 409 if deleting the last admin. |
+| PATCH | `/{user_id}/sharing-disabled` | Toggle sharing capability: `{disabled: bool}`. |
+
+### Databases (`/api/v1/admin/databases`)
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/` | Admin-enriched DB list (owner email, share list) |
+| PATCH | `/{db_id}` | Set `pipeline_mode_default` to `"linked"` or `"full_schema"` |
+
+### RAG (`/api/v1/admin/rag`)
+
+| Method | Path | Description |
+|---|---|---|
+| DELETE | `/qa-pairs` | Delete all QA pair embeddings. Returns `{deleted: true, count}`. |
+
+### Prompts (`/api/v1/admin/prompts`)
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/` | List all prompts (DB-first resolution with file fallback) |
+| GET | `/{name}` | Single prompt detail |
+| PUT | `/{name}` | Upsert DB override: `{content, description?}`. Overrides the bundled `.j2` file. |
+| DELETE | `/{name}` | Remove override, fall back to file. Returns `{deleted: true}`. |
+| POST | `/{name}/reset` | Reset to file content. Returns `{reset: true}`. |
+
+### Audit (`/api/v1/admin/audit`)
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/` | Cursor-paginated audit log. Filters: `?user=&action=&from=&to=&cursor=&limit=`. Returns `{rows[], next_cursor?}`. |
+
+### Metrics (`/api/v1/admin/metrics`)
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/` | Cursor-paginated `query_metrics` rows. Filters: `?user=&db=&thumbs=&agent_mode=&from=&to=&cursor=&limit=`. |
+
+### Conversations (`/api/v1/admin/conversations`)
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/` | Cursor-paginated conversation list. Filters: `?user_id=&db_id=&cursor=&limit=`. |
+| GET | `/{conv_id}` | Full detail with messages + parsed `chunks_json` |
+| DELETE | `/{conv_id}` | Delete conversation. Returns `{deleted: true}`. |
+
+### Performance (`/api/v1/admin/performance`)
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/` | Per-endpoint latency percentiles (p50/p95/p99) from in-memory Prometheus histograms. Resets on restart. |
+
+### Sentry Debug (`/api/v1/admin/sentry`)
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/ping` | Emit a message-level Sentry event |
+| GET | `/boom` | Raise `RuntimeError` to test exception capture |
 
 ---
 
-### GET /api/automations
+## 18. Internal Endpoint
 
-List automations. Org admins see automations in their org; super admins see all.
+### POST `/api/internal/run-due-automations`
 
-**Auth:** Admin required.
+HMAC-authenticated endpoint for external scheduler (cron) integration. Only active when `AUTOMATIONS_ENABLED=true` and `AUTOMATIONS_SCHEDULER_MODE=external`.
 
-**Response** `200 OK` -- array of automation objects.
-
----
-
-### GET /api/automations/{id}
-
-Get automation detail including the 10 most recent runs (admin only).
-
-**Response** `200 OK`:
-```json
-{
-  "id": "auto-abc",
-  "name": "Daily Fraud Alert",
-  "description": "Alert when fraud count spikes",
-  "nl_query": "Count fraud transactions today",
-  "sql_query": "SELECT COUNT(*) AS fraud_count FROM transactions WHERE is_fraud = 1",
-  "sql_queries": ["SELECT COUNT(*) AS fraud_count FROM transactions WHERE is_fraud = 1"],
-  "cron_expression": "0 9 * * *",
-  "trigger_conditions": [
-    {"type": "threshold", "column": "fraud_count", "operator": "gt", "value": 100}
-  ],
-  "is_active": true,
-  "last_run_at": "2024-01-15T09:00:00",
-  "next_run_at": "2024-01-16T09:00:00",
-  "created_by": "user-id",
-  "source_conversation_id": null,
-  "source_message_id": null,
-  "workflow_graph": null,
-  "created_at": "2024-01-10T12:00:00",
-  "updated_at": "2024-01-15T09:00:01",
-  "recent_runs": [...]
-}
-```
-
----
-
-### PUT /api/automations/{id}
-
-Update an automation. All fields are optional (admin only). Org-scoped: admins can only update automations they own or that belong to their org.
+**Auth:** `X-Scheduler-Signature` header with HMAC-SHA256 of the request body, keyed by `AUTOMATIONS_SCHEDULER_SECRET`.
 
 **Request body:**
 ```json
 {
-  "name": "Updated name",
-  "sql_queries": ["SELECT COUNT(*) FROM transactions WHERE is_fraud = 1"],
-  "schedule_preset": "weekly",
-  "workflow_graph": null
+  "tick_at": 1716200000
 }
 ```
 
----
-
-### DELETE /api/automations/{id}
-
-Delete an automation and remove it from the scheduler (admin only).
-
-**Response** `200 OK`:
-```json
-{"status": "ok"}
-```
-
----
-
-### PATCH /api/automations/{id}/toggle
-
-Toggle an automation on or off (admin only). When toggled on, the scheduler job is resumed or re-added. When toggled off, the job is paused.
-
-**Response** `200 OK` -- the updated automation object.
-
----
-
-### POST /api/automations/{id}/run
-
-Trigger a manual run immediately (admin only).
+**Replay protection:** Max 5-minute drift on `tick_at`. 401 on bad signature.
 
 **Response** `200 OK`:
 ```json
 {
-  "status": "ok",
-  "message": "Manual run triggered for 'Daily Fraud Alert'",
-  "run": {
-    "id": "run-xyz",
-    "automation_id": "auto-abc",
-    "status": "success",
-    "result_json": {"fraud_count": 45},
-    "row_count": 1,
-    "execution_time_ms": 234,
-    "triggers_fired": [],
-    "error_message": null,
-    "created_at": "2024-01-15T14:30:00"
-  }
-}
-```
-
----
-
-### GET /api/automations/{id}/runs
-
-List run history for an automation (admin only).
-
-**Query parameters:**
-- `limit` -- Number of runs to return (1--100, default: 20)
-
-**Response** `200 OK` -- array of run objects.
-
----
-
-### GET /api/automations/{id}/runs/{run_id}
-
-Get a specific run (admin only).
-
-**Response** `200 OK` -- single run object.
-
----
-
-## Notification Endpoints
-
-**Prefix:** `/api/notifications`
-
-### GET /api/notifications
-
-Get the current user's own notifications.
-
-**Auth:** Any authenticated user.
-
-**Query parameters:**
-- `unread_only` -- If `true`, return only unread notifications (default: `false`)
-
-**Response** `200 OK` -- array of notification objects:
-```json
-[
-  {
-    "id": "notif-abc",
-    "user_id": "user-xyz",
-    "automation_id": "auto-abc",
-    "run_id": "run-xyz",
-    "title": "Alert: Daily Fraud Alert triggered",
-    "message": "fraud_count (145) exceeded threshold (100)",
-    "severity": "warning",
-    "is_read": false,
-    "automation_name": "Daily Fraud Alert",
-    "created_at": "2024-01-15T09:00:02"
-  }
-]
-```
-
----
-
-### GET /api/notifications/all
-
-Get notifications scoped by admin role. Org admins see their org's notifications (with user info); super admins see all notifications across the platform (with user info).
-
-**Auth:** Admin required.
-
-**Query parameters:**
-- `unread_only` -- Filter to unread only (default: `false`)
-
----
-
-### GET /api/notifications/count
-
-Get the current user's unread notification count.
-
-**Auth:** Any authenticated user.
-
-**Response** `200 OK`:
-```json
-{"count": 3}
-```
-
----
-
-### PATCH /api/notifications/{id}/read
-
-Mark a single notification as read (own notifications only).
-
-**Auth:** Any authenticated user.
-
-**Response** `200 OK`:
-```json
-{"status": "ok"}
-```
-
-**Errors:** `404 Not Found`
-
----
-
-### POST /api/notifications/mark-all-read
-
-Mark all of the current user's notifications as read.
-
-**Auth:** Any authenticated user.
-
-**Response** `200 OK`:
-```json
-{"status": "ok", "count": 3}
-```
-
----
-
-## Trigger Template Endpoints
-
-**Prefix:** `/api/trigger-templates` (admin only)
-
-Reusable trigger condition sets.
-
-### GET /api/trigger-templates
-
-List all trigger templates. Org admins see templates in their org; super admins see all.
-
-**Auth:** Admin required.
-
-### POST /api/trigger-templates
-
-Create a trigger template.
-
-**Auth:** Admin required.
-
-**Request body:**
-```json
-{
-  "name": "High Volume Alert",
-  "description": "Fires when transaction count exceeds threshold",
-  "conditions": [
-    {"type": "threshold", "column": "count", "operator": "gt", "value": 1000}
+  "ran": [
+    {"automation_id": "auto-abc", "run_id": "run-xyz", "status": "success"}
   ]
 }
 ```
 
-### PUT /api/trigger-templates/{id}
+**Errors:**
+- `401 Unauthorized` -- bad signature
+- `503 Service Unavailable` -- automations disabled or scheduler mode is not `"external"`
 
-Update a trigger template. All fields optional. Org-scoped: admins can only update templates they own.
-
-**Auth:** Admin required.
-
-### DELETE /api/trigger-templates/{id}
-
-Delete a trigger template. Org-scoped: admins can only delete templates they own.
-
-**Auth:** Admin required.
-
-**Response** `200 OK`:
-```json
-{"status": "ok"}
+```bash
+BODY='{"tick_at":1716200000}'
+SIG=$(echo -n "$BODY" | openssl dgst -sha256 -hmac "your-secret-here" | awk '{print $2}')
+curl -X POST http://localhost:8080/api/internal/run-due-automations \
+  -H "Content-Type: application/json" \
+  -H "X-Scheduler-Signature: $SIG" \
+  -d "$BODY"
 ```
 
 ---
 
-## Insights Endpoints
+## 19. SSE Chunk Types Reference
 
-**Prefix:** `/api/insights`
+All chunk types emitted by `POST /api/v1/chat` (and the legacy pipeline path). Every chunk follows the envelope: `{"type": "<ChunkType>", "data": {...}, "conversation_id": "...", "timestamp": 1234567890.0}`.
 
-Insights are synthesized AI-generated findings saved from enriched chat responses. They can also be created manually from any assistant message.
+### Tier 1 -- Lifecycle Chunks
 
-### POST /api/insights
+| Chunk Type | Description | Key Fields |
+|---|---|---|
+| `status` | Progress indicator | `data.message`, `data.stage` |
+| `profile_loaded` | DB profile fetched from cache/store | `data.profile_summary` |
+| `error` | An error occurred during processing | `data.message`, `data.stage` |
+| `answer_delta` | Incremental text from the synthesizer LLM (streaming) | `data.delta` |
+| `answer_generated` | Final synthesized answer (full markdown) | `data.answer`, `data.citations[]` |
+| `metrics` | Token usage and timing for the completed response | `data.input_tokens`, `data.output_tokens`, `data.generation_time_ms` |
+| `auto_routed` | Result of pre-flight mode classification | `data.mode`, `data.reason` |
+| `few_shot_retrieved` | Few-shot examples retrieved from RAG | `data.count`, `data.examples[]` |
 
-Create a manual insight from an assistant message.
+### Tier 2 -- Tool Call Chunks
 
-**Auth:** Any authenticated user.
+| Chunk Type | Description | Key Fields |
+|---|---|---|
+| `tool_call` | LLM is invoking a tool | `data.tool_name`, `data.args`, `data.reasoning` |
+| `tool_result` | Result of a tool execution | `data.tool`, `data.result`, `data.visualization`, `data.x_column`, `data.y_column` |
 
-**Request body:**
-```json
-{
-  "message_id": "msg002",
-  "user_note": "Important pattern to watch"
-}
-```
+### Tier 3 -- Pipeline Transparency Chunks (Legacy 8-Stage Pipeline)
 
-**Response** `200 OK`:
-```json
-{"status": "ok", "insight_id": "insight-abc"}
-```
+| Chunk Type | Stage | Description |
+|---|---|---|
+| `schema_linking_started` | SchemaLinker | Started linking schema for the question |
+| `candidate_sqls_generated` | SchemaLinker | Candidate SQLs from few-shot examples |
+| `literals_extracted` | SchemaLinker | Column literal values extracted |
+| `semantic_matches` | SchemaLinker | Semantic column-to-question matches |
+| `join_paths_added` | SchemaLinker | Join paths added to linked schema |
+| `linked_schema_final` | SchemaLinker | Final linked schema (ready for SQL gen) |
+| `sql_generated` | SqlGenerator | SQL query generated |
+| `sql_executing` | SqlExecutor | SQL query execution started |
+| `rows_returned` | SqlExecutor | Rows returned from execution |
 
-**Errors:** `404 Not Found` -- message not found
+### Tier 4 -- Orchestration Chunks (Agentic Mode)
 
----
-
-### GET /api/insights
-
-List the current user's insights (paginated).
-
-**Auth:** Any authenticated user.
-
-**Query parameters:**
-- `limit` -- Number of insights (1--100, default: 20)
-- `offset` -- Pagination offset (default: 0)
-- `bookmarked` -- If `true`, return only bookmarked insights (default: `false`)
-
-**Response** `200 OK` -- array of insight objects.
-
----
-
-### GET /api/insights/all
-
-Admin-scoped insights list (admin only).
-
-**Auth:** Admin required.
-
-**Query parameters:** Same as `GET /api/insights`.
+| Chunk Type | Description | Key Fields |
+|---|---|---|
+| `orchestrator_plan` | Multi-agent task decomposition | `data.reasoning`, `data.tasks[{id, agent, task, depends_on, category}]` |
+| `agent_trace` | Execution trace for a single orchestrator sub-task | `data.task_id`, `data.agent`, `data.final_sql`, `data.final_answer`, `data.success`, `data.steps[]` |
+| `enrichment_trace` | Execution trace for an enrichment sub-task (legacy path) | `data.source_index`, `data.category`, `data.final_sql`, `data.final_answer`, `data.steps[]` |
+| `insight` | Synthesized insight from multi-agent analysis | `data.content` (markdown with citations) |
+| `clarification` | Clarifying question from the orchestrator | `data.question`, `data.skip_allowed` |
 
 ---
 
-### GET /api/insights/count
+## Endpoint Summary
 
-Return the current user's total insight count (for badge display).
-
-**Auth:** Any authenticated user.
-
-**Response** `200 OK`:
-```json
-{"count": 12}
-```
-
----
-
-### GET /api/insights/{id}
-
-Get a single insight detail.
-
-**Auth:** Any authenticated user.
-
-**Response** `200 OK` -- insight object with `id`, `title`, `summary`, `content`, `categories`, `bookmarked`, `user_note`, `created_at`.
-
-**Errors:** `404 Not Found`
-
----
-
-### PATCH /api/insights/{id}/bookmark
-
-Toggle bookmark on an insight.
-
-**Auth:** Any authenticated user.
-
-**Request body:**
-```json
-{"bookmarked": true}
-```
-
-**Response** `200 OK`:
-```json
-{"status": "ok", "bookmarked": true}
-```
+| Category | Endpoints | Auth |
+|---|---|---|
+| Auth | 4 (`login`, `logout`, `me`, `change-password`) | Mixed |
+| Chat | 4 (`chat`, `poll`, `answer`, `route`) | Session |
+| Conversations | 5 (`list`, `search`, `detail`, `update`, `delete`) | Session |
+| Databases | 9 (`list`, `upload`, `upload-csv`, `schema`, `profile.get`, `profile.post`, `sample-questions`, `visibility`, `ensure-sample-questions`) | Mixed |
+| Connections | 5 (`list`, `create`, `update`, `delete`, `test`) | Session |
+| SQL | 1 (`execute`) | Session |
+| Insights | 6 (`list`, `admin-list`, `count`, `create`, `bookmark`, `delete`) | Mixed |
+| Feedback | 1 (`submit`) | Session |
+| Shared Snapshots | 3 (`create`, `get`, `delete`) | Session |
+| Public Shares | 1 (`view`) | None |
+| Automations | 11+ (main 9 + templates 5 + templates CRUD) | Session |
+| Notifications | 6 (`list`, `admin-list`, `count`, `stream`, `mark-read`, `mark-all-read`) | Mixed |
+| Config | 3 (`config.get`, `switch`, `client-config`) | Mixed |
+| Voice | 1 (WebSocket) | Cookie/Query |
+| Health | 1 (`health`) | None |
+| Metrics | 1 (`/metrics`) | None |
+| Admin | ~18 across 9 sub-routers | Admin |
+| Internal | 1 (`run-due-automations`) | HMAC |
+| **Total** | **~68 endpoints** | |
 
 ---
 
-### DELETE /api/insights/{id}
-
-Delete an insight.
-
-**Auth:** Any authenticated user.
-
-**Response** `200 OK`:
-```json
-{"status": "ok"}
-```
-
----
-
-## ChatChunk Schema
-
-Every event emitted by `POST /api/chat` is a JSON-serialized `ChatChunk`. All fields except `type`, `conversation_id`, and `timestamp` are optional and only populated for relevant chunk types.
-
-```
-ChatChunk {
-  type:            string    -- chunk type (see below)
-  content?:        string    -- human-readable text content
-  sql?:            string    -- SQL query text
-  tool_name?:      string    -- name of the tool being called
-  args?:           object    -- tool call arguments
-  data?:           object    -- type-specific structured payload
-  conversation_id: string    -- conversation ID (use for next turn)
-  timestamp:       float     -- Unix timestamp
-}
-```
-
-### Chunk Types
-
-**`status`** -- Progress indicator while the agent is working.
-```json
-{
-  "type": "status",
-  "content": "Running SQL analyst...",
-  "data": {"agent": "analyst", "phase": "executing"},
-  "conversation_id": "abc123",
-  "timestamp": 1700000000.0
-}
-```
-
-**`tool_call`** -- The LLM is invoking a tool.
-```json
-{
-  "type": "tool_call",
-  "content": "Calling run_sql with SELECT COUNT(*) FROM transactions",
-  "sql": "SELECT COUNT(*) FROM transactions",
-  "tool_name": "run_sql",
-  "args": {"query": "SELECT COUNT(*) FROM transactions"},
-  "data": {"llm_reasoning": "I need to count total transactions first."},
-  "conversation_id": "abc123",
-  "timestamp": 1700000001.0
-}
-```
-
-**`sql`** -- A SQL query that was executed.
-```json
-{
-  "type": "sql",
-  "sql": "SELECT merchant_category, SUM(amount) FROM transactions GROUP BY merchant_category",
-  "conversation_id": "abc123",
-  "timestamp": 1700000002.0
-}
-```
-
-**`tool_result`** -- The result of a tool execution. `data.result` is a JSON string containing `{columns, rows, row_count}` for SQL results. May include chart rendering hints.
-```json
-{
-  "type": "tool_result",
-  "data": {
-    "tool": "run_sql",
-    "result": "{\"columns\":[\"merchant_category\",\"total\"],\"rows\":[...],\"row_count\":10}",
-    "visualization": "bar",
-    "x_column": "merchant_category",
-    "y_column": "total"
-  },
-  "conversation_id": "abc123",
-  "timestamp": 1700000003.0
-}
-```
-
-**`answer`** -- The final markdown answer from the analyst agent.
-```json
-{
-  "type": "answer",
-  "content": "The top 5 merchant categories by total transaction value are:\n\n1. **Food & Dining** -- Rs.45.2M...",
-  "conversation_id": "abc123",
-  "timestamp": 1700000004.0
-}
-```
-
-**`insight`** -- A synthesized, cited markdown answer produced by the enrichment orchestrator (agentic mode only). Replaces or follows `answer` in multi-agent responses.
-```json
-{
-  "type": "insight",
-  "content": "## Payment Behavior Analysis\n\nBased on 5 independent analyses...",
-  "conversation_id": "abc123",
-  "timestamp": 1700000010.0
-}
-```
-
-**`error`** -- An error occurred during processing.
-```json
-{
-  "type": "error",
-  "content": "SQL syntax error: no such column 'merchant_name'",
-  "conversation_id": "abc123",
-  "timestamp": 1700000005.0
-}
-```
-
-**`clarification`** -- The LLM is asking the user a clarifying question before proceeding (only when `clarification_enabled` is true and `skip_clarification` is false).
-```json
-{
-  "type": "clarification",
-  "content": "Do you want to see this breakdown by city or by merchant category?",
-  "data": {"skip_allowed": true},
-  "conversation_id": "abc123",
-  "timestamp": 1700000001.0
-}
-```
-
-**`metrics`** -- Token usage and timing for the completed response. Always the last chunk before `[DONE]`.
-```json
-{
-  "type": "metrics",
-  "data": {
-    "input_tokens": 4321,
-    "output_tokens": 876,
-    "generation_time_ms": 3241
-  },
-  "conversation_id": "abc123",
-  "timestamp": 1700000011.0
-}
-```
-
-**`orchestrator_plan`** -- The multi-agent orchestrator's reasoning and task decomposition (agentic mode only).
-```json
-{
-  "type": "orchestrator_plan",
-  "data": {
-    "reasoning": "This question requires three independent analyses: volume by city, by type, and temporal trend.",
-    "tasks": [
-      {
-        "id": "task-1",
-        "agent": "analyst",
-        "task": "Calculate total transaction volume by city",
-        "depends_on": [],
-        "category": "geographic"
-      },
-      {
-        "id": "task-2",
-        "agent": "analyst",
-        "task": "Break down by transaction type",
-        "depends_on": [],
-        "category": "segmentation"
-      }
-    ]
-  },
-  "conversation_id": "abc123",
-  "timestamp": 1700000001.5
-}
-```
-
-**`agent_trace`** -- Execution trace for a single orchestrator sub-task.
-```json
-{
-  "type": "agent_trace",
-  "data": {
-    "task_id": "task-1",
-    "agent": "analyst",
-    "category": "geographic",
-    "task": "Calculate total transaction volume by city",
-    "final_sql": "SELECT city, SUM(amount) FROM transactions GROUP BY city",
-    "final_answer": "Mumbai leads with Rs.2.1B in total volume...",
-    "success": true,
-    "steps": [
-      {
-        "type": "tool_call",
-        "tool": "run_sql",
-        "sql": "SELECT city, SUM(amount) FROM transactions GROUP BY city",
-        "result_preview": "{\"columns\":[\"city\",\"total\"],\"rows\":[...]}"
-      }
-    ]
-  },
-  "conversation_id": "abc123",
-  "timestamp": 1700000005.0
-}
-```
-
-**`enrichment_trace`** -- Execution trace for an enrichment sub-task (legacy agentic mode path).
-```json
-{
-  "type": "enrichment_trace",
-  "data": {
-    "source_index": 0,
-    "category": "temporal",
-    "question": "What is the monthly trend?",
-    "final_sql": "SELECT strftime('%Y-%m', timestamp) AS month, COUNT(*) FROM transactions GROUP BY month",
-    "final_answer": "Transaction volume peaks in December...",
-    "steps": [...]
-  },
-  "conversation_id": "abc123",
-  "timestamp": 1700000007.0
-}
-```
-
-**`stats_context`** -- Pre-computed dataset statistics injected into the response for context (when `stats_context_injection` is enabled).
-```json
-{
-  "type": "stats_context",
-  "content": "| Metric | Value |\n|---|---|\n| Total Transactions | 250,000 |...",
-  "data": {
-    "groups": {
-      "by_type": {"P2P": {"count": 125000}, "P2M": {"count": 125000}}
-    }
-  },
-  "conversation_id": "abc123",
-  "timestamp": 1700000000.5
-}
-```
+_All SSE endpoints (chat, profiling, notification stream, orchestrator path) use `sse-starlette.EventSourceResponse` and terminate with `data: [DONE]`._

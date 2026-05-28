@@ -1,592 +1,437 @@
-# InsightXpert Agent Pipeline
+# InsightXpert.ai Pipeline & SSE Streaming
 
-InsightXpert's AI pipeline converts a natural-language question into an evidence-backed answer by orchestrating LLM calls, SQL execution, vector store retrieval, and optional statistical sub-agents. This document covers every phase of the pipeline from the initial request to the final SSE chunk.
-
-> **Visual diagram:** Open [`docs/diagrams/agentic-loop.excalidraw`](diagrams/agentic-loop.excalidraw) in [Excalidraw](https://excalidraw.com) for an interactive diagram of the full agentic processing pipeline — from user question through `_prepare_chat()`, the tool-calling loop, enrichment evaluation, DAG execution, and final response synthesis.
+InsightXpert.ai converts natural-language questions into SQL queries through a multi-stage pipeline. Every stage is transparent -- the frontend sees schema linking, candidate SQLs, row counts, and answer synthesis as they happen via SSE streaming. This document covers the pipeline architecture, every stage in detail, and the SSE chunk taxonomy that enables full transparency.
 
 ---
 
-## Overview
+## 1. Pipeline Overview
 
-The pipeline operates in three modes selected by the `agent_mode` field of `ChatRequest`:
+The text-to-SQL pipeline consists of **8 stages** that run sequentially, each implementing the `Stage` Protocol. The pipeline is constructed in `pipeline/__init__.py`:
 
-| Mode | Description |
+```
+ProfilerStage
+  → SchemaLinkerStage | FullSchemaStage  (depends on pipeline_mode)
+    → SqlGeneratorStage
+      → SqlValidatorStage
+        → SqlExecutorStage
+          → SqlRefinerStage
+            → AnswerSynthesizerStage
+```
+
+Flow:
+1. **Profiler** extracts schema, collects stats, builds join graph and vector index.
+2. **SchemaLinker** (or FullSchemaStage) selects relevant tables/columns for the question.
+3. **SqlGenerator** produces candidate SQL via LLM.
+4. **SqlValidator** checks SQL syntax with sqlglot.
+5. **SqlExecutor** runs the SQL against the user's database.
+6. **SqlRefiner** retries on execution errors (up to 2 iterations).
+7. **Synthesizer** streams the final answer with `[^N]` footnotes.
+
+Each stage emits typed SSE chunks so the user sees exactly what is happening. No stage is silent.
+
+---
+
+## 2. Stage Protocol
+
+Every pipeline stage implements the `Stage` Protocol (PEP 544 structural typing):
+
+```python
+@runtime_checkable
+class Stage(Protocol):
+    name: str
+    async def run(self, ctx: PipelineContext, input: Any) -> Any: ...
+```
+
+### PipelineContext
+
+The shared context threaded through all stages:
+
+```python
+@dataclass
+class PipelineContext:
+    session_id: str
+    conversation_id: str
+    emitter: EventEmitter | None = None
+    state: dict[str, Any] = field(default_factory=dict)
+```
+
+Key design choices:
+- **`typing.Protocol`** (not `abc.ABC`): Structural subtyping means any object with `name` and `run()` satisfies the contract. Vendored pipeline classes don't need to inherit from our base class.
+- **`@runtime_checkable`**: Enables `isinstance(obj, Stage)` checks at registration time.
+- **`ctx.state` is a plain `dict[str, Any]`**: Stages read/write different keys (`question`, `db_id`, `profile`, `schema_text`, `sql`, `rows`, `answer`). A typed model would force all stages to know about all possible keys.
+- **`ctx.emitter`**: Optional `EventEmitter` for SSE transparency. Set once at pipeline construction and shared across all stages.
+
+### Pipeline Runner
+
+`Pipeline.run_scalar()` iterates stages sequentially. For each stage:
+1. Logs `stage.start`.
+2. Emits `STATUS` chunk with stage name.
+3. Calls `await stage.run(ctx, current)` -- `current` is the previous stage's return value.
+4. Logs `stage.end` with elapsed ms.
+5. On exception: logs `stage.error`, emits `ERROR`, **re-raises** (aborting pipeline).
+
+### Input/Output Contract
+
+Each stage declares what it reads from `ctx.state` and what it writes and returns:
+
+| Stage | Reads from ctx.state | Returns | Writes to ctx.state |
+|---|---|---|---|
+| ProfilerStage | `db_id`, `__prefetched_profile` | `DatabaseProfile` | `profile` |
+| SchemaLinkerStage | `question`, `profile`, `db_id` | `{schema_text, ...}` | `schema_text`, `column_sources`, `linked_tables`, `linked_columns` |
+| SqlGeneratorStage | `question`, `schema_text`, `few_shot_example` | SQL string | `sql` |
+| SqlValidatorStage | `sql` | SQL string | `error` (on failure) |
+| SqlExecutorStage | `sql`, `db_id`, `error` (skip flag) | rows list | `rows` or `error` |
+| SqlRefinerStage | `error`, `sql`, `schema_text`, `question` | refined SQL | `rows` or `error` |
+| AnswerSynthesizerStage | `question`, `schema_text`, `sql`, `rows` | answer string | `answer` |
+
+### Error-as-Flag Pattern
+
+The validator and executor do **not raise exceptions**. They write `ctx.state["error"]` as a sentinel string:
+
+```
+SqlValidatorStage: sqlglot parse fails → ctx.state["error"] = "sql_validation_failed: ..."
+SqlExecutorStage: sees "error" already set → skips execution
+                  execution fails → ctx.state["error"] = "sql_execution_error: ..."
+SqlRefinerStage:   sees "error" → enters retry loop
+                   recovers → clears ctx.state["error"]
+                   can't recover → leaves ctx.state["error"] set
+SynthesizerStage:  sees "error" → skips entirely (returns "")
+```
+
+This allows the refiner to recover from validation/execution errors without aborting the entire pipeline.
+
+---
+
+## 3. Stage-by-Stage Detail
+
+### Stage 1: ProfilerStage (`name="profiler"`)
+
+**File:** `pipeline/profiler_stage.py`
+
+The profiler extracts and caches everything needed about the database schema.
+
+**Process:**
+1. Pops `__prefetched_profile` from context (populated during preflight). If present, uses immediately (skips DB read).
+2. Else: checks `ProfileService.load()` (Postgres metadata DB → in-process cache).
+3. Else: runs the full `build_profile()` flow:
+   - Opens the database file via `vendored.pipeline_core.db.SQLiteDatabase`.
+   - Extracts schema via `SchemaExtractor.extract()`.
+   - Collects column stats via `StatsCollector.collect()`.
+   - Auto-disables LLM stages if total columns > `PROFILING_MAX_COLUMNS_FOR_LLM` (default 500).
+   - Runs batched LLM summary + quirk generation (from the `profiling/` module).
+4. Saves via `ProfileService.save()` (upserts to Postgres, invalidates in-process cache).
+5. Resolves DB file path.
+
+**Batching**: LLM calls are batched (20 columns per call, configurable via `PROFILING_BATCH_SIZE`) instead of one call per column. A `batch_disabled` escape hatch exists for per-column mode.
+
+**Cost gating**: Before LLM profiling begins, a cost estimate is computed and the system emits a `profile_cost_estimate` chunk. If the cost exceeds a threshold, profiling requires user confirmation (the "cost gate handshake").
+
+**Quirk detection**: Rule-based heuristics detect special characters in values, numbered groups, FK aliases, type mismatches, symbolic values, and enum labels. Detected quirks are enriched with LLM-generated semantic hints.
+
+**Vector index**: Column descriptions are embedded and indexed for cosine-similarity semantic search used by SchemaLinkerStage.
+
+**LSH index**: MinHash-based Locality-Sensitive Hashing index for literal value matching (used by SchemaLinkerStage).
+
+**Join graph**: `JoinGraphBuilder` builds a graph from declared foreign keys + implicit edges (column-name matching with SQL containment verification).
+
+**Emits**: `PROFILE_LOADED` with `{db_id, table_count, column_count, from_cache}`
+
+### Stage 2a: SchemaLinkerStage (`name="schema_linker"`)
+
+**File:** `pipeline/linker_stage.py`
+
+The linker selects which tables and columns are relevant to the user's question. This is the most complex stage, with 5 signal sources:
+
+**1. Trial SQL Generation**
+- Renders `single_prompt_linking_clean.j2` with the full schema.
+- Calls LLM to generate candidate SQL queries.
+- Parses fenced SQL blocks via regex.
+- Extracts table/column references from each candidate.
+- Deduplicates across candidates via `union_fields()`.
+- **Emits**: `CANDIDATE_SQLS_GENERATED`
+
+**2. LSH Literal Matching** (best-effort)
+- Loads the pickled LSH index if available.
+- Matches SQL string literals to actual column values.
+- Finds columns whose values contain the literals referenced in candidate SQLs.
+- **Emits**: `LITERALS_EXTRACTED`
+
+**3. Vector Semantic Search** (best-effort)
+- Loads the `VectorIndex` if available.
+- Embeds the user's question.
+- Searches top-10 columns with cosine similarity > 0.5.
+- **Emits**: `SEMANTIC_MATCHES`
+
+**4. FK Join Paths**
+- `add_join_paths()` expands the linked set by following declared foreign keys.
+- Connects tables that are reachable through FK relationships.
+- **Emits**: `JOIN_PATHS_ADDED`
+
+**5. Bridge FK Discovery**
+- Detects implicit foreign keys not declared in the schema.
+- Uses column-name heuristics (e.g., `table_id` patterns).
+
+**6. Quirk Consumption**
+- Reads `ColumnQuirks` from the profile (FK aliases, enum labels, semantic hints).
+- Uses quirk information to improve column selection accuracy.
+
+**7. Final Render**
+- Renders the linked schema as a compact text block for SQL generation.
+- **Emits**: `LINKED_SCHEMA_FINAL`
+
+**Emits sequence**: `SCHEMA_LINKING_STARTED` → `CANDIDATE_SQLS_GENERATED` → `LITERALS_EXTRACTED` → `SEMANTIC_MATCHES` → `JOIN_PATHS_ADDED` → `LINKED_SCHEMA_FINAL`
+
+### Stage 2b: FullSchemaStage (`name="full_schema"`)
+
+**File:** `pipeline/full_schema_stage.py`
+
+A complete bypass of the linker. Re-extracts the schema from the database file via `SchemaExtractor.extract()` (the profile has no FK data), then calls `SchemaFormatter(join_graph=None).format(...)` to render the complete schema with inline FK tags and per-table `Foreign Keys:` blocks.
+
+Used when the database is small enough (or the user/admin has selected `pipeline_mode="full_schema"`) that filtering the schema is unnecessary.
+
+**Emits**: `STATUS` chunk: `"pipeline_mode=full_schema — linker bypassed (N tables, M columns)"`
+
+### Stage 3: SqlGeneratorStage (`name="sql_generator"`)
+
+**File:** `pipeline/generator_stage.py`
+
+Generates SQL from the linked schema and user question.
+
+**Process:**
+1. Renders `sql_generation.j2` (a ~160-line prompt with Chain-of-Thought reasoning, JOIN guidance, and rule includes). The prompt uses `{% if few_shot_example %}` to conditionally inject a BIRD-train QA pair.
+2. Calls `llm.async_generate(prompt)`.
+3. Extracts SQL from the first ` ```sql ``` ` fenced block via regex.
+
+The vendored `pipeline_core` also provides:
+- **Candidate generation**: Multiple candidates via temperature shuffle and schema ordering shuffle for diversity.
+- **Majority voting**: Groups candidates by result-set equality, picks the largest group.
+- **Self-correction**: Tool-calling loop where the LLM writes SQL, executes it, inspects results, and iterates (max 3 turns).
+- **Few-shot retrieval**: At runtime, embeds the user's question and performs cosine similarity against a per-DB BIRD-train embedding bank (float16, 1536-dim), returning the top-1 match.
+
+**Emits**: `SQL_GENERATED` with `{sql, iteration=0}`
+
+### Stage 4: SqlValidatorStage (`name="sql_validator"`)
+
+**File:** `pipeline/validator_stage.py`
+
+Validates SQL syntax using **sqlglot** (`sqlglot.parse_one(sql, dialect=...)`). The dialect is resolved from the DialectAdapter's `sqlglot_dialect` property.
+
+- **On failure**: Sets `ctx.state["error"]`, emits `ERROR`, returns `None`.
+- **On success**: Clears any stale `"error"`, emits `STATUS("SQL valid")`.
+
+### Stage 5: SqlExecutorStage (`name="sql_executor"`)
+
+**File:** `pipeline/executor_stage.py`
+
+Executes the validated SQL against the user's database.
+
+**Process:**
+1. Skips entirely if `ctx.state["error"]` is already set (from validator failure).
+2. Resolves the database file path via `DatabaseService.resolve()`.
+3. Emits `SQL_EXECUTING`.
+4. Calls `DatabaseConnector.execute(sql)` with read-only enforcement:
+   - `FORBIDDEN_SQL_RE` regex check (blocks INSERT/UPDATE/DELETE/DROP/ALTER/CREATE/TRUNCATE/REPLACE).
+   - `PRAGMA query_only = ON` (SQLite) or read-only connection (Postgres), reset in `finally`.
+   - Fetches up to `SQL_ROW_LIMIT` rows (default 1000).
+   - Timeout via `statement_timeout` (Postgres) or `connect_timeout` (SQLite), default 30s.
+5. On success: emits `ROWS_RETURNED` with `{columns, rows, row_count, execution_time_ms}`.
+6. On failure: sets `ctx.state["error"]`, emits `ERROR`.
+
+### Stage 6: SqlRefinerStage (`name="sql_refiner"`)
+
+**File:** `pipeline/refiner_stage.py`
+
+Iterative error recovery loop (max 2 iterations, configurable via `MAX_REFINEMENT_ITERATIONS`).
+
+**Process:**
+1. Passes through if no error flag.
+2. For each iteration:
+   - Renders `refine_sql.j2` with schema, question, previous SQL, and error message.
+   - Calls LLM to generate corrected SQL.
+   - Extracts SQL from fenced block.
+   - Inline validates (sqlglot parse).
+   - Inline executes.
+3. On success: clears `ctx.state["error"]`, sets `ctx.state["rows"]`, returns refined SQL.
+4. On persistent failure: leaves `ctx.state["error"]` set.
+
+**Buffer-then-flush pattern**: Errors are buffered during execution attempts and only flushed to the SSE stream after all refinement iterations are exhausted. This prevents the frontend from showing transient errors that the refiner subsequently fixes.
+
+**Emits per iteration**: `SQL_GENERATED (iteration=N)` → `SQL_EXECUTING` → `ROWS_RETURNED` (on success)
+
+### Stage 7: AnswerSynthesizerStage (`name="answer_synthesizer"`)
+
+**File:** `pipeline/synthesizer_stage.py`
+
+Synthesizes the final natural-language answer from the question, SQL, and result rows.
+
+**Process:**
+1. Skips if `ctx.state["error"]` is set.
+2. Renders `answer_synthesizer.j2` with question, DDL, SQL, columns, and rows.
+3. Calls `llm.async_generate_stream(prompt)` -- **streaming path**.
+4. For each non-empty delta: emits `answer_delta` chunk (`{text}`) so the frontend renders materializing text live. This departs from the "stage writes state, route emits" pattern deliberately.
+5. On completion: emits terminal `ANSWER_GENERATED` with the full answer text.
+
+**Footnote format**: Answers use `[^1]`, `[^2]` citation format matching the frontend's inline footnote renderer.
+
+**Graceful degradation**: If LLM streaming fails, falls back to `"Query returned {row_count} rows."`.
+
+**Emits**: `answer_delta` (multiple, during streaming) → `ANSWER_GENERATED` (from route layer)
+
+---
+
+## 4. SSE Chunk Taxonomy
+
+Every chunk on the wire uses a strict envelope:
+
+```json
+{"type": "<ChunkType>", "data": {<typed payload>}, "conversation_id": "<uuid>", "timestamp": 1713123456.789}
+```
+
+The `ChunkType` enum defines ~50 typed chunk types organized into four tiers:
+
+### Tier 1: Lifecycle (every chat turn)
+
+| Type | Description |
 |---|---|
-| `basic` (formerly `analyst`) | Single SQL analyst loop. Direct question → SQL → answer. |
-| `agentic` (formerly `auto`, `statistician`, `advanced`) | Analyst-first with conditional enrichment via a multi-agent DAG. |
-| `deep` | 5W1H dimensional analysis: extracts WHO/WHAT/WHEN/WHERE/HOW dimensions, runs analyst, executes targeted enrichment, synthesizes a structured insight. |
+| `status` | Progress message; may include `rag_context` or `agent`/`phase` data |
+| `error` | Error with code and detail |
+| `metrics` | Terminal chunk: `{latency_ms, prompt_tokens, output_tokens, total_tokens, model}` |
 
-Legacy mode names (`auto`, `statistician`, `advanced`, `analyst`) are mapped in `api/models.py` via `_LEGACY_MODE_MAP` and in `orchestrator_loop()` before dispatch.
+### Tier 2: Generic Tool Protocol (agentic mode)
 
----
+| Type | Description |
+|---|---|
+| `tool_call` | Tool invocation: `{tool_name, args, llm_reasoning}` |
+| `tool_result` | Tool result: `{tool: name, result: json_string}` |
 
-## Entry Point
+### Tier 3: Pipeline Transparency (one per stage)
 
-`POST /api/chat` is handled by `chat_sse()` in `api/routes.py`. Before any agent logic runs, `_prepare_chat()` executes:
-
-1. Retrieves `llm`, `db`, `rag`, `settings`, `conv_store`, `dataset_service` from `app.state`
-2. Gets in-memory history for the conversation ID
-3. If in-memory history is empty but a `conversation_id` was provided, hydrates from `PersistentConversationStore` (handles server restarts and TTL expiry)
-4. Adds the user message to in-memory store
-5. Ensures a `conversations` row exists in SQLite via `get_or_create_conversation`
-6. Persists the user message to SQLite
-
-A `_TokenCountingLLM` wrapper is created around the base LLM provider to accumulate `input_tokens` and `output_tokens` across all LLM calls in the request.
-
-Feature flags are resolved via `_resolve_user_features(request, user)`:
-- Reads `ClientConfig` from DB (60s TTL cache)
-- Determines the user's org from `user_org_mappings`
-- Returns the org-specific `FeatureToggles` (or global defaults for admins and admin-domain users)
-
-`orchestrator_loop()` is then called as an async generator, and each yielded `ChatChunk` is serialized to JSON and sent as an SSE event.
-
----
-
-## Stats Context Pre-Fetch
-
-Before the analyst runs, `orchestrator_loop()` resolves pre-computed stats if the `stats_context_injection` feature flag is ON:
-
-```python
-if config.enable_stats_context and stats_context_injection:
-    stats_result = await asyncio.to_thread(StatsResolver().resolve, question, db.engine)
-    if stats_result:
-        stats_context = stats_result.markdown
-        stats_groups = stats_result.groups
-```
-
-`StatsResolver.resolve()` lowercases the question and scans `STAT_PATTERNS` — a list of `(keyword_list, stat_group_list)` tuples. If any keyword matches, it queries the `dataset_stats` table for those groups and formats the results as compact markdown. Example patterns:
-
-- Keywords `["bank", "sbi", "hdfc", ...]` → fetch stat group `"bank"`
-- Keywords `["fraud", "flag", "flagged", ...]` → fetch groups `["overall", "merchant_category", "state"]`
-- Keywords `["month", "monthly", "trend", ...]` → fetch group `"monthly"`
-
-The resolved markdown is passed into `analyst_loop()` as `stats_context`. If no keywords match, `stats_context` remains `None` and there is no performance overhead.
-
----
-
-## Active Dataset Resolution
-
-`orchestrator_loop()` resolves the active dataset's DDL and documentation before running any agent:
-
-```python
-active_ds = await asyncio.to_thread(dataset_service.get_active_dataset)
-if active_ds:
-    ddl_override = active_ds.get("ddl")
-    docs_override = await asyncio.to_thread(
-        dataset_service.build_documentation_markdown, active_ds["id"]
-    )
-```
-
-If an active dataset exists, `ddl_override` and `docs_override` replace the hardcoded `training/schema.py` DDL and `training/documentation.py` documentation throughout the entire pipeline (analyst, quant analyst, response generator). This enables the multi-tenant dataset feature.
-
----
-
-## Basic Mode: analyst_loop
-
-`analyst_loop()` in `agents/analyst.py` is an async generator that yields `ChatChunk` objects. The caller iterates over them and either yields them downstream (agentic mode) or streams them directly to the SSE response (basic mode).
-
-### Step 1 — RAG Retrieval
-
-```python
-similar_qa = await asyncio.to_thread(
-    rag.search_qa, question, n=5, max_distance=1.0, sql_valid_only=True,
-)
-```
-
-Fetches up to 5 question→SQL pairs from ChromaDB that:
-- Are semantically similar to the question (L2 distance ≤ 1.0)
-- Were previously validated (`sql_valid=True` in metadata)
-
-These pairs become few-shot examples in the system prompt. The distance threshold of 1.0 filters weak matches that would add noise. RAG retrieval latency is logged in milliseconds.
-
-A `status` chunk is yielded with the count of matches found and the question titles for the frontend's RAG context dropdown.
-
-### Step 2 — System Prompt Assembly
-
-```python
-system_prompt = render_prompt(
-    "analyst_system.j2",
-    engine=db.engine,
-    ddl=active_ddl,
-    documentation=active_docs,
-    similar_qa=similar_qa,
-    relevant_findings=[],
-    stats_context=stats_context,
-    clarification_enabled=clarification_enabled,
-)
-```
-
-`render_prompt()` tries the DB first (`prompt_templates` table), falls back to the `.j2` file. The Jinja2 template conditionally includes:
-- DDL section (always)
-- Documentation section (always)
-- `{% if similar_qa %}` — few-shot example block
-- `{% if stats_context %}` — pre-computed statistics block with instructions to answer from stats when sufficient
-- `{% if clarification_enabled %}` — instructions for when to use the `clarify` tool
-
-If `stats_context` was injected but the DB template predates the stats feature (no `stats_context` block), the stats are appended directly to the system prompt as a fallback.
-
-### Step 3 — Message List Assembly
-
-```python
-messages = [
-    {"role": "system", "content": system_prompt},
-    # conversation history (prior user/assistant turns, max 20)
-    *history,
-    {"role": "user", "content": question},
-]
-```
-
-History messages are injected between the system prompt and the current question. This gives the LLM conversational context for multi-turn follow-up questions.
-
-### Step 4 — Agentic Tool Loop
-
-The loop runs up to `max_agent_iterations` (default 10) iterations:
-
-```python
-for iteration in range(max_iter):
-    response = await llm.chat(messages, tools=tool_registry.get_schemas())
-    ...
-```
-
-**Guard rail — force tool use (first iteration):**
-
-If `response.tool_calls` is empty AND no tools have been executed yet in this session:
-
-- If `stats_context` is present: the LLM is permitted to answer directly from stats. A `stats_context` chunk is emitted for frontend transparency, then execution falls through to the final-answer branch.
-- Otherwise: the response is rejected. The LLM's partial answer is appended to messages as an assistant message, followed by a corrective user message:
-
-  ```
-  "You MUST use the run_sql tool to query the database before answering.
-  Do not answer from memory or prior context."
-  ```
-
-  (When `clarification_enabled=True`, the corrective message also allows the `clarify` tool.)
-
-  The loop continues to the next iteration.
-
-This guard prevents the LLM from hallucinating answers based on training data or the few-shot examples in the prompt. Every answer must be backed by a database query unless pre-computed stats are sufficient.
-
-**When tool calls are present:**
-
-For each `ToolCall` in `response.tool_calls`:
-
-1. Yield a `tool_call` chunk (tool name, arguments, optional LLM reasoning from `response.content`)
-2. If the tool is `run_sql`: yield a `sql` chunk with the query text and a `status` chunk
-3. Execute the tool: `await tool_registry.execute(tc.name, tc.arguments, tool_context)`
-4. Set `tools_executed = True`
-5. If the tool is `clarify`: parse the JSON result, yield a `clarification` chunk, and `return` (stop the loop — wait for the user's answer)
-6. Append the tool result to messages as a `{"role": "tool", ...}` message
-7. Yield a `tool_result` chunk (includes `visualization`, `x_column`, `y_column` hints for chart rendering)
-
-The loop continues. The LLM receives tool results and generates another response.
-
-**When no tool calls after tools have executed:**
-
-The LLM has produced a final text answer. Yield an `answer` chunk with `response.content` and break.
-
-**Iteration exhaustion:**
-
-If all `max_iter` iterations complete without a final answer, yield an `error` chunk and stop.
-
-### Step 5 — Auto-Save
-
-After a successful answer, `_extract_sql_from_messages()` walks the message list in reverse to find the last SQL (from a `run_sql` tool call argument or a fenced ` ```sql ``` ` block in any message). The pair is persisted:
-
-```python
-await asyncio.to_thread(
-    rag.add_qa_pair, question, sql, {"sql_valid": True},
-)
-```
-
-This creates a self-improving flywheel: every successful answer becomes a future few-shot example. Auto-save failures are logged at DEBUG level and do not affect the response.
-
----
-
-## Agentic Mode: orchestrator_loop
-
-`orchestrator_loop()` in `agents/orchestrator.py` implements the four-phase analyst-first enrichment flow.
-
-### Phase 1 — Analyst (Immediate Results)
-
-The analyst runs with the original question. Every chunk is yielded directly to the SSE response — the user sees SQL, table results, and the answer immediately, before any enrichment begins.
-
-Simultaneously, the orchestrator collects:
-- `analyst_sql` — extracted from `sql` chunks
-- `analyst_rows` — parsed from `tool_result` chunks where `tool == "run_sql"` (up to the full result set)
-- `analyst_answer` — extracted from `answer` chunks
-- `analyst_had_error` — set if any `error` or `clarification` chunk is emitted
-
-If the analyst had an error or produced no answer, the orchestrator stops here and returns. No enrichment is attempted.
-
-### Phase 2 — Enrichment Evaluation
-
-A `status` chunk announces that deeper analysis is being evaluated.
-
-RAG context for the evaluator is fetched:
-```python
-similar = rag.search_qa(question, n=5)
-rag_context = [doc for doc if doc["distance"] <= 1.0]
-```
-
-Then `evaluate_for_enrichment()` is called (timeout: 60 seconds):
-
-```python
-enrichment_plan = await evaluate_for_enrichment(
-    question=question,
-    analyst_sql=analyst_sql,
-    analyst_rows=analyst_rows,
-    analyst_answer=analyst_answer,
-    llm=llm,
-    ddl=effective_ddl,
-    documentation=effective_docs,
-    history=history,
-    rag_context=rag_context,
-    max_tasks=config.max_orchestrator_tasks,
-)
-```
-
-Inside `evaluate_for_enrichment()`:
-1. Renders `enrichment_evaluator.j2` with all context (question, SQL, rows summary, answer, RAG hits, history)
-2. Single LLM call with no tools — output must be JSON
-3. If `parsed["enrich"] == False`: returns `None` → analyst answer stands, no enrichment
-4. If `parsed["enrich"] == True`: validates the task plan via `_validate_plan()` and returns an `OrchestratorPlan`
-
-The evaluator prompt biases toward "no enrichment" for simple factual questions and toward "yes" for questions where comparative context, temporal trends, root-cause analysis, or segmentation would materially improve the answer.
-
-On any failure (timeout, JSON parse error, validation error), `evaluate_for_enrichment()` returns `None` — the analyst answer stands.
-
-### Phase 3 — DAG Execution
-
-An `orchestrator_plan` chunk is emitted listing the enrichment tasks.
-
-`execute_dag()` in `agents/dag_executor.py` runs tasks with maximum parallelism:
-
-```python
-results = await execute_dag(
-    plan=enrichment_plan,
-    run_task=run_task,
-    on_task_start=on_task_start,
-    on_task_complete=on_task_complete,
-)
-```
-
-The DAG executor:
-1. Finds all tasks whose `depends_on` list is empty or fully satisfied
-2. Launches them all concurrently with `asyncio.gather()`
-3. As tasks complete, checks for newly unblocked tasks and launches those
-4. Repeats until all tasks are done, errored, or skipped
-5. On task failure: marks downstream tasks as `skipped` recursively
-
-Circular dependencies are detected at validation time via Kahn's algorithm (`_has_cycle()`). If a cycle is found, all dependency links are removed and tasks run in parallel.
-
-Each task runs as either:
-
-**`sql_analyst`** — calls `analyst_loop()` for the sub-task's natural-language question. Collects `collected_sql`, `collected_rows`, `collected_answer`, and full `trace_steps` (one step per chunk). Returns a `SubTaskResult`.
-
-**`quant_analyst`** — calls `quant_analyst_loop()` with `upstream_results` (the `SubTaskResult` from depended-on tasks). The quant analyst merges upstream rows into a DataFrame and runs statistical analysis tools. Returns a `SubTaskResult` with an `answer` but typically no `sql`.
-
-`on_task_start` and `on_task_complete` callbacks accumulate `status` and `agent_trace` chunks in `pending_chunks`, which are yielded after the DAG completes.
-
-### Sub-Task Categories
-
-The evaluator assigns each task one of four categories:
-
-| Category | Label | When used |
+| Type | Stage | Payload |
 |---|---|---|
-| `comparative_context` | Comparative Context | Question asks about a specific value but benchmark context is missing |
-| `temporal_trend` | Temporal Trend | Data changes over time and the analyst showed a snapshot |
-| `root_cause` | Root-Cause Analysis | Anomaly or outlier in the analyst result needs explanation |
-| `segmentation` | Segmentation | Aggregate answer would be more useful broken down by a dimension |
+| `profile_loaded` | Profiler | `{db_id, table_count, column_count, from_cache}` |
+| `schema_linking_started` | SchemaLinker | -- |
+| `candidate_sqls_generated` | SchemaLinker | `{candidates: [{sql, tables, columns}, ...]}` |
+| `literals_extracted` | SchemaLinker | `{literals: [{value, matched_columns}, ...]}` |
+| `semantic_matches` | SchemaLinker | `{matches: [{column, similarity}, ...]}` |
+| `join_paths_added` | SchemaLinker | `{paths: [{from_table, to_table, via_column}, ...]}` |
+| `linked_schema_final` | SchemaLinker | `{schema_text, table_count, column_count}` |
+| `sql_generated` | SqlGenerator / SqlRefiner | `{sql, iteration}` |
+| `sql_executing` | SqlExecutor | -- |
+| `rows_returned` | SqlExecutor | `{columns, rows, row_count, execution_time_ms}` |
+| `answer_generated` | Route layer | `{answer}` |
+| `answer_delta` | Synthesizer | `{text}` (incremental, during streaming) |
+| `few_shot_retrieved` | Preflight | `{question, sql, similarity}` |
 
-### Phase 4 — Response Synthesis
+### Tier 4: Orchestration Transparency (agentic mode)
 
-`generate_response()` in `agents/response_generator.py` makes a single LLM call (no tools) to combine all evidence into a cited response:
+| Type | Description |
+|---|---|
+| `auto_routed` | Mode classification result: `{from_mode, to_mode, reason}` |
+| `stats_context` | Pre-computed statistics injected into prompt |
+| `clarification` | Clarifying question: `{question, skip_allowed}` |
+| `orchestrator_plan` | Enrichment plan: `{reasoning, tasks: [{id, agent, category, question, depends_on}]}` |
+| `agent_trace` | Per-task execution details with `steps` array |
+| `enrichment_trace` | Citation source: `{source_index, category, question, sql, answer, steps}` |
+| `insight` | Synthesized cited response (agentic mode only) |
 
-Evidence blocks are assembled:
-- Source [1]: Original analyst answer (question, SQL, rows summary, answer)
-- Source [2..N]: Each successful enrichment task (category label, task description, SQL, rows summary, answer)
+### Profiling Upgrade Types
 
-The `response_generator.j2` template instructs the LLM to write a leadership-grade response with inline citations `[1]`, `[2]`, etc. matching the source indices.
+Additional types for the profiling pipeline:
+`profile_stage_started`, `profile_stage_completed`, `profile_progress`, `profile_cost_estimate`, `profile_done`, `profile_error`, `sample_questions_ready`.
 
-The synthesized markdown is emitted as an `insight` chunk.
+### EventEmitter
 
-On LLM failure, `_fallback_answer()` concatenates individual agent answers separated by `---` dividers.
-
-### Phase 5 — Enrichment Traces
-
-After the insight, one `enrichment_trace` chunk is emitted per source for the citation system:
-
-- Source [1]: Original analyst (category "SQL Analysis", question, sql, answer, no steps)
-- Source [2..N]: Each successful enrichment task (category label, question, sql, answer, full trace_steps)
-
-The frontend's `CitationLink` component renders `[N]` references in the insight text as clickable links. Clicking opens a `TraceModal` showing the source's category, question, SQL, and execution steps.
-
----
-
-## Deep Think Mode
-
-`deep_think_loop()` in `agents/deep_think.py` extends the agentic flow with a 5W1H framing:
-
-**Phase 1 — Dimension Extraction** (15s timeout):
-Single LLM call maps the question onto WHO/WHAT/WHEN/WHERE/HOW dimensions, identifies the WHY intent, and pre-plans targeted enrichment tasks for any uncovered dimensions.
-
-**Phase 2 — Analyst**:
-`analyst_loop()` runs unchanged. User sees immediate results.
-
-**Phase 3 — Targeted Enrichment**:
-The pre-planned enrichment tasks from Phase 1 execute via `execute_dag()`, reusing `_run_sql_analyst()`.
-
-**Phase 4 — Synthesis** (60s timeout):
-`deep_synthesizer.j2` template produces a 5W1H-structured insight with `[[N]]` citations.
+`EventEmitter` in `sse/emitter.py` manages per-request SSE streaming:
+- One emitter per request, stored in `app.state.user_notification_emitters` keyed by user_id.
+- `emit(chunk_type, payload)` wraps in `ChatChunk` envelope, puts on `asyncio.Queue(maxsize=256)`.
+- Queue uses oldest-drop back-pressure when full (sampled warnings every 10th drop).
+- `stream()` async generator yields `chunk.to_json()` until `None` sentinel, then `"[DONE]"`.
+- `EventSourceResponse` wraps the generator, framing each yield as `data: ...\n\n`.
+- SSE idle reaper (60s tick) evicts entries idle >15 minutes with no subscribers.
 
 ---
 
-## Quant Analyst Sub-Agent
+## 5. Pipeline Modes
 
-`quant_analyst_loop()` in `agents/quant_analyst.py` is used for enrichment tasks that require statistical analysis beyond SQL.
+### "linked" (default)
 
-### Setup
+The `SchemaLinkerStage` runs the full 5-signal linking process. This is the default for most databases because it reduces the schema to only relevant tables/columns, saving LLM prompt tokens and improving SQL generation accuracy.
 
-Upstream results from depended-on `sql_analyst` tasks are merged:
-```python
-for task_id, result in upstream_results.items():
-    if result.success and result.rows:
-        merged_results.extend(result.rows)
-```
+### "full_schema"
 
-A `ToolContext` is created with `analyst_results=merged_results` so all stat tools have access to the upstream DataFrame.
+The `FullSchemaStage` bypasses all linker logic and presents the complete schema to the SQL generator. Best for small databases (fewer than ~10 tables) where filtering is unnecessary overhead.
 
-If no upstream data is available, the agent emits an `error` chunk and returns immediately.
+### Mode Selection Precedence
 
-### System Prompt
-
-`quant_analyst_system.j2` receives:
-- DDL and documentation (same as analyst)
-- `analyst_sql` — the SQL that produced the upstream data
-- `results_summary` — compact text summary of upstream rows
-- `upstream_context` — per-source markdown blocks with source ID, SQL, row count, and answer excerpt
-
-### Tool Loop
-
-`agent_tool_loop()` in `agents/common.py` runs the agentic loop (same logic as the analyst loop, without the guard rail since the quant analyst always has data to work with). Max iterations: `max_quant_analyst_iterations` (default 5).
-
-### Available Tools
-
-The quant analyst's `_quant_registry()` merges the advanced registry (which includes `run_sql` and `run_python`) with the four stat-specific tools:
-
-**`compute_descriptive_stats`**:
-- Input: `{"column": "amount"}`
-- Output: count, mean, std, min, Q1, median, Q3, max, skewness, kurtosis
-
-**`test_hypothesis`**:
-- Supported tests: `chi_squared`, `t_test`, `mann_whitney`, `anova`, `z_proportion`
-- `chi_squared`: contingency table test with Cramér's V effect size
-- `t_test`: Welch's t-test with Cohen's d
-- `mann_whitney`: non-parametric U-test with rank-biserial r
-- `anova`: one-way F-test with eta squared
-- `z_proportion`: one-sample proportion test
-- All tests report `significant_at_005: bool`
-
-**`compute_correlation`**:
-- Methods: `pearson`, `spearman`, `kendall`
-- Reports coefficient, p-value, n, significance flag
-
-**`fit_distribution`**:
-- Candidates: normal, exponential, lognormal, gamma, weibull_min
-- Ranked by KS-test p-value (higher = better fit)
-- Reports params for each fitted distribution
-
-**`run_python`** (sandboxed):
-- Pre-loaded globals: `np`, `pd`, `stats` (scipy.stats), `math`, `json`, `itertools`, `collections`, `functools`, `datetime`, `re`, `df`
-- Import whitelist: `_ALLOWED_IMPORT_ROOTS` — numpy, pandas, scipy, math, json, itertools, collections, functools, datetime, re, statistics, warnings, operator, string, textwrap, decimal, fractions, numbers, copy, enum, typing, io, csv, dataclasses, abc
-- Timeout: `SIGALRM` on Unix (silently skipped on Windows or non-main threads)
-- `df` sync-back: if the code modifies `df`, the modified DataFrame is written back to `context.analyst_results` so subsequent tools see derived columns
-
-**`run_sql`**: available for additional data fetching when the upstream data is insufficient.
+1. **Admin override**: `pipeline_mode` in the request body (admin-only; returns 403 for non-admins).
+2. **Per-DB default**: `pipeline_mode_default` on the database record.
+3. **System default**: `"linked"`.
 
 ---
 
-## Guard Rails
+## 6. Profiling Pipeline
 
-### Force Tool Use
+A separate pipeline handles database profiling -- the one-time (or refresh-on-demand) process of extracting schema, collecting statistics, generating summaries, and building search indexes.
 
-The analyst loop's most important guard: on the first iteration, if the LLM responds with text only (no tool calls) and no stats context was injected, the response is rejected. A corrective user message forces the LLM to call `run_sql`. This prevents the LLM from answering from its training data or the few-shot examples in the prompt instead of the actual database.
+### 7 Steps
 
-The force message differs based on `clarification_enabled`:
-- With clarification: allows both `run_sql` and `clarify`
-- Without: only `run_sql` is allowed
+1. **Schema Extract**: `SchemaExtractor.extract()` via `PRAGMA table_info/foreign_key_list` (SQLite) or `information_schema` (Postgres).
+2. **Stats Collect**: `StatsCollector` runs per-column aggregation queries (COUNT, COUNT DISTINCT, MIN, MAX, LIMIT 20 samples).
+3. **Join Graph Build**: `JoinGraphBuilder` constructs a graph from declared FKs + implicit edges.
+4. **Summary Generate**: `SummaryGenerator` makes async LLM calls (short + long summary per column), semaphore-limited (concurrency=2 via `PROFILE_MAX_CONCURRENCY`).
+5. **Quirk Detect**: `QuirkEnricher` applies rule-based heuristics and LLM enrichment for enum labels and semantic hints.
+6. **LSH Build**: MinHash-based Locality-Sensitive Hashing index for literal value matching.
+7. **Vector Build**: `VectorBuilder` embeds column descriptions into a cosine-similarity `VectorIndex`.
 
-### SQL Blocklist
+### Cost Gate Handshake
 
-`POST /api/sql/execute` (the direct SQL endpoint) enforces a regex blocklist:
+Before LLM profiling begins, a cost estimate is computed based on column count and batch size. The system emits a `profile_cost_estimate` chunk to the frontend. The user must explicitly confirm before LLM calls proceed. Columns exceeding `PROFILING_MAX_COLUMNS_FOR_LLM` (default 500) auto-disable LLM profiling.
 
-```python
-_FORBIDDEN_SQL = re.compile(
-    r"\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|REPLACE|MERGE|GRANT|REVOKE|ATTACH|DETACH|PRAGMA\s+\w+\s*=)\b",
-    re.IGNORECASE,
-)
-```
+### Batched LLM Prompts
 
-Blocked queries return HTTP 403. The agent's `run_sql` tool does not apply this regex — it relies on the `PRAGMA query_only` enforcement in `DatabaseConnector.execute()`.
+Instead of one LLM call per column, profiling uses batched prompts (20 columns per call). This reduces API costs from O(columns) to O(columns/batch_size) and avoids rate limiting.
 
-### Read-Only Enforcement
+### Per-DB Output Caching
 
-`DatabaseConnector.execute(read_only=True)` issues `PRAGMA query_only = ON` before the query and `PRAGMA query_only = OFF` in a `finally` block. Any attempt to write while `query_only` is ON raises a SQLite error. The agent's `run_sql` tool does not pass `read_only=True` explicitly — but the transactions table is append-only from the application's perspective, and all agent SQL is SELECT-only by instruction.
+Profiling results are cached in the metadata DB via `ProfileService`. Subsequent requests load the cached `DatabaseProfile` instead of re-profiling. The cache is invalidated when the database schema changes.
 
-### Row Limits
+### Rate Limiting
 
-`DatabaseConnector.execute(row_limit=N)` uses `fetchmany(N)` instead of `fetchall()`. The analyst uses `config.sql_row_limit` (default 10,000). Historical conversation chunks are truncated to 50 rows in `_truncate_chunks()` before sending to the frontend.
-
-### Iteration Limits
-
-- Analyst: `max_agent_iterations` (default 10)
-- Quant analyst: `max_quant_analyst_iterations` (default 5)
-- Enrichment tasks: `max_orchestrator_tasks` (default 5)
-- Enrichment evaluator: 60-second timeout
-
-### Sanitized Errors
-
-`ToolRegistry.execute()` wraps every tool call in a try/except and returns `json.dumps({"error": str(e)})`. Python tracebacks are never sent to the LLM or the user — only the exception message string. The LLM receives sanitized error strings and can adjust its next tool call accordingly.
+Per-user profiling is rate-limited to `PROFILE_MAX_PER_USER_PER_DAY` (default 10) per day, preventing abuse.
 
 ---
 
-## Clarification System
+## 7. Token Tracking
 
-The clarification system lets the LLM ask the user for more information when a question is ambiguous or references schema columns that don't exist.
+A single LLM instance is shared across all pipeline stages. Its `input_tokens_used` / `output_tokens_used` accumulators are incremented by every LLM call. The route layer reads them once at the end for the terminal `metrics` chunk.
 
-### Activation
-
-Enabled when `clarification_enabled=True` in the user's resolved `FeatureToggles` AND `skip_clarification=False` in the `ChatRequest`. The effective flag is:
-
-```python
-effective_clarification = clarification_enabled and not skip_clarification
-```
-
-When `effective_clarification=True`, `ClarifyTool` is added to the tool registry and included in the system prompt.
-
-### Flow
-
-1. LLM calls `clarify({"question": "Did you mean X or Y?"})` instead of `run_sql`
-2. `ClarifyTool.execute()` returns `{"clarification": "..."}`
-3. The analyst loop detects the `clarify` tool name, parses the result, emits a `clarification` chunk, and returns immediately
-4. The frontend renders the clarification question with two options: answer it, or click "Just answer" (which sets `skip_clarification=true` in the next request)
-5. If the user answers, their answer is appended to the question in the next request
-6. If the user clicks "Just answer", `skip_clarification=true` disables `ClarifyTool` for that request and the LLM must answer directly
-
-### Prompt Instruction
-
-When `clarification_enabled=True`, `analyst_system.j2` includes a section instructing the LLM to use `clarify` when the question references a column or concept that doesn't exist in the schema, and to suggest the closest available alternative.
+LLM concurrency is controlled by a module-level `asyncio.Semaphore`:
+- General calls: `LLM_MAX_CONCURRENCY` (default 3).
+- Profiling calls: `PROFILE_MAX_CONCURRENCY` (default 2, stricter to avoid starving chat requests).
 
 ---
 
-## Token Tracking
+## 8. Conversation Persistence
 
-`_TokenCountingLLM` wraps the base LLM provider and accumulates token counts:
+### In-Memory Layer (`services/conversation_store.py`)
+- Thread-safe `OrderedDict` keyed by `(session_id, conversation_id)`.
+- Holds `Conversation` objects with `messages[]` and `chunks[]` (SSE replay buffer).
+- Lost on instance recycle (v1 tradeoff -- acceptable for Cloud Run's stateless model).
 
-```python
-async def chat(self, messages, tools=None):
-    resp = await self._llm.chat(messages, tools)
-    self.input_tokens += resp.input_tokens
-    self.output_tokens += resp.output_tokens
-    return resp
-```
-
-After all chunks are yielded and before `[DONE]`, a `metrics` chunk is emitted:
-
-```python
-metrics_chunk = ChatChunk(
-    type="metrics",
-    data={
-        "input_tokens": counting_llm.input_tokens,
-        "output_tokens": counting_llm.output_tokens,
-        "generation_time_ms": generation_time_ms,
-    },
-    ...
-)
-```
-
-`generation_time_ms` is the wall-clock time of the entire orchestrator loop (from before `orchestrator_loop()` was called to after the last chunk). This is the correct measure of end-to-end LLM processing time.
-
-Token counts and `generation_time_ms` are stored in the `messages` table alongside the assistant message content.
-
----
-
-## Conversation Persistence
+### Durable Layer (`orchestration/service.py`)
+- `record_conversation_snapshot()` upserts `conversations` row + inserts user + assistant `messages` rows (with `chunks_json`) in a single transaction.
+- Best-effort only: guarded by user-existence check; failures logged and swallowed.
 
 ### Fire-and-Forget Pattern
 
 Persistence is intentionally asynchronous to keep SSE latency low:
 
-```python
-yield {"data": "[DONE]"}  # client stops spinner immediately
+```
+yield "[DONE]"  # client stops spinner immediately
 
 asyncio.ensure_future(
-    asyncio.to_thread(
-        _persist_response,
-        conv_store, persistent_store, store_cid, persistent_cid, user.id,
-        final_answer[-1] if final_answer else "",
-        executed_sql,
-        "[" + ",".join(all_chunks) + "]",
-        counting_llm.input_tokens or None,
-        counting_llm.output_tokens or None,
-        generation_time_ms,
-        org_id=user.org_id,
-        question=chat_req.message,
-    )
+    asyncio.to_thread(_persist_response, ...)
 )
 ```
 
-`[DONE]` is yielded before `asyncio.ensure_future()` is called, so the client's spinner stops as soon as the answer is delivered. The DB write happens after.
-
-### `_persist_response()`
-
-This synchronous function (called via `asyncio.to_thread`) performs several writes:
-
-1. **In-memory store** — adds the assistant answer to `ConversationStore` (for future multi-turn context injection)
-2. **Assistant message** — saves to `messages` table with full `chunks_blob` (JSON array of all SSE events), token counts, and generation time
-3. **Enrichment traces** — parses `enrichment_trace` chunks from the blob and saves to `enrichment_traces` table
-4. **Orchestrator plan** — parses `orchestrator_plan` chunk and saves to `orchestrator_plans` table
-5. **Agent executions** — parses `agent_trace` chunks and saves to `agent_executions` table (linked to the plan)
-6. **Insight** — parses `insight` chunk and saves to `insights` table with categories, summary, and enrichment task count
-
-All writes are conditional: they only occur if the relevant chunk type is present in the blob. A conversation with a basic mode response will have no enrichment traces, orchestrator plan, or insight rows.
-
-### History Injection
-
-On subsequent turns, history is injected between the system prompt and the current question:
-
-```python
-messages = [
-    {"role": "system", "content": system_prompt},
-    *history,  # prior user+assistant turns (max 20)
-    {"role": "user", "content": question},
-]
-```
-
-The in-memory store holds condensed history — user messages and assistant final answers only. Tool call/result intermediaries are not stored in the history, keeping context window usage manageable. The max depth is `MAX_HISTORY_TURNS = 20` messages.
-
-For sub-tasks in enrichment DAG execution, `history=None` is passed — sub-agents do not receive conversation history, only their specific task.
-
----
-
-## SSE Consumer (Frontend)
-
-The frontend's SSE client (`lib/sse-client.ts`) reads the streaming response:
-
-1. Opens a `fetch()` with the request body, reads via `ReadableStream`
-2. Parses SSE `data:` lines into `ChatChunk` objects
-3. Dispatches each chunk to a callback
-4. On `[DONE]`: closes the stream and signals completion
-
-React 18's automatic batching means state updates from multiple consecutive chunks are batched into a single re-render. The drain loop processes all queued chunks synchronously:
-
-```typescript
-while (queue.length > 0) {
-    const chunk = queue.shift();
-    dispatchChunk(chunk);
-}
-```
-
-`answer-chunk.tsx` is wrapped with `React.memo` to prevent markdown re-parsing when the answer content has not changed (e.g. when a later `metrics` chunk arrives).
-
-Auto-scroll in `message-list.tsx` depends on `[messages.length, lastMsgChunkCount]` — it scrolls when a new message is added or when the chunk count for the last message increases, but not when feedback state changes on earlier messages.
+`[DONE]` is yielded before `asyncio.ensure_future()` is called, so the client's spinner stops as soon as the answer is delivered. The DB write happens after, without blocking the user.

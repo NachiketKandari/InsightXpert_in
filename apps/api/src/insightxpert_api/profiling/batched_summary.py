@@ -142,6 +142,7 @@ def _parse_json_object(raw: str) -> dict[str, object]:
 # ---------------------------------------------------------------------------
 
 
+# DECISION(D-061): Batch N columns per LLM call (default 20) instead of 2 calls per column
 class BatchedSummaryGenerator:
     """Generate short + long column summaries with 1 LLM call per batch of N columns.
 

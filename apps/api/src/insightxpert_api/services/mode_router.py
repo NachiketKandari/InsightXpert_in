@@ -48,6 +48,7 @@ _deepseek_client: "AsyncOpenAI | None" = None
 _gemini_client: "genai.Client | None" = None
 
 
+# TEST-ONLY
 def _reset_mode_router_clients() -> None:
     """Test hook: discard cached clients so tests can inject fresh ones."""
     global _deepseek_client, _gemini_client

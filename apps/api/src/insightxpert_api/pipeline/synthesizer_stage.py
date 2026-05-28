@@ -79,6 +79,9 @@ class AnswerSynthesizerStage:
             rows = list(rows_payload)
         row_count = len(rows)
 
+        # DECISION(D-023): Answer synthesis emits [^N] footnote citations with
+        # definitions — standard remark-gfm rendering, click-to-highlight FE
+        # integration. Prompt templates instruct the LLM to use this format.
         prompt = self._tpl.render(
             question=ctx.state.get("question", ""),
             ddl=ctx.state.get("schema_text", ""),
@@ -100,16 +103,17 @@ class AnswerSynthesizerStage:
         # answer_generated emission, which remains the route's responsibility.
         chunks: list[str] = []
         try:
-            stream = await asyncio.wait_for(self._llm.async_generate_stream(prompt), timeout=60.0)
-            async for delta in stream:
-                if not delta:
-                    continue
-                chunks.append(delta)
-                if ctx.emitter is not None:
-                    await ctx.emitter.emit(
-                        ChunkType.answer_delta,
-                        AnswerDeltaPayload(text=delta),
-                    )
+            stream = self._llm.async_generate_stream(prompt)
+            async with asyncio.timeout(60.0):
+                async for delta in stream:
+                    if not delta:
+                        continue
+                    chunks.append(delta)
+                    if ctx.emitter is not None:
+                        await ctx.emitter.emit(
+                            ChunkType.answer_delta,
+                            AnswerDeltaPayload(text=delta),
+                        )
             answer = "".join(chunks).strip()
             if not answer:
                 # Empty stream — treat as failure for fallback purposes.

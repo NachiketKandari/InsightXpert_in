@@ -1,551 +1,340 @@
-# InsightXpert Configuration Reference
+# InsightXpert.ai Configuration Reference
 
-## Backend Environment Variables
+The backend reads configuration from `apps/api/.env.local` via **pydantic-settings** (`BaseSettings`). All values can also be set as regular shell environment variables; environment variables take precedence over `.env.local`.
 
-The backend reads configuration from `backend/.env.local` via Pydantic Settings (`BaseSettings`). All values can also be set as regular shell environment variables; environment variables take precedence over `.env.local`.
-
-The settings class is `insightxpert.config.Settings`.
+The settings class is `insightxpert_api.config.Settings`. A fresh `.env.local` can be seeded from `apps/api/.env.example`.
 
 ---
 
-### LLM Settings
+## Configuration Architecture
 
-**`LLM_PROVIDER`**
-Which LLM backend to use.
-
-| Value | Description |
-|---|---|
-| `gemini` | Google Gemini via AI Studio API key (default) |
-| `ollama` | Local Ollama server |
-| `vertex_ai` | Google Cloud Vertex AI Model Garden |
-
-Default: `gemini`
-
----
-
-**`GEMINI_API_KEY`**
-Google AI Studio API key. Required when `LLM_PROVIDER=gemini`.
-
-Obtain at: https://aistudio.google.com/app/apikey
-
-Default: `""` (empty — a warning is logged at startup if the provider is Gemini and this is unset)
-
----
-
-**`GEMINI_MODEL`**
-Gemini model name to use.
-
-Available models (also served by `GET /api/config`):
-- `gemini-3-flash-preview`
-- `gemini-3.1-pro-preview`
-- `gemini-2.5-flash` ← **default**
-- `gemini-2.5-pro`
-- `gemini-2.5-flash-lite`
-- `gemini-2.0-flash`
-- `gemini-2.0-flash-lite`
-
-Default: `gemini-2.5-flash`
-
----
-
-**`OLLAMA_BASE_URL`**
-URL of the Ollama HTTP server.
-
-Default: `http://localhost:11434`
-
----
-
-**`OLLAMA_MODEL`**
-Default Ollama model name. Used when `LLM_PROVIDER=ollama`.
-
-Default: `llama3.1`
-
-Any model name accepted by Ollama is valid (e.g., `mistral`, `llama3.2:1b`, `codellama`). The model must be pulled before use.
-
----
-
-**`GCP_PROJECT_ID`**
-Google Cloud project ID for Vertex AI. When set, the `vertex_ai` provider becomes available in `GET /api/config`. Leave empty to disable Vertex AI.
-
-Default: `""` (disabled)
-
----
-
-**`VERTEX_AI_REGION`**
-Google Cloud region for Vertex AI API calls.
-
-Default: `global`
-
----
-
-**`VERTEX_AI_MODEL`**
-Model name for Vertex AI. Currently supports Model Garden models.
-
-Default: `zai-org/glm-5-maas`
-
----
-
-### Database Settings
-
-**`DATABASE_URL`**
-SQLAlchemy connection URL for the combined SQLite database. Both the transactions data and the auth/config data live in this file.
-
-Default: `sqlite:///./insightxpert.db`
-
-If set to an empty string, the default is used. The path is relative to the working directory where the server starts (`backend/` when using `python -m insightxpert.main`).
-
----
-
-**`CHROMA_PERSIST_DIR`**
-Directory for ChromaDB vector store persistence. Four collections are created here: `qa_pairs`, `ddl`, `docs`, `findings`.
-
-Default: `./chroma_data`
-
----
-
-### Security
-
-**`SECRET_KEY`**
-Secret used to sign and verify JWT session tokens. Must be at least 32 characters.
-
-Default: `CHANGE-ME-in-production-use-a-random-secret-key-here`
-
-A warning is logged at startup if the key contains `"CHANGE-ME"` or is shorter than 32 characters. Generate a strong key with:
-```bash
-python -c "import secrets; print(secrets.token_hex(32))"
-```
-
----
-
-**`ACCESS_TOKEN_EXPIRE_MINUTES`**
-How long JWT session tokens remain valid, in minutes.
-
-Default: `1440` (24 hours)
-
-Must be greater than 0.
-
----
-
-**`CORS_ORIGINS`**
-Comma-separated list of allowed CORS origins. The backend will accept cross-origin requests from these URLs.
-
-Default: `http://localhost:3000,https://insightxpert.vercel.app,https://insightxpert-ai.web.app`
-
-Example for custom deployment:
-```
-CORS_ORIGINS=https://myapp.example.com,http://localhost:3000
-```
-
----
-
-### Admin Bootstrap
-
-**`ADMIN_SEED_EMAIL`**
-Email address for the bootstrap admin user created on first startup. If a user with this email already exists, seeding is skipped.
-
-Default: `admin@insightxpert.ai`
-
----
-
-**`ADMIN_SEED_PASSWORD`**
-Password for the bootstrap admin user. Must be at least 8 characters. A warning is logged if this is set to common weak values (`changeme`, `admin123`, `""`).
-
-Default: `admin123` (**must be changed for production**)
-
----
-
-### Agent Settings
-
-**`MAX_AGENT_ITERATIONS`**
-Maximum number of LLM tool-call iterations for the analyst agent loop per request. Prevents runaway loops.
-
-Default: `25`
-
-Must be greater than 0.
-
----
-
-**`MAX_QUANT_ANALYST_ITERATIONS`**
-Maximum iterations for the quantitative analyst agent sub-loop (Python execution path).
-
-Default: `15`
-
-Must be greater than 0.
-
----
-
-**`MAX_ORCHESTRATOR_TASKS`**
-Maximum number of parallel sub-tasks the orchestrator planner can spawn per question in agentic mode.
-
-Default: `10`
-
-Must be greater than 0.
-
----
-
-**`PYTHON_EXEC_TIMEOUT_SECONDS`**
-Timeout in seconds for sandboxed Python code execution (used by the quantitative analyst).
-
-Default: `10`
-
-Must be greater than 0.
-
----
-
-**`SQL_ROW_LIMIT`**
-Maximum number of rows returned by any single SQL query. Applies to both the agent's internal queries and the `POST /api/sql/execute` endpoint.
-
-Default: `10000`
-
-Must be greater than 0.
-
----
-
-**`SQL_TIMEOUT_SECONDS`**
-Maximum execution time for any SQL query, in seconds.
-
-Default: `30`
-
-Must be greater than 0.
-
----
-
-**`ENABLE_STATS_CONTEXT`**
-When `true`, pre-computed dataset statistics are injected into the system prompt at the start of each chat request. Controlled per-user/org by the `stats_context_injection` feature toggle; this env var enables or disables the underlying computation.
-
-Default: `true`
-
-Set `ENABLE_STATS_CONTEXT=false` to disable the stats injection pipeline entirely.
-
----
-
-### Startup and Runtime
-
-**`RAG_BOOTSTRAP_TIMEOUT_SECONDS`**
-Maximum time to wait for the background RAG training task to complete during startup. If training exceeds this limit the server starts anyway and continues training in the background.
-
-Default: `120`
-
-Must be greater than 0.
-
----
-
-**`CONVERSATION_TTL_SECONDS`**
-How long an in-memory conversation history entry is kept before being evicted. This is the in-process LLM context cache; persistent message storage in SQLite is not affected.
-
-Default: `7200` (2 hours)
-
-Must be greater than 0.
-
----
-
-### Voice / Speech-to-Text
-
-**`DEEPGRAM_API_KEY`**
-API key for the Deepgram speech-to-text service. When set, the voice transcription feature is enabled via a WebSocket endpoint at `WS /api/transcribe`. The backend proxies browser audio to Deepgram's Nova-3 model and streams transcripts back in real time.
-
-Obtain at: https://console.deepgram.com/
-
-Default: `""` (empty — voice feature is disabled)
-
-If a client connects to the `/api/transcribe` WebSocket and this key is not configured, the connection is closed with code `4002` and reason `"Speech-to-text is not configured"`.
-
----
-
-### Cloudflare R2 Object Storage
-
-R2 is used as optional backup storage for uploaded files (CSV datasets and PDF documents). It is not managed via the `Settings` class; instead, an `R2StorageService` instance is attached to `app.state.r2_storage` at startup when the required environment variables are present. If R2 is not configured, uploads are stored in the local SQLite database only and the R2 backup is silently skipped.
-
-The following environment variables configure R2 (all four are required to enable R2):
-
-**`R2_ACCESS_KEY_ID`**
-Cloudflare R2 access key ID (S3-compatible).
-
-**`R2_SECRET_ACCESS_KEY`**
-Cloudflare R2 secret access key (S3-compatible).
-
-**`R2_ENDPOINT_URL`**
-Cloudflare R2 S3-compatible endpoint URL. Typically `https://<account-id>.r2.cloudflarestorage.com`.
-
-**`R2_BUCKET`**
-Name of the R2 bucket to store objects in.
-
-All R2 operations (upload, delete, presigned URL generation) are synchronous and wrapped with `asyncio.to_thread()` in route handlers. Failures are logged but do not block the API response -- R2 is a best-effort backup layer.
-
----
-
-### Logging
-
-**`LOG_LEVEL`**
-Logging verbosity for the `insightxpert.*` logger hierarchy.
-
-Valid values: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`
-
-Default: `INFO`
-
----
-
-## Frontend Environment Variables
-
-The frontend reads environment variables from `frontend/.env.local`. Variables prefixed with `NEXT_PUBLIC_` are embedded into the static build and visible in the browser.
-
-**`NEXT_PUBLIC_API_URL`**
-Base URL of the backend API. When empty, the frontend makes requests relative to its own origin (useful when running behind a reverse proxy).
-
-Default: `""` (empty — relative URL)
-
-Development `.env.local` typically sets:
-```
-NEXT_PUBLIC_API_URL=http://localhost:8000
-```
-
-In the production CI build, this is set to the Cloud Run service URL discovered at deploy time.
-
-**Why a direct URL in development:** Next.js rewrites buffer the full response before forwarding it, which breaks SSE streaming. Pointing directly at the backend bypasses the Next.js proxy so chunks stream incrementally.
-
----
-
-## Admin Configuration
-
-The admin configuration is stored in the database (`admin_config` table) as a JSON document. It is initially populated from the legacy `config/client-configs.json` file on first startup (idempotent migration), and thereafter managed exclusively via the admin UI or `PUT /api/admin/config`.
-
-The full structure is the `ClientConfig` Pydantic model:
-
-```json
-{
-  "admin_domains": ["insightxpert.ai"],
-  "user_org_mappings": [
-    {"email": "partner@acme.com", "org_id": "org-uuid"}
-  ],
-  "organizations": {
-    "org-uuid": {
-      "org_id": "org-uuid",
-      "org_name": "ACME Corp",
-      "features": {
-        "sql_executor": true,
-        "model_switching": false,
-        "rag_training": false,
-        "chart_rendering": true,
-        "conversation_export": true,
-        "agent_process_sidebar": true,
-        "clarification_enabled": true,
-        "stats_context_injection": true
-      },
-      "branding": {
-        "display_name": "ACME Analytics",
-        "logo_url": "https://acme.com/logo.png",
-        "theme": {"--primary": "#FF6B00", "--secondary": "#003366"},
-        "color_mode": "dark"
-      }
-    }
-  },
-  "defaults": {
-    "features": {
-      "sql_executor": true,
-      "model_switching": true,
-      "rag_training": true,
-      "chart_rendering": true,
-      "conversation_export": true,
-      "agent_process_sidebar": true,
-      "clarification_enabled": true,
-      "stats_context_injection": false
-    },
-    "branding": {
-      "display_name": null,
-      "logo_url": null,
-      "theme": null,
-      "color_mode": null
-    }
-  }
-}
-```
-
-### Field Descriptions
-
-**`admin_domains`** — List of email domains whose users are automatically granted admin access, regardless of the `is_admin` DB flag. Example: `["insightxpert.ai"]` means `*@insightxpert.ai` are admins.
-
-**`user_org_mappings`** — Email-to-org assignments. When a user logs in, their email is checked against this list to assign org membership. Each entry has `email` (exact match, case-insensitive) and `org_id`.
-
-**`organizations`** — Map of `org_id` → `OrgConfig`. Each org has its own feature set and branding that overrides the defaults for mapped users.
-
-**`defaults`** — Baseline `features` and `branding` applied to users who are not mapped to any org.
-
----
-
-## Feature Toggles
-
-Feature toggles are defined in `FeatureToggles` and control what UI capabilities are available to a user or org. They are resolved at request time via `GET /api/client-config`.
-
-Admin users always receive all features enabled, regardless of org config.
-
-| Toggle | Default | Description |
-|---|---|---|
-| `sql_executor` | `true` | Show the SQL Executor panel for running custom queries |
-| `model_switching` | `true` | Allow users to switch LLM provider/model via the UI |
-| `rag_training` | `true` | Allow users to add training examples to the RAG store |
-| `chart_rendering` | `true` | Render Plotly charts for SQL results |
-| `conversation_export` | `true` | Allow exporting conversations |
-| `agent_process_sidebar` | `true` | Show the Agent Process sidebar with SQL traces and enrichment steps |
-| `clarification_enabled` | `true` | Allow the LLM to ask clarifying questions before answering (also requires the backend feature toggle below) |
-| `stats_context_injection` | `false` | Inject pre-computed dataset statistics into the system prompt for every chat request |
-
-### Backend Feature Toggles
-
-Two feature toggles are also enforced server-side during the agent loop (not just in the UI):
-
-- **`stats_context_injection`** — If `false`, the stats context step is skipped even if the agent would otherwise include it.
-- **`clarification_enabled`** — If `false`, the clarifier agent step is skipped and `skip_clarification` is implicitly `true`.
-
-These are resolved per-request from the user's org config via `_resolve_user_features()` in `api/routes.py`.
-
----
-
-## Pydantic Settings Class
-
-`insightxpert.config.Settings` is a `pydantic_settings.BaseSettings` subclass. Full field list with defaults:
+**`Settings`** in `config.py` is a `pydantic_settings.BaseSettings` model reading from `.env.local` (resolved relative to `apps/api/`). The `get_settings()` function is an **LRU-cached singleton** (`@lru_cache(maxsize=1)`). All application code calls `get_settings()` rather than instantiating `Settings()` directly.
 
 ```python
+from functools import lru_cache
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env.local",
         env_file_encoding="utf-8",
         extra="ignore",
+        case_sensitive=False,
     )
+    # ... fields ...
 
-    # LLM
-    llm_provider: LLMProvider = LLMProvider.GEMINI          # "gemini" | "ollama" | "vertex_ai"
-    gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.5-flash"
-    ollama_model: str = "llama3.1"
-    ollama_base_url: str = "http://localhost:11434"
-
-    # Vertex AI
-    gcp_project_id: str = ""
-    vertex_ai_region: str = "global"
-    vertex_ai_model: str = "zai-org/glm-5-maas"
-
-    # Database
-    database_url: str = "sqlite:///./insightxpert.db"       # env: DATABASE_URL
-    chroma_persist_dir: str = "./chroma_data"
-
-    # Agent
-    max_agent_iterations: int = 25                          # > 0
-    max_quant_analyst_iterations: int = 15                  # > 0
-    max_orchestrator_tasks: int = 10                        # > 0
-    python_exec_timeout_seconds: int = 10                   # > 0
-    sql_row_limit: int = 10000                              # > 0
-    sql_timeout_seconds: int = 30                           # > 0
-
-    # CORS
-    cors_origins: str = "http://localhost:3000,https://insightxpert.vercel.app,https://insightxpert-ai.web.app"
-
-    # Auth
-    secret_key: str = "CHANGE-ME-..."                       # >= 32 chars for production
-    access_token_expire_minutes: int = 1440                 # > 0
-    admin_seed_email: str = "admin@insightxpert.ai"
-    admin_seed_password: str = "admin123"                   # change for production
-
-    # Startup / runtime
-    rag_bootstrap_timeout_seconds: int = 120                # > 0
-    conversation_ttl_seconds: int = 7200                    # > 0
-
-    # Stats context
-    enable_stats_context: bool = True
-
-    # Voice / Speech-to-text (Deepgram)
-    deepgram_api_key: str = ""
-
-    # Logging
-    log_level: str = "INFO"                                 # DEBUG | INFO | WARNING | ERROR | CRITICAL
+@lru_cache(maxsize=1)
+def get_settings() -> Settings:
+    return Settings()
 ```
 
-**Validators:**
-- `database_url`: Empty string is treated as unset (falls back to default).
-- `log_level`: Normalized to uppercase; invalid values raise `ValueError`.
-- Model validator at startup logs warnings for insecure `secret_key`, weak `admin_seed_password`, missing `gemini_api_key` when provider is Gemini, and missing `gcp_project_id` when provider is Vertex AI.
+**Key behaviors:**
+- `extra="ignore"` -- unknown env vars are silently discarded
+- `case_sensitive=False` -- env vars are matched case-insensitively
+- `.env.local` is resolved relative to `apps/api/`, making it stable regardless of launch CWD
+- Tests call `get_settings.cache_clear()` to reset after overriding env vars
 
 ---
 
-## CI/CD: GitHub Actions Variables and Secrets
+## 1. Runtime Settings
 
-The production deploy workflow (`.github/workflows/deploy.yml`) uses Workload Identity Federation to authenticate to Google Cloud without storing a long-lived service account key.
-
-### Secrets (required)
-
-Stored in **Settings → Secrets → Actions** in the GitHub repository.
-
-| Secret | Description |
-|---|---|
-| `GEMINI_API_KEY` | Google AI Studio API key for the Gemini LLM provider |
-| `SECRET_KEY` | JWT signing secret — must be a random string of 32+ hex characters |
-| `ADMIN_SEED_PASSWORD` | Password for the bootstrap admin account (replaces the insecure default) |
-
-### Variables (optional overrides)
-
-Stored in **Settings → Variables → Actions** in the GitHub repository. These have sensible defaults in the workflow but can be overridden per environment.
-
-| Variable | Default in workflow | Description |
+| Env Var | Default | Description |
 |---|---|---|
-| `GEMINI_MODEL` | `gemini-2.5-flash` | Gemini model name passed to Cloud Run |
-| `CORS_ORIGINS` | `https://insightxpert-ai.web.app,https://insightxpert.vercel.app` | Comma-separated allowed origins |
-
-### Cloud Run Environment Variables (set by workflow)
-
-The `gcloud run deploy` step passes these as `--set-env-vars`:
-
-| Variable | Source |
-|---|---|
-| `LLM_PROVIDER` | Hardcoded to `gemini` |
-| `GEMINI_API_KEY` | From secret `GEMINI_API_KEY` |
-| `GEMINI_MODEL` | From variable `GEMINI_MODEL` (default: `gemini-2.5-flash`) |
-| `DATABASE_URL` | `sqlite:///./insightxpert.db` |
-| `LITESTREAM_REPLICA_URL` | `gcs://insightxpert-bucket/litestream/insightxpert.db` |
-| `CHROMA_PERSIST_DIR` | `./chroma_data` |
-| `CORS_ORIGINS` | From variable `CORS_ORIGINS` |
-| `LOG_LEVEL` | `INFO` |
-| `SECRET_KEY` | From secret `SECRET_KEY` |
-| `ADMIN_SEED_PASSWORD` | From secret `ADMIN_SEED_PASSWORD` |
-
-### Frontend Build Variable
-
-The frontend build step sets `NEXT_PUBLIC_API_URL` to the Cloud Run service URL discovered dynamically via `gcloud run services describe`. This URL is baked into the static Next.js export and served from Firebase Hosting.
+| `APP_ENV` | `"local"` | Deployment environment: `local`, `staging`, or `prod`. Controls logging format (ConsoleRenderer for local, JSONRenderer for staging/prod) and Sentry env fallback. |
+| `PORT` | `8080` | HTTP listen port. |
+| `CORS_ORIGINS` | `["http://localhost:3000","http://localhost:3001"]` | Allowed CORS origins as a JSON array. CORS middleware sets `allow_credentials=True`, `allow_methods=["*"]`, `allow_headers=["*"]`. |
 
 ---
 
-## Database Persistence in Production
+## 2. Authentication Settings
 
-The production Cloud Run instance uses **Litestream** for SQLite replication. Litestream runs as a sidecar and continuously replicates the local SQLite WAL to Google Cloud Storage (`gcs://insightxpert-bucket/litestream/insightxpert.db`). On container startup, Litestream restores the latest snapshot from GCS before the FastAPI server starts.
+| Env Var | Default | Description |
+|---|---|---|
+| `SESSION_SECRET` | _(required)_ | Secret key for signing session cookies. Must be at least 32 characters. Rotating this key invalidates all existing sessions. |
+| `SESSION_TTL_SECONDS` | `2592000` (30 days) | Sliding session expiration. The cookie's `Max-Age` is set to this value on every authenticated request. |
+| `SESSION_COOKIE_NAME` | `"ix_session"` | Name of the HttpOnly session cookie. |
+| `BOOTSTRAP_ADMIN_EMAIL` | `None` | Admin email created on first boot if no users exist. Idempotent -- skipped if any user already exists. |
+| `BOOTSTRAP_ADMIN_PASSWORD` | `None` | Password for the bootstrap admin account. |
+| `BOOTSTRAP_USER_EMAIL` | `None` | Test user email created on first boot. |
+| `BOOTSTRAP_USER_PASSWORD` | `None` | Password for the bootstrap test user. |
 
-This means:
-- All SQLite data (auth, conversations, config, automations, insights, stats) survives container restarts.
-- The `transactions` table is populated from the CSV at startup if empty (as an additional safety net).
-- ChromaDB vector data in `./chroma_data` is not replicated by Litestream; it is re-bootstrapped from the seeded training data on cold starts.
+**Auth mechanism:** itsdangerous `URLSafeTimedSerializer` with HMAC-SHA256 signing. Sessions are stored in cookies (HttpOnly, SameSite=Lax, Secure in non-local environments). A `Bearer` header fallback accepts the same signed token for SSE and WebSocket endpoints. Password hashing uses Argon2id via `argon2-cffi`.
+
+Session invalidation is handled via the `sessions_valid_after` timestamp on the user row -- any session issued before that timestamp is rejected. This allows admins to force-logout all sessions for a user by updating the timestamp.
 
 ---
 
-## Local Development Setup
+## 3. Database Settings
 
-Minimal `.env.local` for local development:
+### Primary Metadata Database
 
-```dotenv
-# backend/.env.local
-GEMINI_API_KEY=your-api-key-here
-SECRET_KEY=local-dev-secret-key-32-chars-min-here
-ADMIN_SEED_PASSWORD=localdevpassword
-LOG_LEVEL=DEBUG
+| Env Var | Default | Description |
+|---|---|---|
+| `DATABASE_URL` | `"sqlite:///./app.db"` | Primary metadata DB connection string. Supports SQLite (`sqlite:///...`) and Postgres (`postgresql+psycopg://...`). This stores users, conversations, databases registry, audit logs, automations, profiles, etc. |
+| `DATABASE_DIRECT_URL` | `""` | Direct (non-pooler) connection URL for Alembic migrations. Falls back to `DATABASE_URL` when unset. Required because pooler transaction mode is incompatible with DDL operations. |
+
+### Connection Pool (Postgres only)
+
+Two independent SQLAlchemy engine singletons isolate request-serving from background work, preventing hung background tasks from starving user requests.
+
+**Request Engine** (serves all HTTP route handlers):
+
+| Env Var | Default | Description |
+|---|---|---|
+| `DB_POOL_SIZE` | `15` | Number of persistent connections. |
+| `DB_MAX_OVERFLOW` | `10` | Additional connections allowed beyond pool_size. |
+| `DB_POOL_TIMEOUT` | `10` | Seconds to wait for a connection before raising `TimeoutError`. |
+| `DB_POOL_PRE_PING` | `False` | Check connection liveness on checkout. Keep `False` for pgbouncer (transaction pooler handles dead connections). |
+| `DB_POOL_RECYCLE` | `600` | Max connection age in seconds before recycling. |
+| `DB_CONNECT_TIMEOUT` | `10` | Connection establishment timeout. |
+
+**Background Engine** (automations scheduler/runner):
+
+| Env Var | Default | Description |
+|---|---|---|
+| `DB_BACKGROUND_POOL_SIZE` | `2` | Persistent connections for background tasks. |
+| `DB_BACKGROUND_MAX_OVERFLOW` | `0` | No overflow -- background work is capped. |
+| `DB_BACKGROUND_POOL_TIMEOUT` | `30` | More generous timeout for background operations. |
+
+**Pool settings are silently ignored by SQLite** (which uses StaticPool/NullPool internally). They only take effect when `DATABASE_URL` points at a Postgres backend.
+
+### Database Connection Strings
+
+**Transaction Pooler (Supabase port 6543)** -- for runtime queries:
+```
+DATABASE_URL=postgresql+psycopg://postgres.<project_ref>:<password>@aws-0-<region>.pooler.supabase.com:6543/postgres
+```
+Note the user format is `postgres.<project_ref>` (required by the pooler), not just `postgres`.
+
+**Direct Connection (Supabase port 5432)** -- for Alembic migrations:
+```
+DATABASE_DIRECT_URL=postgresql+psycopg://postgres:<password>@db.<project_ref>.supabase.co:5432/postgres?sslmode=require
 ```
 
-Everything else uses defaults (SQLite at `./insightxpert.db`, ChromaDB at `./chroma_data`, Gemini 2.5 Flash, CORS allowing `localhost:3000`).
+**pgBouncer awareness:** When Postgres is detected, the engine is configured for pgbouncer transaction mode: `pool_pre_ping=False`, prepare statements disabled via `connect_args`. This avoids session-level features that conflict with transaction pooling.
 
-To also enable voice input during local development, add:
+**SQLite behavior:** `journal_mode=WAL`, `synchronous=NORMAL`, `foreign_keys=ON` are set via SQLAlchemy connect event listeners.
 
-```dotenv
-DEEPGRAM_API_KEY=your-deepgram-api-key-here
+### User Database Access
+
+User databases (uploaded SQLite files or external Postgres connections) are accessed via `DatabaseConnector`, which enforces:
+- `PRAGMA query_only = ON` (SQLite) or `default_transaction_read_only=on` (Postgres) before every query
+- Regex block on `INSERT/UPDATE/DELETE/DROP/ALTER/CREATE/TRUNCATE/REPLACE/MERGE/GRANT/REVOKE/ATTACH/DETACH`
+- Statement timeout via `SQL_TIMEOUT_SECONDS`
+
+---
+
+## 4. LLM Provider Configuration
+
+### Gemini (Google AI Studio)
+
+| Env Var | Default | Description |
+|---|---|---|
+| `GEMINI_API_KEY` | _(required)_ | Google AI Studio API key. Obtain at https://aistudio.google.com/app/apikey |
+| `GEMINI_CHAT_MODEL` | `"gemini-2.5-flash"` | Model used for chat/completion. Available: `gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-2.5-flash-lite`, `gemini-2.0-flash`, `gemini-2.0-flash-lite`. |
+| `GEMINI_EMBED_MODEL` | `"gemini-embedding-001"` | Model used for embeddings (RAG, pgvector). |
+
+### DeepSeek (OpenAI-compatible API)
+
+| Env Var | Default | Description |
+|---|---|---|
+| `DEEPSEEK_API_KEY` | `""` | DeepSeek API key. Empty = DeepSeek disabled. |
+| `DEEPSEEK_CHAT_MODEL` | `"deepseek-v4-flash"` | DeepSeek chat model. |
+
+### Provider Selection
+
+| Env Var | Default | Description |
+|---|---|---|
+| `LLM_PROVIDER` | `"deepseek"` | Which provider the orchestrator uses: `"gemini"` or `"deepseek"`. Can be switched at runtime via `POST /api/v1/config/switch` (in-process only, lost on restart). |
+
+When DeepSeek is the chat provider, embeddings still go to Gemini (DeepSeek has no embedding API). `GEMINI_API_KEY` must still be set.
+
+### Concurrency Controls
+
+| Env Var | Default | Description |
+|---|---|---|
+| `LLM_MAX_CONCURRENCY` | `3` | Global LLM call semaphore. Prevents one user from driving the provider into 429 for everyone. |
+| `PROFILE_MAX_CONCURRENCY` | `2` | Profiling-specific semaphore. Stricter because a single profile can trigger dozens of batched LLM calls. |
+
+---
+
+## 5. Pipeline Tuning
+
+| Env Var | Default | Description |
+|---|---|---|
+| `MAX_UPLOAD_MB` | `50` | Max database upload size in MB. Enforced via chunked read; returns 413 on oversize. |
+| `SQL_ROW_LIMIT` | `1000` | Max rows returned by any user-facing SQL query. Applies to chat pipeline and `POST /api/v1/sql/execute`. |
+| `SQL_TIMEOUT_SECONDS` | `30` | Max execution time for a single SQL query. Maps to `SQLTimeoutError` -> 408. |
+| `MAX_REFINEMENT_ITERATIONS` | `2` | Max SQL refinement loops when the validator detects errors. |
+| `ENABLE_STATS_CONTEXT` | `False` | Inject pre-computed dataset statistics into the system prompt. Off by default in v1. |
+| `MAX_ORCHESTRATOR_TASKS` | `10` | Max concurrent sub-tasks the DAG orchestrator can spawn per question. |
+| `CLARIFICATION_ENABLED` | `False` | Whether the orchestrator may ask clarifying questions before proceeding. |
+
+---
+
+## 6. Profiling Configuration
+
+| Env Var | Default | Description |
+|---|---|---|
+| `PROFILING_BATCH_SIZE` | `20` | Columns per LLM call in the batched summary/quirk generators. Reduces cost from 2x N calls to ceil(N / BATCH_SIZE) per artifact. |
+| `PROFILING_BATCH_DISABLED` | `False` | Escape hatch -- forces the old per-column path (1 LLM call per column per artifact). Expensive, kept as a safety valve. |
+| `PROFILING_MAX_COLUMNS_FOR_LLM` | `500` | Hard cap above which all LLM-driven profiling stages auto-disable. Wide DBs (e.g., Snowflake landscapes) skip cost-free. |
+| `PROFILE_MAX_PER_USER_PER_DAY` | `10` | Per-user daily cap on `POST /databases/{id}/profile`. Returns 429 when exceeded. Admins exempt. |
+
+---
+
+## 7. Automations Setup
+
+| Env Var | Default | Description |
+|---|---|---|
+| `AUTOMATIONS_ENABLED` | `False` | Master switch. When `False`, all automations/notifications routes are unmounted and the scheduler lifespan hook is a no-op. |
+| `AUTOMATIONS_SCHEDULER_MODE` | `"embedded"` | `"embedded"` runs APScheduler inside the FastAPI process (dev/single-replica). `"external"` expects a cron job hitting `POST /api/internal/run-due-automations` with an HMAC-signed body. |
+| `AUTOMATIONS_SCHEDULER_SECRET` | `""` | HMAC secret (minimum 32 characters) required when `mode=external`. Validated at startup; raises `ValueError` if too short. |
+| `AUTOMATIONS_SCHEDULER_TICK_SECONDS` | `30` | Tick interval for the embedded APScheduler. Keep >=5s to avoid excessive DB load. |
+| `AUTOMATIONS_MAX_PER_USER` | `50` | Per-user cap on the number of automations. Enforced atomically via `pg_advisory_xact_lock` (Postgres) or write-lock (SQLite). Returns 429 when exceeded. |
+
+**Dispatching:** Due automations are claimed via `SELECT ... FOR UPDATE SKIP LOCKED`, making the system safe for multi-replica deployments.
+
+---
+
+## 8. Sentry Configuration
+
+| Env Var | Default | Description |
+|---|---|---|
+| `SENTRY_DSN` | `""` | Sentry DSN. Empty = Sentry is a no-op (safe default for tests/fresh clones). Also no-ops when `pytest` is in `sys.modules`. |
+| `SENTRY_ENVIRONMENT` | `""` | Sentry environment tag. Defaults to `APP_ENV` when blank. |
+| `SENTRY_RELEASE` | `""` | Git SHA or semantic release string for grouping events per release. |
+| `SENTRY_TRACES_SAMPLE_RATE` | `0.0` | Performance tracing sample rate. 0.0 disables, 1.0 captures all. Keep low in prod to control cost. |
+| `SENTRY_PROFILES_SAMPLE_RATE` | `0.0` | Profiling sample rate. |
+| `SENTRY_SEND_DEFAULT_PII` | `False` | Include IP, headers, and user email in captured events. Off by default. |
+
+**Initialization order:** Sentry is initialized in `create_app()` **before** `FastAPI()` construction, so integrations (`FastApiIntegration`, `StarletteIntegration`, `AsyncioIntegration`, `LoggingIntegration`) patch at the ASGI level before any middleware or routers are registered.
+
+---
+
+## 9. Storage Configuration
+
+| Env Var | Default | Description |
+|---|---|---|
+| `GCS_BUCKET` | `""` | Google Cloud Storage bucket name for uploaded files. Empty = local filesystem fallback (dev/tests). |
+| `LOCAL_STORAGE_DIR` | `"./tmp/storage"` | Local directory for file storage when `GCS_BUCKET` is empty. |
+| `BUNDLED_DBS_DIR` | `"./Databases"` | Directory containing bundled sample databases. |
+
+---
+
+## 10. Voice / Speech-to-Text
+
+| Env Var | Default | Description |
+|---|---|---|
+| `DEEPGRAM_API_KEY` | `""` | Deepgram Nova-3 API key. Empty = voice feature disabled. If a client connects to `/api/transcribe` without this key set, the WebSocket is closed with code 4002. Obtain at https://console.deepgram.com/ |
+
+---
+
+## 11. Credential Encryption (BYO DB)
+
+| Env Var | Default | Description |
+|---|---|---|
+| `CREDENTIAL_ENCRYPTION_KEY` | `None` | Fernet symmetric key (32-byte URL-safe base64) for encrypting BYO database credentials at rest. Only required when `/api/v1/connections` is used. Generate with: `python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'` |
+
+---
+
+## 12. SLA Thresholds
+
+| Env Var | Default | Description |
+|---|---|---|
+| `SLA_CRITICAL_P95_MS` | `300` | p95 latency target for critical routes (login, chat). |
+| `SLA_STANDARD_P95_MS` | `500` | p95 latency target for standard routes (conversations, databases). |
+| `SLA_BACKGROUND_P95_MS` | `2000` | p95 latency target for background/admin routes. |
+
+---
+
+## 13. Feature Flags
+
+The `AUTOMATIONS_ENABLED` flag controls **conditional route mounting**. When `False`, the automations and notifications routers are never registered with FastAPI. This means:
+- All `/api/v1/automations/*` routes return 404
+- All `/api/v1/notifications/*` routes return 404
+- The SSE notification stream is unavailable
+- The scheduler lifespan hook is a no-op
+- The internal HMAC endpoint returns 503
+
+The `/api/v1/client-config` endpoint reflects this in its `features` map:
+```json
+{
+  "features": {
+    "sql_runner": true,
+    "upload": true,
+    "profile_editor": true,
+    "voice": true,
+    "automations": false,
+    "admin": false,
+    "insights": true,
+    "notifications": false
+  },
+  "version": "0.1.0"
+}
 ```
 
-Minimal `frontend/.env.local`:
+---
+
+## 14. Observability
+
+The observability stack consists of three layers:
+
+1. **structlog** (structured logging) -- ConsoleRenderer for local dev (pretty, colorized), JSONRenderer for staging/prod (Cloud Logging compatible lines). Controlled by `APP_ENV`.
+
+2. **Sentry** (error tracking) -- Initialized before FastAPI construction. Integrations: `FastApiIntegration`, `StarletteIntegration`, `AsyncioIntegration`, `LoggingIntegration`. See Section 8 for configuration.
+
+3. **Prometheus** (metrics) -- In-memory counters exposed at `GET /metrics` (no auth). Counters include `audit_queue_depth`, `sse_active_emitters`, `llm_calls_total`, `process_resident_memory_bytes`. Per-endpoint latency histograms via `http_request_duration` and `db_query_duration`.
+
+**Audit middleware** enqueues an audit row for every non-GET request, classifying paths against a regex table to derive `(resource_type, resource_id)`. Audit rows are drained in batches (50 rows / 200ms, max 5000 entries). Audit failures are logged and swallowed -- they never impact the response.
+
+---
+
+## 15. Development vs Production Settings
+
+### Minimal Local Development `.env.local`
 
 ```dotenv
-# frontend/.env.local
-NEXT_PUBLIC_API_URL=http://localhost:8000
+APP_ENV=local
+PORT=8080
+
+# Auth (generate a real secret for anything beyond localhost)
+SESSION_SECRET=local-dev-secret-at-least-32-characters-long!!
+
+# Bootstrap users (idempotent -- only applied on first boot)
+BOOTSTRAP_ADMIN_EMAIL=admin@insightxpert.ai
+BOOTSTRAP_ADMIN_PASSWORD=admin123
+BOOTSTRAP_USER_EMAIL=user@insightxpert.ai
+BOOTSTRAP_USER_PASSWORD=user@insightxpert.ai123
+
+# Database (SQLite for local dev -- no Postgres needed)
+DATABASE_URL=sqlite:///./app.db
+
+# LLM (choose one provider)
+LLM_PROVIDER=deepseek
+GEMINI_API_KEY=your-gemini-key
+DEEPSEEK_API_KEY=your-deepseek-key
+
+# Pipeline
+MAX_UPLOAD_MB=50
+SQL_ROW_LIMIT=1000
+SQL_TIMEOUT_SECONDS=30
+
+# Optional: enable automations for local testing
+# AUTOMATIONS_ENABLED=true
+# AUTOMATIONS_SCHEDULER_MODE=embedded
 ```
+
+### Production Considerations
+
+For production deployments on Cloud Run:
+
+- **Database:** Use Supabase Postgres with the transaction pooler URL (port 6543) for `DATABASE_URL`. Set `DATABASE_DIRECT_URL` (port 5432) for Alembic migrations. Tune pool sizes: `DB_POOL_SIZE=15`, `DB_MAX_OVERFLOW=10`.
+- **Session secret:** Generate a strong random string of 32+ characters. Rotating this invalidates all sessions.
+- **Bootstrap passwords:** Change from defaults. They are only applied on first boot but should still be strong in case the DB is ever reset.
+- **Sentry:** Set `SENTRY_DSN` to your project DSN. Start with `SENTRY_TRACES_SAMPLE_RATE=0.1` and adjust based on cost.
+- **Automations:** If using external scheduler, set `AUTOMATIONS_SCHEDULER_MODE=external` and provide a strong `AUTOMATIONS_SCHEDULER_SECRET` (32+ random bytes).
+- **CORS:** Set `CORS_ORIGINS` to your production frontend origins as a JSON array.
+- **Credential encryption:** Generate a Fernet key and set `CREDENTIAL_ENCRYPTION_KEY` if BYO database connections will be used.
+- **Storage:** Set `GCS_BUCKET` to your GCS bucket name for persistent file storage.
+- **Logging:** Set `APP_ENV=prod` for JSON-formatted structlog output.

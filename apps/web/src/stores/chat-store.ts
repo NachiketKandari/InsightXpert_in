@@ -24,7 +24,6 @@ interface ChatState {
   streamingConversationId: string | null;
   agentSteps: AgentStep[];
   leftSidebarOpen: boolean;
-  rightSidebarOpen: boolean;
   sqlExecutorOpen: boolean;
   datasetViewerOpen: boolean;
   sampleQuestionsOpen: boolean;
@@ -65,9 +64,7 @@ interface ChatState {
   updateLastAssistantTime: (wallTimeMs: number, convId?: string) => void;
 
   toggleLeftSidebar: () => void;
-  toggleRightSidebar: () => void;
   setLeftSidebar: (open: boolean) => void;
-  setRightSidebar: (open: boolean) => void;
   setSqlExecutorOpen: (open: boolean) => void;
   setDatasetViewerOpen: (open: boolean) => void;
   setSampleQuestionsOpen: (open: boolean) => void;
@@ -79,18 +76,6 @@ interface ChatState {
 
   // ---------------------------------------------------------------------
   // In-answer citation highlights (clickable [^N] footnotes → row flash).
-  // Set when an answer-chunk footnote is clicked; cleared after the
-  // data-table flashes the cited rows. `ts` is updated on every set so a
-  // re-click of the same footnote re-triggers the framer-motion animation.
-  // ---------------------------------------------------------------------
-  messageHighlight: {
-    messageId: string;
-    rowIndices: number[];
-    ts: number;
-  } | null;
-  setMessageHighlight: (
-    h: { messageId: string; rowIndices: number[] } | null,
-  ) => void;
 }
 
 export const useChatStore = create<ChatState>()(persist((set, get) => ({
@@ -100,7 +85,6 @@ export const useChatStore = create<ChatState>()(persist((set, get) => ({
   streamingConversationId: null,
   agentSteps: [],
   leftSidebarOpen: false,
-  rightSidebarOpen: false,
   sqlExecutorOpen: false,
   datasetViewerOpen: false,
   sampleQuestionsOpen: false,
@@ -495,16 +479,8 @@ export const useChatStore = create<ChatState>()(persist((set, get) => ({
     set((state) => ({ leftSidebarOpen: !state.leftSidebarOpen }));
   },
 
-  toggleRightSidebar: () => {
-    set((state) => ({ rightSidebarOpen: !state.rightSidebarOpen }));
-  },
-
   setLeftSidebar: (open) => {
     set({ leftSidebarOpen: open });
-  },
-
-  setRightSidebar: (open) => {
-    set({ rightSidebarOpen: open });
   },
 
   setSqlExecutorOpen: (open) => {
@@ -539,23 +515,6 @@ export const useChatStore = create<ChatState>()(persist((set, get) => ({
     set({ selectedDbId: dbId });
   },
 
-  // ---------------------------------------------------------------------
-  // Citation highlight slice — see ChatState above for rationale.
-  // ---------------------------------------------------------------------
-  messageHighlight: null,
-  setMessageHighlight: (h) => {
-    if (h === null) {
-      set({ messageHighlight: null });
-      return;
-    }
-    set({
-      messageHighlight: {
-        messageId: h.messageId,
-        rowIndices: h.rowIndices,
-        ts: Date.now(),
-      },
-    });
-  },
 }), {
   name: "insightxpert-chat",
   storage: {

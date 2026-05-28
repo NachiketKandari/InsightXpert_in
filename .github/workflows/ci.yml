@@ -1,3 +1,6 @@
+# DECISION(D-045): No CI/CD remote yet (local-only git). This workflow is
+# scaffolded (push+PR trigger, SQLite+Postgres matrix, uv+pytest) but
+# unverified — no GitHub remote exists. Single-developer pre-launch workflow.
 name: CI
 
 on:

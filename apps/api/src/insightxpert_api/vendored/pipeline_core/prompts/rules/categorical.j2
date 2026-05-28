@@ -1,6 +1,0 @@
-CATEGORICAL FILTERING:
-- **Categorical columns → ALWAYS use `=`, NEVER `LIKE`.** This is critical for columns that can hold multiple values.
-  WRONG: `WHERE "types" LIKE '%Artifact%'` (matches "Artifact Creature" too).
-  WRONG: `WHERE "colors" LIKE '%B%'` (matches "BG", "BR" too).
-  RIGHT: `WHERE "types" = 'Artifact'` and `WHERE "colors" = 'B'`.
-  Also applies to tags: `WHERE "Tags" = '<humor>'` not `LIKE '%<humor>%'`.

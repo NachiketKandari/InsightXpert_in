@@ -86,16 +86,6 @@ export interface AnswerGeneratedData {
 }
 
 /**
- * Streaming delta emitted by AnswerSynthesizerStage while the LLM is still
- * producing tokens. The FE appends `text` onto the assistant message's
- * content; the terminal `answer_generated` chunk replaces it with the
- * canonical full text.
- */
-export interface AnswerDeltaData {
-  text: string;
-}
-
-/**
  * Per-DB few-shot QA pair retrieved during the route's preflight.
  *
  * Emitted as a single ``few_shot_retrieved`` chunk before any pipeline

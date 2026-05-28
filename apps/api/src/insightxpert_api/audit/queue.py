@@ -20,6 +20,9 @@ from .table import audit_log
 
 log = get_logger("audit")
 
+# DECISION(D-073): Audit back-pressure — hard 5000-item cap, oldest rows
+# dropped when full. Drain at 50 rows OR 200ms, whichever first. Principle:
+# "Audit logging must never cause user-facing latency."
 # Hard back-pressure limit on the audit queue. Once full, new rows are dropped
 # rather than growing memory unboundedly.
 _QUEUE_MAXSIZE = 5000
@@ -179,6 +182,7 @@ def get_queue() -> AuditQueue:
     return _queue
 
 
+# TEST-ONLY: used by test_audit_queue.py
 def reset_queue_for_tests() -> None:
     """Test hook only. Drops the singleton so the next call rebuilds."""
     global _queue

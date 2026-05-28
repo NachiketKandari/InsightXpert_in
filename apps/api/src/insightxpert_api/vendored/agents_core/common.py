@@ -195,7 +195,7 @@ async def yield_enrichment_traces(
 ) -> AsyncGenerator[ChatChunk, None]:
     """Yield enrichment_trace chunks for the citation system.
 
-    Source [1] = original analyst; additional tasks start at [2].
+    Source 1 = original analyst; additional tasks start at 2.
     """
     yield ChatChunk(
         type="enrichment_trace",
@@ -250,8 +250,8 @@ def build_evidence_blocks(
 ) -> str:
     """Build formatted evidence text from all sources for synthesis prompts.
 
-    When *original* is provided it becomes Source [1] and enrichment tasks
-    start at [2].  Returns the joined evidence string.
+    When *original* is provided it becomes Source 1 and enrichment tasks
+    start at 2.  Returns the joined evidence string.
     """
     evidence_entries: list[str] = []
     source_offset = 0
@@ -260,7 +260,7 @@ def build_evidence_blocks(
         source_offset = 1
         rows_summary = summarize_results(original.rows, max_rows=10)
         evidence_entries.append(
-            f"### Source [1]: Original Analysis\n"
+            f"### Source 1: Original Analysis\n"
             f"**Task:** {question}\n"
             f"**SQL:** `{original.sql or '(none)'}`\n"
             f"**Results ({len(original.rows)} rows):** {rows_summary}\n"
@@ -282,7 +282,7 @@ def build_evidence_blocks(
 
         if not result.success:
             evidence_entries.append(
-                f"### Source [{idx}]: {label}\n"
+                f"### Source {idx}: {label}\n"
                 f"**Task:** {task.task}\n"
                 f"**Status:** Failed — {result.error or 'no data available'}"
             )
@@ -290,7 +290,7 @@ def build_evidence_blocks(
 
         rows_summary = summarize_results(result.rows, max_rows=10)
         evidence_entries.append(
-            f"### Source [{idx}]: {label}\n"
+            f"### Source {idx}: {label}\n"
             f"**Task:** {task.task}\n"
             f"**SQL:** `{result.sql or '(none)'}`\n"
             f"**Results ({len(result.rows)} rows):** {rows_summary}\n"

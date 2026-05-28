@@ -111,6 +111,11 @@ function parseSections(markdown: string): { preamble: string; sections: ParsedSe
   return { preamble, sections };
 }
 
+// Monotonic counter for unique React keys across all CitationLink renders.
+// Using match.index alone causes duplicate keys when the same source index
+// appears at the same character offset in different paragraphs.
+let _citeKeyCounter = 0;
+
 function processCitations(
   children: React.ReactNode,
   traceMap: Map<number, EnrichmentTrace>,
@@ -139,7 +144,7 @@ function processCitations(
       if (trace) {
         result.push(
           <CitationLink
-            key={`cite-${match.index}-${sourceIdx}`}
+            key={`cite-${++_citeKeyCounter}`}
             sourceIndex={sourceIdx}
             trace={trace}
             onClick={onCitationClick}

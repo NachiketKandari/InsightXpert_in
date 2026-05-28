@@ -1,3 +1,6 @@
+# DECISION(D-007): Provider-agnostic LLM factory — create_chat_llm(settings)
+# replaces hardcoded GeminiLLM(). Supports Gemini (google-genai) + DeepSeek
+# (OpenAI-compatible) selectable via LLM_PROVIDER env var.
 """LLM provider surface.
 
 The Protocol contract lives in the vendored ``agents_core`` tree (matches

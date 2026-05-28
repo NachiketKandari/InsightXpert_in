@@ -31,6 +31,7 @@ _request_engine: Engine | None = None
 _background_engine: Engine | None = None
 
 
+# DECISION(D-089): # noqa: ANN001 on SQLAlchemy event listeners — signatures are fixed by SQLAlchemy's event system
 def _apply_sqlite_pragmas(dbapi_connection, _connection_record) -> None:  # noqa: ANN001
     cursor = dbapi_connection.cursor()
     try:
@@ -59,6 +60,10 @@ def _build_engine(*, pool_size: int, max_overflow: int, pool_timeout: int) -> En
         event.listen(engine, "connect", _apply_sqlite_pragmas)
         return engine
 
+    # DECISION(D-044): PgBouncer transaction pooling (Supabase port 6543) —
+    # connections reused across transactions, no server-side prepared
+    # statements (incompatible with transaction mode). Alembic migrations
+    # use direct connection (port 5432, session mode).
     # `prepare_threshold` is a psycopg3-only connect kwarg. Setting it to
     # None disables server-side prepared statements, which is required for
     # pgbouncer transaction-mode pooling. Only pass it when the URL
@@ -103,6 +108,9 @@ def _build_engine(*, pool_size: int, max_overflow: int, pool_timeout: int) -> En
     return engine
 
 
+# DECISION(D-033): Lazy engine singletons — engines created on first access, not at import time
+# DECISION(D-060): Two independent SQLAlchemy engines — request pool + background pool (prevents pool starvation)
+# DECISION(D-063): Request pool sized 15+10 for ~25 concurrent users; background fenced to 2+0
 def get_request_engine() -> Engine:
     global _request_engine
     if _request_engine is None:
@@ -136,6 +144,7 @@ def get_engine() -> Engine:
     return get_request_engine()
 
 
+# TEST-ONLY: used by conftest.py and test_db_engine.py
 def reset_engine_cache() -> None:
     """Test hook only. Disposes both cached engines so the next call rebuilds."""
     global _request_engine, _background_engine

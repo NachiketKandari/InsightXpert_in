@@ -40,6 +40,7 @@ def _llm_semaphore() -> asyncio.Semaphore:
     return _LLM_SEMAPHORE
 
 
+# TEST-ONLY
 def _reset_llm_semaphore(n: int) -> None:
     """Test hook — reset the module-level LLM semaphore."""
     global _LLM_SEMAPHORE

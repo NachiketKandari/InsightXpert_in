@@ -1,8 +1,0 @@
-ORDERING & LIMITS:
-- Prefer `ORDER BY ... LIMIT 1` over subqueries with MAX/MIN — UNLESS ties matter.
-- **Ties:** If the question says "the league with the most matches" and multiple leagues could tie, use a subquery: `HAVING COUNT(*) = (SELECT MAX(cnt) FROM ...)` instead of LIMIT 1.
-- **LIMIT 1 only when one result is asked for.** "Which races did X win?" → ALL rows. "List X that Y" → ALL rows. Only use LIMIT 1 for "the top", "the best", "the single highest/lowest".
-- Word "rank" in question → **MUST** include `RANK() OVER (ORDER BY ...)` column in SELECT.
-
-NULLS (for ranking):
-- **ORDER BY + LIMIT extremes: ALWAYS add `WHERE col IS NOT NULL`.** NULLs sort first in ASC and can silently corrupt results.

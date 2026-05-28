@@ -48,6 +48,9 @@ def configure_logging(env: str) -> None:
     if env == "local":
         log_dir = Path(__file__).resolve().parents[3] / "logs"
         log_dir.mkdir(exist_ok=True)
+        # DECISION(D-075): File-based log rotation in dev only (10 MB x 5
+        # backups, JSON format). Production logs go to stdout via JSONRenderer
+        # (Cloud Run captures stdout → Cloud Logging). No file I/O in prod.
         file_handler = RotatingFileHandler(
             log_dir / "api.log",
             maxBytes=10_485_760,  # 10 MB
@@ -62,6 +65,9 @@ def configure_logging(env: str) -> None:
     # params) at DEBUG level — they flood the file log and add disk I/O.
     logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
 
+    # DECISION(D-070): structlog with ConsoleRenderer (local dev, human-readable)
+    # and JSONRenderer (prod, machine-parseable by Cloud Logging).
+    # contextvars for request-scoped fields; stdlib logging bridge.
     # --- structlog (processors + renderer) ----------------------------------
     if env == "local":
         renderer: structlog.types.Processor = structlog.dev.ConsoleRenderer()

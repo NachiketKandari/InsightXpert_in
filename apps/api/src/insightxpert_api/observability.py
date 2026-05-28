@@ -1,3 +1,7 @@
+# DECISION(D-072): Prometheus /metrics endpoint (GET, no auth) — histograms
+# for HTTP request duration (method/route/status_class) and DB query duration
+# (operation/engine), counters for requests/SLA violations/LLM calls.
+# No auth flagged as TODO-SECURITY — must be firewall-gated in production.
 """Process-level observable counters for the /metrics endpoint.
 
 These are intentionally simple in-memory integers — no deps, no threads,

@@ -141,6 +141,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             mode=settings.automations_scheduler_mode,
         )
 
+    # DECISION(D-074): SSE idle reaper — wakes every 60s, evicts emitters
+    # with no subscriber and 15+ min inactivity. Prevents memory leak from
+    # abandoned SSE connections. Emits Prometheus counter for evictions.
     # --- SSE idle reaper ---------------------------------------------------
     reaper_task = asyncio.create_task(
         _sse_idle_reaper(app), name="sse-idle-reaper"
@@ -191,6 +194,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 def create_app() -> FastAPI:
+    # DECISION(D-001): Python + FastAPI on Cloud Run — async-native SSE support,
+    # Pydantic integration, and zero-ops container hosting via Cloud Run.
+    # DECISION(D-009): Fresh orchestrator + vendored pipeline BE strategy — new
+    # FastAPI app wrapping vendored pipeline_core/agents_core; no port of the
+    # public repo's agentic analyst loop.
     """Construct the FastAPI app. Kept thin on purpose — all work in routers/services."""
     settings = get_settings()
 
@@ -257,6 +265,7 @@ def create_app() -> FastAPI:
     # templates_router must be included BEFORE router so that
     # /api/v1/automations/templates resolves to the templates handler, not the
     # parametric /{automation_id} route.
+    # DECISION(D-035): Conditional router mounting — routes conditionally included based on AUTOMATIONS_ENABLED env var
     if settings.automations_enabled:
         app.include_router(automations_routes.templates_router)
         app.include_router(automations_routes.router)
@@ -270,4 +279,6 @@ def create_app() -> FastAPI:
     return app
 
 
+# DECISION(D-020): All user-facing routes under /api/v1/ prefix; admin under
+# /api/v1/admin/; internal routes under /api/internal/ (no version prefix).
 app = create_app()

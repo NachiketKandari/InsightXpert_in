@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, EmailStr, Field
 
 from ..auth.current_user import CurrentUser, get_current_user
+from ..auth.rate_limit import check_auth_rate_limit
 from ..auth.session import SessionSigner
 from ..config import Settings, get_settings
 from ..users import service
@@ -48,6 +49,7 @@ async def login(
     body: LoginRequest,
     response: Response,
     settings: Settings = Depends(get_settings),
+    _rate_limit: None = Depends(check_auth_rate_limit),
 ) -> LoginResponse:
     user = service.authenticate(body.email, body.password)
     # DECISION(D-025): Flat error response shape {"detail": "message"} —
@@ -55,6 +57,48 @@ async def login(
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="unauthorized")
     # Ensure iat >= sessions_valid_after so the freshly-issued token is always valid.
+    iat = max(int(time.time()), user.sessions_valid_after)
+    token = SessionSigner(settings).issue(user_id=user.id, role=user.role, iat=iat)
+    _set_session_cookie(response, settings, token)
+    service.touch_last_seen(user.id)
+    return LoginResponse(
+        id=user.id,
+        email=user.email,
+        role=user.role,
+        must_change_password=user.must_change_password,
+    )
+
+
+# --- register -------------------------------------------------------------
+
+
+class RegisterRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=8, max_length=256)
+
+
+@router.post("/register", response_model=LoginResponse, status_code=status.HTTP_201_CREATED)
+async def register(
+    body: RegisterRequest,
+    response: Response,
+    settings: Settings = Depends(get_settings),
+    _rate_limit: None = Depends(check_auth_rate_limit),
+) -> LoginResponse:
+    if not settings.registration_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="registration is disabled",
+        )
+    try:
+        user = service.register(body.email, body.password)
+    except service.EmailAlreadyExistsError:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="email_exists"
+        ) from None
+    except service.WeakPasswordError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e)
+        ) from None
     iat = max(int(time.time()), user.sessions_valid_after)
     token = SessionSigner(settings).issue(user_id=user.id, role=user.role, iat=iat)
     _set_session_cookie(response, settings, token)

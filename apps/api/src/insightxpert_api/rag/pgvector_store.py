@@ -24,6 +24,7 @@ from sqlalchemy.engine import Connection
 from ..db.engine import get_engine
 
 
+# DECISION(D-014): Deterministic doc IDs — SHA-256 hex prefix for content-addressable vector IDs
 def _make_id(text_: str) -> str:
     """Deterministic doc id — first 16 hex chars of SHA-256(content)."""
     return hashlib.sha256(text_.encode()).hexdigest()[:16]

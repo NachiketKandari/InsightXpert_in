@@ -87,20 +87,24 @@ def _user_sharing_disabled(user_id: str) -> bool:
 
 
 def _load_conversation(conversation_id: str, user_id: str) -> dict:
-    with get_engine().connect() as conn:
-        crow = conn.execute(
-            select(conversations).where(conversations.c.id == conversation_id)
-        ).mappings().first()
-        if crow is None:
-            raise ConversationNotFound(conversation_id)
-        if crow["user_id"] != user_id:
-            raise NotConversationOwner(conversation_id)
-        mrows = conn.execute(
-            select(messages)
-            .where(messages.c.conversation_id == conversation_id)
-            .order_by(messages.c.created_at.asc())
-        ).mappings().all()
-    return {"conversation": dict(crow), "messages": [dict(m) for m in mrows]}
+    for attempt in range(5):
+        with get_engine().connect() as conn:
+            crow = conn.execute(
+                select(conversations).where(conversations.c.id == conversation_id)
+            ).mappings().first()
+            if crow is not None:
+                if crow["user_id"] != user_id:
+                    raise NotConversationOwner(conversation_id)
+                mrows = conn.execute(
+                    select(messages)
+                    .where(messages.c.conversation_id == conversation_id)
+                    .order_by(messages.c.created_at.asc())
+                ).mappings().all()
+                return {"conversation": dict(crow), "messages": [dict(m) for m in mrows]}
+        if attempt < 4:
+            time.sleep(0.1)
+    raise ConversationNotFound(conversation_id)
+
 
 
 def _build_payload(

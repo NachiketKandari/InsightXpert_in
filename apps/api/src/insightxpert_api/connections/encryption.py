@@ -25,6 +25,7 @@ def _get_fernet(settings: Settings | None = None) -> Fernet:
     return Fernet(s.credential_encryption_key.encode())
 
 
+# DECISION(D-052): Fernet symmetric authenticated encryption for BYO-DB credentials
 def encrypt(plaintext: str) -> str:
     return _get_fernet().encrypt(plaintext.encode()).decode()
 

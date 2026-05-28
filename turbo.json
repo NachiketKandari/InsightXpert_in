@@ -1,5 +1,6 @@
 {
   "$schema": "https://turbo.build/schema.json",
+  // DECISION(D-080): npm workspaces (not pnpm) — pnpm symlinks caused Turbopack resolution failures
   "tasks": {
     "build": {
       "dependsOn": ["^build"],

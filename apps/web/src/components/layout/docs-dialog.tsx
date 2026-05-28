@@ -39,6 +39,7 @@ const DOC_GROUPS: DocGroup[] = [
       { label: "Architecture", path: "/docs/ARCHITECTURE.md" },
       { label: "Walkthrough", path: "/docs/WALKTHROUGH.md" },
       { label: "Design Patterns", path: "/docs/DESIGN_PATTERNS.md" },
+      { label: "Decision Records", path: "/docs/DECISIONS.md" },
     ],
   },
   {

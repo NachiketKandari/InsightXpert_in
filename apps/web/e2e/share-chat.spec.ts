@@ -1,8 +1,8 @@
 import { test, expect } from "@playwright/test";
 import { loginAsAdmin } from "./helpers/auth";
 
-// The chat input placeholder used in both WelcomeScreen and MessageInput.
-const CHAT_PLACEHOLDER = "Ask about Indian digital payments...";
+// The chat input placeholder matches once a database is loaded/selected.
+const CHAT_PLACEHOLDER = /Ask anything about/i;
 
 test.describe("share-chat", () => {
   test("bundled DB → create → copy → incognito loads → revoke → 404", async ({

@@ -282,6 +282,7 @@ async def _preflight_concurrent(
             )
             return None
 
+    # DECISION(D-062): Concurrent preflight via asyncio.TaskGroup — wall time = max(profile, classify, fewshot)
     async with asyncio.TaskGroup() as tg:
         decision_t = tg.create_task(_safe_classify())
         profile_t = tg.create_task(_safe_profile())
@@ -505,6 +506,10 @@ async def _run_pipeline(
                 pass
 
 
+# DECISION(D-021): POST for chat endpoints — request bodies are complex JSON
+# (message, db_id, conversation_id, agent_mode), not query-safe.
+# DECISION(D-024): Three chat surfaces (SSE streaming, poll for debugging,
+# answer for simple integrations) — same pipeline, different delivery.
 @router.post("/chat")
 async def chat_sse(
     body: ChatRequest,

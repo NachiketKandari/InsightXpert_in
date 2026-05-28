@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# insightxpert.in — VPS Backend Setup Script (NEW backend on port 8080)
+# insightxpert.in — VPS Backend Setup Script
 # Run this ON your Hostinger VPS as nachiket
 set -euo pipefail
 
 APP_BASE="/home/nachiket/services/insightxpert-api"
 
 echo "=== 1. Create app directory structure ==="
-mkdir -p "${APP_BASE}"/{Databases,indices,storage}
+mkdir -p "${APP_BASE}"/{indices,storage}
 cd "${APP_BASE}"
 
 echo ""
@@ -29,12 +29,14 @@ cat > "${APP_BASE}/.env" << 'ENVEOF'
 APP_ENV=production
 PORT=8080
 
-# --- CORS (update if using a different frontend domain) ---
+# --- CORS ---
 CORS_ORIGINS='["https://insightxpert.in","https://www.insightxpert.in"]'
 
-# --- Supabase (use YOUR real values from 1Password / previous .env) ---
+# --- Supabase ---
 DATABASE_URL=postgresql+psycopg://postgres.rwnxgohpmmuyfjeghhaj:<YOUR_SUPABASE_PASSWORD>@aws-1-ap-northeast-1.pooler.supabase.com:6543/postgres
-DATABASE_DIRECT_URL=postgresql+psycopg://postgres.rwnxgohpmmuyfjeghhaj:<YOUR_SUPABASE_PASSWORD>@aws-1-ap-northeast-1.pooler.supabase.com:6543/postgres
+DATABASE_DIRECT_URL=postgresql+psycopg://postgres.rwnxgohpmmuyfjeghhaj:<YOUR_SUPABASE_PASSWORD>@db.rwnxgohpmmuyfjeghhaj.supabase.co:5432/postgres?sslmode=require
+SUPABASE_PROJECT_REF=rwnxgohpmmuyfjeghhaj
+SUPABASE_SERVICE_KEY=<YOUR_SUPABASE_SERVICE_ROLE_KEY>
 
 # --- Auth ---
 SESSION_SECRET=<GENERATE_A_RANDOM_32_CHAR_STRING>
@@ -69,14 +71,7 @@ echo ".env template written to ${APP_BASE}/.env"
 echo ">>> EDIT ${APP_BASE}/.env WITH YOUR REAL VALUES <<<"
 
 echo ""
-echo "=== 5. Copy bundled databases ==="
-if [ -d "${APP_BASE}/repo/apps/api/Databases" ]; then
-  cp -r "${APP_BASE}/repo/apps/api/Databases"/* "${APP_BASE}/Databases/" 2>/dev/null || true
-  echo "Bundled databases copied."
-fi
-
-echo ""
-echo "=== 6. Create docker-compose.yml ==="
+echo "=== 5. Create docker-compose.yml and start ==="
 cat > "${APP_BASE}/docker-compose.yml" << COMPOSEEOF
 services:
   api:
@@ -86,7 +81,6 @@ services:
     env_file:
       - ${APP_BASE}/.env
     volumes:
-      - ${APP_BASE}/Databases:/app/Databases:ro
       - ${APP_BASE}/indices:/app/indices
       - ${APP_BASE}/storage:/app/tmp/storage
     restart: unless-stopped
@@ -97,8 +91,6 @@ services:
       retries: 3
 COMPOSEEOF
 
-echo ""
-echo "=== 7. Start the container ==="
 cd "${APP_BASE}"
 docker compose up -d
 
@@ -107,3 +99,9 @@ echo "=== Done! ==="
 echo "Check: curl http://localhost:8080/api/v1/health"
 echo "Public: https://api.insightxpert.in/api/v1/health"
 echo "(Caddy handles SSL and reverse proxy — already configured)"
+echo ""
+echo "=== IMPORTANT: Before running ==="
+echo "1. Edit ${APP_BASE}/.env with your real secrets"
+echo "2. Run: bash ${APP_BASE}/repo/scripts/deploy-vps.sh"
+echo ""
+echo "Bundled SQLite DBs are downloaded from Supabase Storage at container startup."

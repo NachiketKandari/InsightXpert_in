@@ -1,9 +1,3 @@
-export const SUGGESTED_QUESTIONS = [
-  "Show the monthly transaction volume trend over time",
-  "What are the top 5 merchant categories by total transaction value?",
-  "Compare UPI vs credit card transaction patterns",
-] as const;
-
 // Regular API calls go through the CDN proxy (relative URL = first-party cookies).
 export const API_BASE_URL = "";
 

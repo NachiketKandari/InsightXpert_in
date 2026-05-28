@@ -1,8 +1,30 @@
 #!/bin/sh
 set -e
 
-# Run database migration before starting uvicorn.
-# Standalone — avoids hanging inside uvicorn's lifespan thread pool.
+# ---- Download bundled databases from Supabase Storage ------------------
+if [ -n "${SUPABASE_SERVICE_KEY}" ] && [ -n "${SUPABASE_PROJECT_REF}" ]; then
+  echo "Fetching bundled databases from Supabase Storage..."
+  DB_DIR="/app/Databases"
+  mkdir -p "${DB_DIR}"
+  BASE="https://${SUPABASE_PROJECT_REF}.supabase.co/storage/v1/object/bundled-dbs"
+
+  for f in california_schools.sqlite debit_card_specializing.sqlite \
+           formula_1.sqlite toxicology.sqlite \
+           financial.sqlite.gz european_football_2.sqlite.gz; do
+    echo "  → ${f}"
+    curl -sfSL -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}" \
+      -o "${DB_DIR}/${f}" "${BASE}/${f}"
+    # Decompress gzipped databases
+    case "${f}" in
+      *.gz) gunzip -f "${DB_DIR}/${f}"; echo "    decompressed" ;;
+    esac
+  done
+  echo "Bundled databases ready ($(ls -1 ${DB_DIR}/*.sqlite 2>/dev/null | wc -l) files)."
+else
+  echo "SUPABASE_SERVICE_KEY or SUPABASE_PROJECT_REF not set — skipping DB fetch."
+fi
+
+# ---- Run database migrations -------------------------------------------
 echo "Running DB migrations..."
 cd /app
 python -m alembic -c alembic.ini upgrade head

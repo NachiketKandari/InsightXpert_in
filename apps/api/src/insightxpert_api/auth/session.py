@@ -31,12 +31,14 @@ class SessionClaims:
 
 
 class SessionSigner:
+    # DECISION(D-050): HMAC-signed session cookies via itsdangerous.URLSafeTimedSerializer (not JWT/OAuth)
     _SALT = "ix-session"
 
     def __init__(self, settings: Settings) -> None:
         self._serializer = URLSafeTimedSerializer(settings.session_secret, salt=self._SALT)
         self._ttl = settings.session_ttl_seconds
 
+    # DECISION(D-055): Use iat (issued-at) not exp for session age — enables server-side invalidation
     def issue(self, *, user_id: str, role: Role, sid: str | None = None, iat: int | None = None) -> str:
         payload = {
             "user_id": user_id,

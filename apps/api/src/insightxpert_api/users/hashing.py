@@ -9,6 +9,7 @@ from __future__ import annotations
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError, InvalidHashError
 
+# DECISION(D-051): Argon2id password hashing (not bcrypt) — memory-hard, GPU/ASIC-resistant
 _hasher = PasswordHasher()
 
 

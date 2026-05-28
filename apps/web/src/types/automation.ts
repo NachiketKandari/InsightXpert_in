@@ -94,15 +94,6 @@ export interface TriggerTemplate {
 
 export type SchedulePreset = "hourly" | "daily" | "weekly" | "monthly" | "custom";
 
-export interface AutomationContext {
-  question: string;
-  sqlQueries: string[];
-  columns: string[];
-  rows: Record<string, unknown>[];
-  conversationId: string | null;
-  messageId: string | null;
-}
-
 export interface CreateAutomationPayload {
   name: string;
   description?: string;

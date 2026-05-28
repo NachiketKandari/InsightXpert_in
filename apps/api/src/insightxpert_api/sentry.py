@@ -44,6 +44,10 @@ def init_sentry(settings: Settings) -> bool:
     environment = settings.sentry_environment or settings.app_env
     release = settings.sentry_release or None
 
+    # DECISION(D-071): Sentry error tracking — incident grouping, stack traces
+    # with local variables, release tracking. Initialized BEFORE FastAPI() so
+    # FastApiIntegration can patch the ASGI app. No-op when SENTRY_DSN empty
+    # or when pytest is in sys.modules.
     sentry_sdk.init(
         dsn=settings.sentry_dsn,
         environment=environment,

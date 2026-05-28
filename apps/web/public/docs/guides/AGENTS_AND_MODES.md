@@ -1,613 +1,499 @@
-# InsightXpert: Agents, Modes & Orchestration
+# InsightXpert.ai: Agents, Modes & Orchestration
 
-This document describes every agent, analysis mode, and orchestration pipeline in InsightXpert — what each component does, when it fires, why it exists, and what types of questions suit each mode.
+This document describes every agent, analysis mode, and orchestration pipeline in InsightXpert.ai -- what each component does, when it fires, why it exists, and what types of questions suit each mode.
 
 ---
 
 ## Table of Contents
 
-1. [Architecture Overview](#architecture-overview)
-2. [Analysis Modes](#analysis-modes)
-   - [Basic Mode](#basic-mode)
-   - [Agentic Mode](#agentic-mode-default)
-   - [Deep Think Mode](#deep-think-mode)
-   - [Mode Selection Guide](#mode-selection-guide)
-3. [Agents](#agents)
-   - [SQL Analyst](#1-sql-analyst)
-   - [Clarifier](#2-clarifier)
-   - [Enrichment Evaluator](#3-enrichment-evaluator)
-   - [Quant Analyst](#4-quant-analyst)
-   - [Response Synthesizer](#5-response-synthesizer)
-   - [Dimension Extractor](#6-dimension-extractor-deep-think-only)
-   - [Deep Synthesizer](#7-deep-synthesizer-deep-think-only)
-   - [Investigation Evaluator](#8-investigation-evaluator-deep-think-only)
-   - [Investigation Synthesizer](#9-investigation-synthesizer-deep-think-only)
-   - [Insight Quality Evaluator](#10-insight-quality-evaluator)
-4. [Orchestration Pipelines](#orchestration-pipelines)
-5. [Supporting Infrastructure](#supporting-infrastructure)
-6. [Prompt Templates](#prompt-templates)
-7. [Error Handling & Fallbacks](#error-handling--fallbacks)
+1. [Mode Overview](#mode-overview)
+2. [Mode Router](#mode-router)
+3. [Agentic Orchestrator](#agentic-orchestrator)
+4. [Agent Types](#agent-types)
+5. [Enrichment Phases](#enrichment-phases)
+6. [Tools](#tools)
+7. [Memory](#memory)
+8. [Dual-Mode Dispatch](#dual-mode-dispatch)
 
 ---
 
-## Architecture Overview
+## 1. Mode Overview
 
-InsightXpert is a **multi-agent, analyst-first** system. Every question always starts with the SQL Analyst — the user gets a direct answer fast. Depending on the selected mode, additional agents may kick in to enrich, contextualize, and synthesize a deeper insight.
+InsightXpert.ai supports three analysis modes selected via the `agent_mode` field of `ChatRequest`:
 
-> **Visual diagram:** Open [`docs/diagrams/agentic-loop.excalidraw`](diagrams/agentic-loop.excalidraw) in [Excalidraw](https://excalidraw.com) for an interactive diagram of the agentic processing pipeline, showing Phase 1 (tool-calling loop), Phase 2 (enrichment evaluation and DAG execution), and Phase 3 (response synthesis and quality gate).
-
-```
-User Question
-  │
-  ├─ [Optional] Clarifier ── ambiguous? ask user first
-  │
-  ├─ SQL Analyst ──────────── always runs, user sees results immediately
-  │
-  ├─ [Agentic/Deep] Enrichment pipeline
-  │   ├─ Evaluator / Dimension Extractor ── decides WHAT to investigate
-  │   ├─ DAG Executor ── runs sub-tasks (SQL Analyst / Quant Analyst)
-  │   └─ Synthesizer ── combines all evidence into cited insight
-  │
-  └─ [Deep only] Auto-Investigation ── finds gaps, runs follow-ups, re-synthesizes
-```
-
-**Key principle:** The system is designed so the user always gets a fast initial answer. Enrichment happens _after_ — the user sees the analyst's SQL and results while deeper analysis runs in the background.
-
----
-
-## Analysis Modes
+| Mode | API Value | Description |
+|---|---|---|
+| **Basic** | `"basic"` | Pipeline only. Direct question-to-SQL-to-answer. No enrichment. |
+| **Agentic** | `"agentic"` | Pipeline + enrichment. Analyst answers first, then an evaluator decides if deeper analysis is needed, runs parallel sub-tasks, and synthesizes a cited response. |
+| **Auto** | `"auto"` | LLM classifier decides between basic and agentic per-request. |
 
 ### Basic Mode
 
-**API value:** `agent_mode="basic"`
-
 ```
-Question → SQL Analyst → Answer → Done
+Question → Pipeline (7 stages) → Answer → Done
 ```
 
-**What it does:** Runs the SQL Analyst once. No enrichment, no orchestration, no synthesis. The analyst generates SQL, executes it, and returns the answer.
+The pipeline runs end-to-end: profile loading, schema linking, SQL generation, validation, execution, refinement, and answer synthesis. No orchestration, no enrichment, no multi-agent coordination. The user sees the pipeline's SSE chunks in real time.
 
 **Best for:**
-- Simple factual lookups: _"How many transactions happened in Maharashtra?"_
-- Single-metric queries: _"What's the average transaction amount?"_
-- Quick counts and aggregations: _"Top 5 states by transaction volume"_
+- Simple factual lookups: "How many orders were placed last month?"
+- Single-metric queries: "What's the average order value?"
+- Quick counts and aggregations: "Top 10 customers by revenue"
 - When you already know the answer is in one query
-- Speed-sensitive scenarios where you just need the number
 
-**Not ideal for:**
-- "Why" questions (no root-cause analysis)
-- Questions that need context ("Is this high or low?")
-- Multi-dimensional analysis
-
-**Value:** Fast, cheap (1 LLM call + 1 SQL query), no overhead.
-
----
-
-### Agentic Mode (Default)
-
-**API value:** `agent_mode="agentic"`
+### Agentic Mode
 
 ```
-Question
-  → SQL Analyst (user sees results immediately)
-    → Enrichment Evaluator (should we dig deeper?)
-      → [If yes] DAG execution (1-4 parallel sub-tasks)
-        → Response Synthesizer (combine with citations)
-          → Insight Quality Gate (worth saving?)
+Question → Pipeline (analyst answers immediately)
+  → Enrichment Evaluator (should we dig deeper?)
+    → [If yes] DAG Execution (1-4 parallel sub-tasks)
+      → Response Synthesizer (combine with citations)
+        → Insight Quality Gate (worth saving?)
 ```
 
-**What it does:** The analyst answers first. Then an evaluator LLM call decides if the answer would benefit from enrichment — comparative context, temporal trends, root-cause analysis, or segmentation breakdowns. If yes, it plans 1-4 targeted sub-tasks, executes them (possibly in parallel), and synthesizes everything into a cited response.
+The analyst's pipeline runs first and the user sees results immediately. Then an evaluator LLM call decides if the answer would benefit from enrichment. If yes, it plans 1-4 targeted sub-tasks, executes them with maximum parallelism (respecting dependencies), and synthesizes everything into a cited response.
 
 **Best for:**
-- Analytical questions: _"What's driving UPI failures in Maharashtra?"_
-- Comparative questions: _"How does Delhi compare to Mumbai in card usage?"_
-- Trend questions: _"Is mobile wallet adoption growing?"_
-- Questions where one SQL query answers the surface but not the "so what?"
-- Day-to-day analytical work that benefits from automatic context
+- Analytical questions: "What's driving the increase in churn?"
+- Comparative questions: "How does Q1 compare to Q4?"
+- Trend questions: "Is customer acquisition growing?"
+- Questions where one query answers the surface but not the "so what?"
 
-**Not ideal for:**
-- Simple lookups (overhead of evaluator is wasted)
-- Questions requiring structured dimensional coverage
+### Auto Mode
 
-**Value:** Balances speed with depth. The evaluator avoids unnecessary work — simple questions skip enrichment entirely. When enrichment fires, the synthesizer produces a cited, leadership-ready response with sources like `[[1]]`, `[[2]]`.
+The system uses a lightweight LLM classifier (Gemini flash-lite) to decide per-request whether to use basic or agentic mode. The classifier evaluates question complexity, the presence of comparative/analytical language, and whether a single query is likely sufficient. Server-side re-classification acts as defense-in-depth even when the frontend pre-routes.
 
-**Enrichment categories:**
-| Category | When triggered | Example |
-|----------|---------------|---------|
-| `comparative_context` | Answer shows a metric without benchmarks | "Is 7.2% failure rate high?" → compare across states |
-| `temporal_trend` | No time dimension in the answer | "What's the fraud rate?" → show trend over months |
-| `root_cause` | Pattern observed but not explained | "Why is X high?" → correlations, breakdowns |
-| `segmentation` | Single aggregate without demographic cuts | "Average amount" → break by age, gender, city tier |
+**Best for:** General use where you want the system to automatically choose the right depth of analysis.
 
 ---
 
-### Deep Think Mode
+## 2. Mode Router
 
-**API value:** `agent_mode="deep"`
+### Auto-Mode Classification
+
+When `agent_mode="auto"`, the preflight step calls `classify_mode()`:
 
 ```
-Question
-  → Dimension Extractor (5W1H mapping + enrichment planning)
-    → SQL Analyst (user sees results)
-      → DAG execution (pre-planned enrichment tasks)
-        → Deep Synthesizer (dimensionally-structured response)
-          → Insight Quality Gate
-            → Auto-Investigation Evaluator (any gaps?)
-              → [If yes] Follow-up task execution
-                → Investigation Re-synthesizer (final insight)
+POST /chat with agent_mode="auto"
+  → _preflight_concurrent():
+      classify_mode() runs in parallel with profile loading and few-shot retrieval
 ```
 
-**What it does:** The most thorough mode. Before the analyst even runs, a Dimension Extractor maps the question onto a **5W1H framework** (WHO, WHAT, WHEN, WHERE, HOW, WHY) and identifies which dimensions are covered, implicit, or missing. It pre-plans enrichment tasks to fill gaps. After the analyst answers and enrichment runs, a Deep Synthesizer structures the response by dimension. Then an auto-investigation phase checks for remaining gaps and runs follow-up queries without waiting for the user to ask.
+`classify_mode()` in `routes/chat.py`:
+1. Renders `mode_router.j2` prompt with the user's question.
+2. Calls `gemini-3.1-flash-lite-preview` (fast/cheap model).
+3. Parses the JSON response: `{mode: "basic"|"agentic", reason: "..."}`.
+4. On any failure (timeout, parse error): defaults to `"agentic"` (bias toward correctness).
 
-**Best for:**
-- Open-ended analytical questions: _"Analyze fraud patterns in India"_
-- Executive-level questions: _"What are the key risk factors in our transaction data?"_
-- Research-style deep dives: _"Explain the relationship between demographics and payment preferences"_
-- Questions where you want comprehensive dimensional coverage
-- When you're willing to wait for thoroughness
+The classification result is emitted as an `auto_routed` chunk so the frontend can show: _"Auto-routed to agentic mode -- this question needs deeper analysis."_
 
-**Not ideal for:**
-- Quick lookups (significant overhead)
-- Time-sensitive answers
-- Questions with a single obvious answer
+### Server-Side Re-Classification (Defense-in-Depth)
 
-**Value:** Produces the most comprehensive analysis. The 5W1H framework ensures no important dimension is missed. Auto-investigation means the system proactively fills gaps instead of waiting for the user to ask follow-ups. Output is structured by dimension with full citations.
+Even when the frontend pre-routes via `POST /chat/route` (which returns a mode suggestion without running the pipeline), the server re-classifies `agent_mode="auto"` on the actual `/chat` request. This prevents client-side bugs or stale pre-routing from forcing incorrect modes.
 
-**The 5W1H Framework:**
-| Dimension | What it covers | Example |
-|-----------|---------------|---------|
-| **WHO** | Senders, receivers, demographics, segments | Which age groups are most affected? |
-| **WHAT** | Core metric, magnitude, distribution | What's the fraud rate? How is it distributed? |
-| **WHEN** | Temporal patterns, trends, seasonality | Is it increasing? Any seasonal spikes? |
-| **WHERE** | Geographic distribution, regional patterns | Which states/cities are hotspots? |
-| **HOW** | Payment channels, device types, mechanisms | Which payment method has highest risk? |
-| **WHY** | Root causes, correlations, causal hypotheses | What factors drive this pattern? |
+### mode_router.py
+
+The classification prompt template evaluates:
+- Question complexity (single fact vs. multi-faceted analysis).
+- Comparative/analytical language signals.
+- Whether a single SQL query is likely sufficient.
+- Historical patterns from similar questions.
 
 ---
 
-### Mode Selection Guide
+## 3. Agentic Orchestrator
 
-| Question Type | Recommended Mode | Why |
-|--------------|-----------------|-----|
-| _"How many UPI transactions?"_ | Basic | Single fact, one query |
-| _"Average amount by state"_ | Basic | Direct aggregation |
-| _"Top 10 merchants by volume"_ | Basic | Simple ranking |
-| _"Why is failure rate high in Maharashtra?"_ | Agentic | Needs comparison + root cause |
-| _"How does Delhi compare to Mumbai?"_ | Agentic | Comparative analysis |
-| _"Is card fraud increasing?"_ | Agentic | Needs temporal trend enrichment |
-| _"Analyze transaction patterns"_ | Deep | Open-ended, multi-dimensional |
-| _"What are the key fraud risk factors?"_ | Deep | Needs WHO/WHAT/WHEN/WHERE/HOW |
-| _"Give me a complete picture of UPI adoption"_ | Deep | Executive-level comprehensive analysis |
-| _"Explain demographic payment preferences"_ | Deep | Cross-dimensional, research-style |
+The agentic orchestrator lives in `vendored/agents_core/orchestrator.py` and is invoked from our `routes/chat.py` via `_run_orchestrator()`.
 
-**Rule of thumb:**
-- Know the exact number you want? → **Basic**
-- Want the number + context? → **Agentic**
-- Want a full investigation report? → **Deep**
+### orchestrator_loop()
+
+The top-level `orchestrator_loop()` supports three modes:
+
+**basic:**
+```
+analyst_loop() → stream chunks directly
+```
+
+**agentic:**
+```
+analyst_loop() → evaluate_for_enrichment() →
+  if enrichment needed: plan_tasks() → execute_dag() → generate_response() →
+  evaluate_insight_quality()
+  else: analyst answer stands
+```
+
+**deep** (experimental, not exposed in production UI):
+```
+_extract_dimensions() || analyst_loop() →
+  execute_dag(enrichment) → _deep_synthesize() →
+  evaluate_for_investigation() → execute_dag(investigation) → _investigation_synthesize()
+```
+
+### How Our Code Composes
+
+Our `analyst_loop` adapter (`agents/analyst.py`) wraps the 7-stage pipeline as an `analyst_loop` implementation. It is injected into the vendored orchestrator via `functools.partial`:
+
+```python
+_run_orchestrator():
+    analyst_impl = functools.partial(analyst_loop, ...)
+    async for chunk in orchestrator_loop(analyst_impl=analyst_impl, ...):
+        yield _vendored_to_envelope(chunk)
+```
+
+This adapter:
+1. Builds the same `default_pipeline()` as the legacy path.
+2. Creates an internal `EventEmitter` and `PipelineContext`.
+3. Fires `_drive_pipeline()` as an asyncio task.
+4. Translates pipeline-envelope chunks to vendored-flat chunks via `_to_vendored()`.
+5. Injects synthetic `tool_call`/`tool_result` pairs so the vendored `AnalystCollector` sees them.
+6. Buffers errors during execution so the refiner can recover without the orchestrator latching `had_error=true`.
+
+### orchestrator_planner.py
+
+The planner module handles task decomposition and enrichment evaluation:
+
+- **`plan_tasks(question, ddl, documentation)`**: Decomposes a complex question into a DAG of sub-tasks. Falls back to a single `sql_analyst` task on error.
+- **`evaluate_for_enrichment(sql, rows, answer)`**: Decides if the analyst's answer needs enrichment. Returns `None` if the answer is sufficient.
+- **`evaluate_for_investigation(synthesis)`**: Detects gaps in a synthesized response. Returns `None` if no gaps found.
+- **`evaluate_insight_quality(synthesis)`**: Gates whether the final response is worth persisting as an insight.
+
+### DAG Executor (`dag_executor.py`)
+
+Executes an `OrchestratorPlan` with maximum parallelism while respecting DAG dependencies:
+
+1. Finds all tasks whose `depends_on` list is empty or fully satisfied.
+2. Launches them all concurrently with `asyncio.gather()`.
+3. As tasks complete, checks for newly unblocked tasks and launches those.
+4. Repeats until all tasks are done, errored, or skipped.
+5. On task failure: marks downstream tasks as `skipped` recursively.
+
+Circular dependencies are detected at validation time via Kahn's algorithm. If a cycle is found, all dependency links are removed and tasks run in parallel.
+
+Task types:
+- **`sql_analyst`**: Runs the analyst pipeline for a sub-question. Returns `SubTaskResult` with SQL, rows, and answer.
+- **`quant_analyst`**: Runs statistical analysis on upstream results. Returns `SubTaskResult` with statistical findings.
 
 ---
 
-## Agents
+## 4. Agent Types
 
-### 1. SQL Analyst
+### Analyst Agent
 
-**File:** `agents/analyst.py`
-**Prompt:** `prompts/analyst_system.j2`
-**Used in:** All modes (always the first agent to run)
+**Used in:** All modes (always runs first).
 
-**What it does:**
-The SQL Analyst is the core workhorse. It converts natural language into SQL, executes the query, and narrates the results. It runs an agentic tool loop — it can call tools iteratively until it has a complete answer.
+The primary SQL analyst. Converts natural language into SQL, executes the query, and narrates the results. In the vendored implementation, it runs a tool-calling loop with RAG retrieval, semantic column pruning, and an iterative LLM loop (up to 25 iterations).
 
-**Tools available:**
-| Tool | Purpose |
-|------|---------|
-| `run_sql` | Execute a SELECT query with optional visualization spec |
-| `get_schema` | Inspect table DDL to verify column names |
-| `search_similar` | Search RAG store for similar past Q&A pairs |
-| `clarify` | Ask the user a clarifying question (only if clarification is enabled) |
+In our adapter, it wraps the 7-stage pipeline, providing the same interface the orchestrator expects while using the pipeline engine for execution.
 
-**Pipeline:**
-1. RAG retrieval — find up to 3 similar past Q&A pairs from the vector store
-2. Prompt assembly — render `analyst_system.j2` with DDL, documentation, RAG hits, and optional stats context
-3. Agentic tool loop — iteratively call LLM with tools until a final answer or max iterations
-4. Guard rail — first iteration forces tool use (prevents hallucinated answers without SQL)
-5. Auto-save — on success, save the (question, SQL) pair to RAG for future few-shot retrieval
+**Pipeline:** RAG retrieval → prompt assembly → pipeline execution → auto-save Q&A pair.
 
-**Value:** Ensures every answer is grounded in actual data. The RAG flywheel means the system gets better with usage — successful Q&A pairs become few-shot examples for future similar questions.
+### Quant Analyst
 
----
+**Used in:** Agentic mode (as a downstream enrichment sub-task).
 
-### 2. Clarifier
+A statistical analysis agent that receives upstream SQL results and applies quantitative analysis beyond what SQL can do. Runs in a tool-calling loop (up to 5 iterations) with access to statistical tools.
 
-**File:** `agents/clarifier.py`
-**Prompt:** Hardcoded `CLARIFICATION_SYSTEM_PROMPT` in the file
-**Used in:** Agentic and Deep modes (when `clarification_enabled=True`)
+**Tools:** `compute_descriptive_stats`, `test_hypothesis`, `compute_correlation`, `fit_distribution`, `run_python`, plus `run_sql` for additional data fetching.
 
-**What it does:**
-A lightweight, single-shot LLM call that runs _before_ the analyst. It checks whether the user's question is genuinely ambiguous — meaning multiple reasonable interpretations would produce very different SQL queries.
+**Setup:** Upstream results from depended-on `sql_analyst` tasks are merged into a DataFrame. The `quant_analyst_system.j2` prompt receives DDL, documentation, upstream SQL, and a results summary.
+
+### Clarifier
+
+**Used in:** Agentic mode (when `clarification_enabled=True`).
+
+A lightweight, single-shot LLM call that runs **before** the analyst. It checks whether the user's question is genuinely ambiguous -- meaning multiple reasonable interpretations would produce different SQL queries.
 
 **Decision logic:**
-- If clear → `{"action": "execute"}` → analyst proceeds normally
-- If ambiguous → `{"action": "clarify", "question": "..."}` → user sees a clarification question
+- If clear: `{"action": "execute"}` → analyst proceeds normally.
+- If ambiguous: `{"action": "clarify", "question": "..."}` → user sees a clarification question.
 
-**Examples:**
-| Question | Clarifier Decision | Reasoning |
-|----------|-------------------|-----------|
-| _"Show me the data"_ | Clarify: "Which metrics? Transaction counts, amounts, or failure rates?" | "data" has too many interpretations |
-| _"Average transaction amount"_ | Execute | Clear intent, one obvious SQL |
-| _"Compare the cities"_ | Clarify: "Which cities would you like to compare?" | No cities specified |
-| _"UPI failure rate in Maharashtra"_ | Execute | Unambiguous |
+On any error, falls back to `"execute"` -- never blocks the user.
 
-**Value:** Prevents wasted compute on questions that would produce wrong results. By asking one targeted question upfront, we avoid running the entire analyst pipeline on a misunderstood question. Falls back to "execute" on any error — never blocks the user.
+**Flow:**
+1. LLM calls `clarify({"question": "Did you mean X or Y?"})`.
+2. The analyst loop detects the `clarify` tool, emits a `clarification` chunk, and returns.
+3. The frontend renders the question with two options: answer it, or click "Just answer" (sets `skip_clarification=true`).
+4. If the user answers, their clarification is appended to the question on the next request.
 
----
+### Deep Think Agent
 
-### 3. Enrichment Evaluator
+**Used in:** Deep mode (experimental, not exposed in production UI).
 
-**File:** `agents/orchestrator_planner.py` → `evaluate_for_enrichment()`
-**Prompt:** `prompts/enrichment_evaluator.j2`
-**Used in:** Agentic mode (Phase 2)
+Extends the agentic flow with a 5W1H framework:
 
-**What it does:**
-After the analyst produces an answer, this evaluator decides: _"Is this answer sufficient, or would additional context make it significantly better?"_ If enrichment is needed, it plans 1-4 targeted sub-tasks with dependencies.
+1. **Dimension Extraction** (15s timeout): Maps the question onto WHO/WHAT/WHEN/WHERE/HOW dimensions.
+2. **Analyst**: Pipeline runs unchanged; user sees immediate results.
+3. **Targeted Enrichment**: Pre-planned enrichment tasks execute via DAG.
+4. **Deep Synthesis** (60s timeout): `deep_synthesizer.j2` produces a 5W1H-structured insight.
+5. **Auto-Investigation**: Detects gaps in the synthesis and runs follow-up queries.
+6. **Re-Synthesis**: Integrates investigation findings into the prior synthesis, focusing on what changed.
 
-**Input:** The analyst's SQL, result rows, and narrative answer.
+### Response Generator
 
-**Decision criteria:**
+**Used in:** Agentic mode (Phase 4, after enrichment).
 
-_When NOT to enrich:_
-- Simple lookups that the analyst answered completely
-- Questions where the analyst already provided comparative context
-- Already comprehensive multi-faceted answers
-
-_When to enrich:_
-- A single metric without benchmarks (needs `comparative_context`)
-- No temporal dimension (needs `temporal_trend`)
-- Pattern observed but not explained (needs `root_cause`)
-- Single aggregate without demographic breakdown (needs `segmentation`)
-- Volume shown without normalizing by population/base (needs context)
-
-**Output:** Either `{"enrich": false}` or a plan with 1-4 tasks specifying agent type (`sql_analyst` or `quant_analyst`), category, question, and dependencies.
-
-**Value:** This is the intelligence layer that prevents unnecessary work. A simple "how many transactions?" skips enrichment entirely. A "why is failure rate high?" triggers targeted follow-up queries. The evaluator is biased slightly toward enriching — the thinking is that additional context improves most analytical questions.
-
----
-
-### 4. Quant Analyst
-
-**File:** `agents/quant_analyst.py`
-**Prompt:** `prompts/quant_analyst_system.j2`
-**Used in:** Agentic and Deep modes (as an enrichment sub-task)
-
-**What it does:**
-The Quant Analyst is a downstream statistical agent. It receives upstream SQL Analyst results and applies quantitative analysis that goes beyond what SQL can do — statistical tests, distribution fitting, correlation analysis, anomaly detection, and fraud risk scoring.
-
-**Tools available (merged registry):**
-
-_Statistical tools:_
-| Tool | Purpose |
-|------|---------|
-| `compute_descriptive_stats` | Mean, median, std dev, skewness, kurtosis |
-| `test_hypothesis` | Chi-squared, t-test, ANOVA, Mann-Whitney U |
-| `compute_correlation` | Pearson/Spearman correlation coefficients |
-| `fit_distribution` | Fit data to theoretical distributions |
-
-_Advanced analytics tools (from `advanced_tools.py`):_
-| Tool | Purpose |
-|------|---------|
-| `run_sql` | Execute queries for data retrieval |
-| `run_python` | Execute Python code for custom analysis |
-| `percentile_ranking` | Rank values within distributions |
-| `concentration_index` | Measure market concentration (HHI/Gini) |
-| `fraud_risk_score` | Multi-factor fraud risk assessment |
-| `amount_anomalies` | Detect unusual transaction amounts |
-| `temporal_clustering` | Find time-based patterns |
-| `benfords_law_test` | Statistical fraud detection test |
-
-**When it's invoked:** Only as a sub-task in the enrichment DAG, never directly. The enrichment evaluator or dimension extractor assigns a task to `quant_analyst` when the question requires statistical rigor beyond SQL aggregations.
-
-**Value:** Brings genuine statistical rigor. Instead of the analyst saying "Maharashtra has a high fraud rate," the quant analyst can say "Maharashtra's fraud rate (4.8%) is significantly higher than the national average (3.2%), χ²=1847.3, p<0.001, with Android UPI as the primary driver (r=0.68)." The p-values, effect sizes, and confidence intervals add credibility to the analysis.
-
----
-
-### 5. Response Synthesizer
-
-**File:** `agents/response_generator.py`
-**Prompt:** `prompts/response_generator.j2`
-**Used in:** Agentic mode (Phase 4, after enrichment)
-
-**What it does:**
 Takes evidence from all sub-tasks (original analyst + enrichment agents) and synthesizes a single, cited response suitable for leadership consumption.
 
 **Citation system:**
-- Source `[[1]]` = original analyst answer
-- Source `[[2]]`, `[[3]]`, etc. = enrichment sub-task results
-- Each source has a label (e.g., "Comparative Context", "Root-Cause Analysis")
+- Source `[^1]` = original analyst answer.
+- Source `[^2]`, `[^3]`, etc. = enrichment sub-task results.
+- Each source has a label (e.g., "Comparative Context", "Root-Cause Analysis").
 
 **Output structure:**
-1. Direct answer to the question
-2. Key evidence with citations
-3. Contextual analysis
-4. Root-cause hypothesis (if applicable)
-5. Business recommendations with specific data thresholds
-6. Suggested follow-up questions
+1. Direct answer to the question.
+2. Key evidence with `[^N]` citations.
+3. Contextual analysis.
+4. Root-cause hypothesis (if applicable).
+5. Business recommendations with specific data thresholds.
+6. Suggested follow-up questions.
 
-**Value:** Turns raw multi-source data into a coherent narrative. Without synthesis, the user would see disconnected results from 3-4 separate queries. The synthesizer weaves them together with proper attribution, so the reader knows exactly which data point came from which analysis.
+On LLM failure, `_fallback_answer()` concatenates individual agent answers separated by `---` dividers.
 
 ---
 
-### 6. Dimension Extractor (Deep Think only)
+## 5. Enrichment Phases
 
-**File:** `agents/deep_think.py` → `_extract_dimensions()`
-**Prompt:** `prompts/dimension_extractor.j2`
-**Used in:** Deep mode (Phase 1, before the analyst)
+Agentic mode runs in distinct phases:
 
-**What it does:**
-Maps the user's question onto a 5W1H framework and identifies analytical gaps. For each dimension (WHO, WHAT, WHEN, WHERE, HOW), it determines whether the question explicitly covers it, implicitly needs it, or leaves it uncovered. It then pre-plans enrichment tasks to fill the gaps.
+### Phase 1: Analyst (Immediate Results)
 
-**Output:**
-```json
-{
-  "dimensions": {
-    "who":   {"status": "implicit", "detail": "senders flagged for fraud"},
-    "what":  {"status": "covered",  "detail": "fraud rate metric"},
-    "when":  {"status": "uncovered","detail": "no temporal scope mentioned"},
-    "where": {"status": "covered",  "detail": "Maharashtra explicitly asked"},
-    "how":   {"status": "uncovered","detail": "payment type not addressed"}
-  },
-  "why_intent": "Root-cause analysis of fraud in a specific state",
-  "suggested_enrichments": [
-    {"id": "B", "agent": "sql_analyst", "category": "temporal_trend", "task": "..."},
-    {"id": "C", "agent": "quant_analyst", "category": "root_cause", "task": "..."}
-  ]
-}
+The analyst pipeline runs with the original question. Every chunk is yielded directly to the SSE response -- the user sees SQL, results, and the answer immediately, before any enrichment begins.
+
+Simultaneously, the orchestrator collects: `analyst_sql`, `analyst_rows`, `analyst_answer`, and `analyst_had_error` flag.
+
+If the analyst had an error or produced no answer, the orchestrator stops here. No enrichment is attempted.
+
+### Phase 2: Enrichment Evaluation
+
+A `status` chunk announces that deeper analysis is being evaluated.
+
+`evaluate_for_enrichment()` makes a single LLM call (no tools, 60s timeout) with:
+- The user's question.
+- The analyst's SQL, rows summary, and answer.
+- DDL and documentation.
+- Conversation history.
+- RAG context (similar past Q&A pairs).
+
+**Decision criteria:**
+- `"enrich": false` for simple factual questions.
+- `"enrich": true` when comparative context, temporal trends, root-cause analysis, or segmentation would materially improve the answer.
+
+On any failure (timeout, JSON parse error, validation error), returns `None` -- the analyst answer stands.
+
+### Phase 3: DAG Execution
+
+An `orchestrator_plan` chunk lists the enrichment tasks. The DAG executor runs tasks with maximum parallelism.
+
+**Enrichment categories:**
+
+| Category | Label | When Used |
+|---|---|---|
+| `comparative_context` | Comparative Context | A metric is shown without benchmarks |
+| `temporal_trend` | Temporal Trend | Data changes over time but the analyst showed a snapshot |
+| `root_cause` | Root-Cause Analysis | An anomaly or outlier needs explanation |
+| `segmentation` | Segmentation | An aggregate answer would be more useful broken down by dimension |
+
+`on_task_start` and `on_task_complete` callbacks accumulate `status` and `agent_trace` chunks, which are yielded after the DAG completes.
+
+### Phase 4: Evidence Assembly and Synthesis
+
+After all tasks complete (or error), evidence blocks are assembled:
+- Source [1]: Original analyst answer (question, SQL, rows summary, answer).
+- Source [2..N]: Each successful enrichment task (category label, question, SQL, rows summary, answer).
+
+The response generator synthesizes these into a cited response. The synthesized markdown is emitted as an `insight` chunk.
+
+### Phase 5: Enrichment Traces
+
+One `enrichment_trace` chunk is emitted per source:
+- Source [1]: Original analyst (category "SQL Analysis", question, SQL, answer).
+- Source [2..N]: Each enrichment task (category label, question, SQL, answer, full trace steps).
+
+The frontend's `CitationLink` component renders `[^N]` references as clickable links that open a `TraceModal` showing the source's category, question, SQL, and execution steps.
+
+---
+
+## 6. Tools
+
+The vendored `agents_core` provides a tool system used by the analyst and quant analyst loops.
+
+### Tool Architecture
+
+```python
+class Tool(ABC):
+    name: str
+    description: str
+    def get_args_schema(self) -> dict: ...
+    async def execute(self, context: ToolContext, args: dict) -> str: ...
+    def get_definition(self) -> dict: ...  # OpenAI function-calling schema
+
+class ToolRegistry:
+    def register(self, tool: Tool) -> None: ...
+    def get_schemas(self) -> list[dict]: ...  # For LLM tool-calling
+    async def execute(self, name, args, context) -> str: ...
 ```
 
-**Value:** This is what makes Deep Think fundamentally different from Agentic mode. Instead of reactively deciding "should we enrich?" after seeing the analyst's answer, the dimension extractor proactively identifies _what's missing from the question itself_. A question about "fraud in Maharashtra" might not mention time, payment type, or demographics — but a complete analysis needs all of those.
+### ToolContext
 
----
-
-### 7. Deep Synthesizer (Deep Think only)
-
-**File:** `agents/deep_think.py` → `_deep_synthesize()`
-**Prompt:** `prompts/deep_synthesizer.j2`
-**Used in:** Deep mode (Phase 4)
-
-**What it does:**
-Like the Response Synthesizer in agentic mode, but structures the output by 5W1H dimensions rather than as a flat narrative. Only includes dimensions that have supporting evidence.
-
-**Output structure:**
-1. **Direct Answer** — concise answer to the question
-2. **WHO** — demographic/segment findings (if evidence exists)
-3. **WHAT** — metric deep-dive with distributions
-4. **WHEN** — temporal patterns and trends
-5. **WHERE** — geographic distribution
-6. **HOW** — channel/mechanism insights
-7. **WHY** — root-cause hypothesis with causal reasoning
-8. **Recommendations** — specific, data-cited action items
-9. **Follow-up Questions** — what gaps remain
-
-**Value:** The dimensional structure makes complex analyses scannable. A reader looking for geographic patterns goes straight to WHERE. Someone interested in trends goes to WHEN. This is especially valuable for executive audiences who want to jump to the dimension they care about.
-
----
-
-### 8. Investigation Evaluator (Deep Think only)
-
-**File:** `agents/orchestrator_planner.py` → `evaluate_for_investigation()`
-**Prompt:** `prompts/investigation_evaluator.j2`
-**Used in:** Deep mode (Phase 5, auto-triggered after synthesis)
-
-**What it does:**
-After deep synthesis, this evaluator reads the synthesized insight and decides: _"Are there analytical gaps that follow-up queries could fill?"_ Unlike the enrichment evaluator (which runs in agentic mode and requires user action), this runs automatically.
-
-**Gap detection criteria:**
-- Pattern revealed but not explained
-- Key comparison missing
-- Anomaly mentioned but not investigated
-- Temporal dimension glossed over
-- Unnormalized comparisons (missing cohort sizes)
-- Volume-value gap (counts shown without amounts, or vice versa)
-- Cross-category blindspot
-
-**Value:** This is what makes Deep Think feel like having a data analyst who doesn't stop at the first answer. If the synthesis says "Android has higher fraud" but doesn't explain _why_, the investigation evaluator will spawn a follow-up query to investigate device-specific factors. The user gets a more complete picture without having to think of follow-up questions themselves.
-
----
-
-### 9. Investigation Synthesizer (Deep Think only)
-
-**File:** `agents/deep_think.py` → `_investigation_synthesize()`
-**Prompt:** `prompts/investigation_synthesizer.j2`
-**Used in:** Deep mode (Phase 6, after investigation tasks complete)
-
-**What it does:**
-Integrates investigation findings into the prior synthesis. Focuses on _what changed_ — what the investigation revealed that wasn't known before — rather than re-narrating everything.
-
-**Output structure:**
-1. Updated direct answer
-2. Key findings (what investigation revealed)
-3. Investigation insights (what gaps were filled)
-4. Updated root-cause hypothesis
-5. Updated recommendations with new evidence
-6. Remaining gaps
-
-**Value:** Avoids the common AI problem of repeating itself. The investigation synthesizer specifically focuses on delta — new evidence that changes or deepens the picture. The result is a final insight that reflects the full chain of analysis without redundancy.
-
----
-
-### 10. Insight Quality Evaluator
-
-**File:** `agents/orchestrator_planner.py` → `evaluate_insight_quality()`
-**Prompt:** `prompts/insight_quality_evaluator.j2`
-**Used in:** Agentic and Deep modes (final gate before saving)
-
-**What it does:**
-Decides whether a synthesized response is a "genuine insight" worth saving to the insights table for future reference.
-
-**Is an insight:**
-- Non-obvious patterns discovered through multi-source analysis
-- Meaningful comparisons with statistical backing
-- Actionable recommendations grounded in specific data
-- Root causes identified with supporting evidence
-
-**Not an insight:**
-- Verbose restatement of what the analyst already said
-- Enrichment that added no new data (all tasks failed/returned same info)
-- Trivial comparison (e.g., "state A has more than state B" when that was the question)
-- Over-enriched simple lookups
-
-**Value:** Prevents the insights table from filling up with noise. Only genuinely valuable multi-source analyses get persisted, keeping the insight library high-signal for future reference.
-
----
-
-## Orchestration Pipelines
-
-### Basic Mode Pipeline
-
-```
-orchestrator_loop(agent_mode="basic")
-  │
-  └─ analyst_loop(question)
-       ├─ RAG retrieval (similar past Q&A)
-       ├─ Render analyst_system.j2
-       ├─ Agentic tool loop (run_sql, get_schema, etc.)
-       └─ Yield: sql chunk, tool_result chunk, answer chunk
+```python
+@dataclass
+class ToolContext:
+    db: DatabaseConnector
+    rag: VectorStoreBackend | None
+    row_limit: int = 1000
+    analyst_results: list[dict] | None = None
+    analyst_sql: str | None = None
+    allowed_tables: list[str] | None = None
+    dataset_id: str | None = None
 ```
 
-**LLM calls:** 1 (analyst)
-**Latency:** ~3-8 seconds
+### Analyst Tools
+
+| Tool | Purpose |
+|---|---|
+| `run_sql` | Execute read-only SQL with visualization hints |
+| `get_schema` | Return CREATE TABLE DDL or per-table info |
+| `search_similar` | Search RAG collections (qa_pairs, ddl, docs) |
+| `clarify` | Ask clarifying question (conditional, only when `clarification_enabled=True`) |
+
+### Quant Analyst Tools
+
+| Tool | Purpose |
+|---|---|
+| `compute_descriptive_stats` | Mean, median, std, quartiles, skewness, kurtosis |
+| `test_hypothesis` | Chi-squared, t-test, Mann-Whitney, ANOVA, z-proportion |
+| `compute_correlation` | Pearson, Spearman, Kendall |
+| `fit_distribution` | Fit to normal, exponential, lognormal, gamma, Weibull |
+| `run_python` | Sandboxed Python execution with preloaded scientific libraries |
+| `run_sql` | Additional data fetching when upstream data is insufficient |
+
+### Advanced Tools
+
+Available in `advanced_tools.py`:
+
+**Time-series:** `compute_time_series_slope`, `compute_area_under_curve`, `compute_percentage_change`, `detect_peaks`, `detect_change_points`.
+
+**Fraud/risk:** `score_fraud_risk`, `detect_amount_anomalies`, `test_temporal_fraud_clustering`, `compute_bank_pair_risk`.
+
+**General:** `compute_percentile_rank`, `compute_concentration_index`, `test_benford_law`.
+
+### SQL Guard (D-053 Dual Enforcement)
+
+All SQL execution goes through two independent enforcement layers:
+1. **Regex blocklist**: `FORBIDDEN_SQL_RE` blocks INSERT/UPDATE/DELETE/DROP/ALTER/CREATE/TRUNCATE/REPLACE/MERGE/GRANT/REVOKE/ATTACH/DETACH before execution.
+2. **Connection-level**: `PRAGMA query_only = ON` (SQLite) or read-only connection (Postgres), enforced by the database engine itself.
+
+### Error Sanitization
+
+`ToolRegistry.execute()` wraps every tool call in try/except and returns sanitized error JSON. Python tracebacks are never sent to the LLM or user -- only the exception message string. The LLM receives clean error strings and can adjust its next tool call accordingly.
 
 ---
 
-### Agentic Mode Pipeline
+## 7. Memory
 
+### Conversation Memory Store
+
+The in-memory `ConversationStore` (`services/conversation_store.py`):
+- Thread-safe `OrderedDict` keyed by `(session_id, conversation_id)`.
+- Max 500 conversations; LRU eviction when exceeded.
+- TTL-based expiry at access time (configurable, default 2 hours).
+- Stores condensed history: user messages + assistant final answers (no tool intermediaries).
+- Returns last 20 turns for LLM context injection.
+
+On cache miss, the store hydrates from the durable `PersistentConversationStore` (Postgres-backed), loading full message history with chunks.
+
+### RAG Store Interface
+
+The `VectorStoreBackend` Protocol in `vendored/agents_core/rag/base.py` defines 14 methods for CRUD across collections: `qa_pairs`, `ddl`, `docs`, `findings`, `column_metadata`.
+
+Our implementation uses **pgvector** (Postgres extension), not ChromaDB. The pgvector-backed adapter (`rag/pgvector_store.py`) implements the Protocol with Postgres-native vector operations.
+
+**Deduplication:** Documents are keyed by `SHA-256(content)[:16]`. Writes use upsert, so duplicate inserts are idempotent.
+
+**Auto-save flywheel:** After every successful analyst answer, the (question, SQL) pair is persisted with `sql_valid=True`. Over time, frequently asked questions accumulate accurate few-shot examples, improving future SQL generation without manual curation.
+
+---
+
+## 8. Dual-Mode Dispatch
+
+The chat route (`routes/chat.py`) dispatches between two code paths depending on `agent_mode`:
+
+### Legacy Pipeline Path (`agent_mode is None`)
+
+`_build_pipeline_and_ctx()` constructs a `Pipeline` with 7 stages, then `_run_pipeline()` fires as a background `asyncio.create_task`. The route returns `EventSourceResponse` immediately.
+
+### Orchestrator Path (`agent_mode in {"basic", "agentic"}`)
+
+`_run_orchestrator()` wraps our pipeline as an `analyst_loop` adapter (via `functools.partial`) and passes it to the vendored `orchestrator_loop(analyst_impl=...)`. The orchestrator runs: analyst → evaluate enrichment → DAG execution → synthesize → quality gate.
+
+### Preflight Parallelism
+
+Three independent operations are raced via `asyncio.TaskGroup` before pipeline dispatch:
+
+| Operation | What It Does | Failure Behavior |
+|---|---|---|
+| `prefetch_profile()` | Loads `DatabaseProfile` from Postgres (or process cache) | Returns `None`; ProfilerStage handles cold-cache normally |
+| `classify_mode()` | Calls Gemini flash-lite with `mode_router.j2` (only when `agent_mode="auto"`) | Defaults to `"agentic"` |
+| `prefetch_few_shot_example()` | Embeds user question, cosine similarity against per-DB BIRD-train bank | Returns `None` |
+
+Each operation has its own try/except -- one failure never cancels the others. Total wall time = max(profile, classify, few_shot), cutting steady-state latency by up to one DB round-trip.
+
+### ChatChunk Translation
+
+The vendored `orchestrator_loop` yields flat `ChatChunk` objects (from `vendored/agents_core/api/models.py`). `_vendored_to_envelope()` translates these into our strict four-field envelope (`{type, data, conversation_id, timestamp}`), dropping internal-only types (`"sql"`, `"answer"`) and unknown types silently.
+
+---
+
+## 9. LLM Abstraction
+
+### Provider-Agnostic Factory
+
+The LLM layer in `vendored/agents_core/llm/` uses a structural Protocol:
+
+```python
+class LLMProvider(Protocol):
+    model: str
+    async def chat(messages: list[dict], tools: list[dict] | None = None,
+                   force_tool_use: bool = False) -> LLMResponse
 ```
-orchestrator_loop(agent_mode="agentic")
-  │
-  ├─ [Optional] clarification_check(question)
-  │    └─ If ambiguous: yield clarification chunk, return
-  │
-  ├─ Phase 1: analyst_loop(question)
-  │    └─ Yield: sql, tool_result, answer (user sees immediately)
-  │
-  ├─ Phase 2: evaluate_for_enrichment(question, analyst_sql, analyst_rows, analyst_answer)
-  │    └─ If no enrichment needed: return (analyst answer stands)
-  │
-  ├─ Phase 3: execute_dag(enrichment_tasks)
-  │    ├─ Task B (sql_analyst or quant_analyst) ─┐
-  │    ├─ Task C (sql_analyst or quant_analyst) ─┤─ parallel where possible
-  │    └─ Task D (quant_analyst, depends on B) ──┘─ sequential if dependency
-  │    └─ Yield: agent_trace chunks for each task
-  │
-  ├─ Phase 4: generate_response(question, all_evidence)
-  │    └─ Yield: insight chunk with citations
-  │
-  └─ Phase 5: evaluate_insight_quality(synthesized_response)
-       └─ If genuine insight: flag for persistence
-```
 
-**LLM calls:** 2-8 (analyst + evaluator + 1-4 sub-tasks + synthesizer + quality gate)
-**Latency:** ~10-30 seconds
+`LLMResponse`: `content`, `tool_calls[]`, `input_tokens`, `output_tokens`.
+
+Message format is OpenAI-style throughout (roles: `system`, `user`, `assistant`, `tool`).
+
+### Provider Implementations
+
+- **`DeepSeekProvider`**: Wraps OpenAI SDK pointed at DeepSeek API. Native format, no message translation.
+- **`GeminiProvider`**: Wraps `google-genai` SDK. Translates messages/tools to Gemini format and back. Generates synthetic UUID tool call IDs (Gemini doesn't return them natively).
+- **`OllamaProvider` / `VertexAIProvider`**: Referenced by the factory but not present in the vendored tree.
+
+### Factory
+
+`create_llm(provider_name, settings)` dispatches on `"gemini"`, `"deepseek"`, `"ollama"`, `"vertex_ai"`. The active provider is set via `LLM_PROVIDER` env var.
+
+Both providers support chat + embeddings. The `pipeline_core` side uses simpler single-turn `BaseLLM` (generate/embed), while `agents_core` uses the richer chat Protocol with tool calling.
 
 ---
 
-### Deep Think Pipeline
-
-```
-deep_think_loop(agent_mode="deep")
-  │
-  ├─ Phase 1: _extract_dimensions(question)
-  │    └─ 5W1H mapping + pre-planned enrichment tasks
-  │
-  ├─ Phase 2: analyst_loop(question)
-  │    └─ Yield: sql, tool_result, answer (user sees immediately)
-  │
-  ├─ Phase 3: execute_dag(dimension_enrichment_tasks)
-  │    └─ Yield: agent_trace chunks
-  │
-  ├─ Phase 4: _deep_synthesize(all_evidence, dimensions)
-  │    └─ Yield: insight chunk (5W1H-structured)
-  │
-  ├─ Phase 5: evaluate_insight_quality(synthesis)
-  │    └─ Flag for persistence if genuine
-  │
-  ├─ Phase 6: evaluate_for_investigation(synthesis)
-  │    └─ If no gaps: return
-  │
-  ├─ Phase 7: execute_dag(investigation_tasks)
-  │    └─ Yield: agent_trace chunks
-  │
-  └─ Phase 8: _investigation_synthesize(prior_synthesis, new_evidence)
-       └─ Yield: updated insight chunk
-```
-
-**LLM calls:** 4-12 (extractor + analyst + 1-4 enrichment + synthesizer + quality gate + investigation evaluator + 1-2 follow-ups + re-synthesizer)
-**Latency:** ~20-60 seconds
-
----
-
-## Supporting Infrastructure
-
-### RAG (Retrieval-Augmented Generation)
-
-When the analyst successfully generates SQL, the (question, SQL) pair is automatically saved to a ChromaDB vector store. On future questions, similar past pairs are retrieved and injected as few-shot examples. This creates a **flywheel** — more usage means better future answers.
-
-### DAG Executor
-
-`agents/dag_executor.py` handles parallel execution of sub-tasks with dependency tracking. Tasks without dependencies run concurrently. Tasks with `depends_on` wait for their predecessors. The executor handles timeouts, errors, and result aggregation.
-
-### Stats Context Injection
-
-When enabled (`stats_context_injection=True`), pre-computed dataset statistics are injected into the analyst prompt. The analyst can answer certain questions directly from stats without running SQL (e.g., "What's the average transaction amount by age group?" if already pre-computed).
-
-### Feature Toggles
-
-Per-organization toggles control:
-- `clarification_enabled` — whether the clarifier runs
-- `stats_context_injection` — whether pre-computed stats are injected
-- `rag_retrieval` — whether RAG lookup is used
-
----
-
-## Prompt Templates
-
-All prompts live in `backend/src/insightxpert/prompts/` as Jinja2 templates. They support DB-first resolution (admin can override via `prompt_templates` table) with file fallback.
-
-| Template | Agent | Key Variables |
-|----------|-------|--------------|
-| `analyst_system.j2` | SQL Analyst | `ddl`, `documentation`, `similar_qa`, `stats_context`, `clarification_enabled` |
-| `enrichment_evaluator.j2` | Enrichment Evaluator | `question`, `analyst_sql`, `analyst_rows`, `analyst_answer`, `history` |
-| `orchestrator_planner.j2` | Orchestrator Planner (legacy) | `ddl`, `documentation`, `rag_context`, `max_tasks` |
-| `quant_analyst_system.j2` | Quant Analyst | `ddl`, `documentation`, `upstream_context`, `analyst_sql`, `results_summary` |
-| `response_generator.j2` | Response Synthesizer | `question`, `evidence_data`, `plan_reasoning` |
-| `dimension_extractor.j2` | Dimension Extractor | `ddl`, `documentation`, `question`, `history` |
-| `deep_synthesizer.j2` | Deep Synthesizer | `question`, `evidence_data`, `dimensions_summary`, `why_intent` |
-| `investigation_evaluator.j2` | Investigation Evaluator | `question`, `analyst_sql`, `synthesized_insight`, `enrichment_evidence` |
-| `investigation_synthesizer.j2` | Investigation Synthesizer | `question`, `prior_synthesis`, `prior_evidence`, `new_evidence` |
-| `insight_quality_evaluator.j2` | Insight Quality Evaluator | `question`, `synthesized_content`, `enrichment_task_count` |
-
----
-
-## Error Handling & Fallbacks
+## 10. Error Handling and Fallbacks
 
 Every component degrades gracefully:
 
 | Component | On Failure | Behavior |
-|-----------|-----------|----------|
+|---|---|---|
 | RAG retrieval | Warning logged | Analyst proceeds without few-shot examples |
-| Stats context | Warning logged | Analyst forced to run SQL |
+| Mode classifier | Warning logged | Defaults to `"agentic"` |
 | Clarifier | Warning logged | Proceeds to analyst (no clarification) |
 | Enrichment evaluator | Warning logged | Analyst answer stands (no enrichment) |
 | Quant analyst sub-task | Task marked "error" | Synthesis uses available results, skips failed task |
 | Response synthesis | Falls back | Returns concatenated agent answers |
 | Insight quality check | Default | Saves as insight (`is_insight=True`) |
-| Investigation evaluator | Warning logged | Prior synthesis stands unchanged |
 | Dimension extraction | Warning logged | Falls back to agentic-mode pipeline |
 
 **Timeouts:**
+
 | Component | Timeout |
-|-----------|---------|
+|---|---|
 | Enrichment evaluator | 60 seconds |
-| Investigation evaluator | 30 seconds |
-| Insight quality evaluator | 15 seconds |
 | Dimension extraction | 15 seconds |
 | Synthesizers | 60 seconds |

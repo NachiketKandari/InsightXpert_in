@@ -59,13 +59,3 @@ class LibsqlConnection(_RedactingMixin, BaseModel):
         return v
 
 
-class SqliteFileConnection(BaseModel):
-    """Pre-existing on-disk SQLite — used by bundled DBs and uploaded files.
-
-    Not serialised into ``connection_config_encrypted`` (paths are implicit
-    from the registry / object store), but kept here so the dispatch
-    function has a single typed family to reason about.
-    """
-
-    kind: Literal["sqlite_file"] = "sqlite_file"
-    path: str

@@ -1,499 +1,440 @@
 # Contributing Guide
 
-## Repository Layout
+This guide covers how to set up, develop, and contribute to InsightXpert.ai -- a SaaS AI data analyst that lets users query databases using plain English.
+
+---
+
+## Project Structure
+
+InsightXpert.ai is a **Turborepo monorepo** with npm workspaces for the frontend and `uv` for the Python backend.
 
 ```
-backend/
-  src/insightxpert/
-    agents/       # analyst, orchestrator, quant_analyst, clarifier, deep_think,
-                  #   response_generator, dag_executor, stats_resolver, tools,
-                  #   stat_tools, advanced_tools, common, tool_base
-    api/          # FastAPI routes (SSE chat endpoint) and Pydantic request/response models
-    auth/         # JWT auth, user/org models, conversation store, permissions, seed
-    admin/        # feature toggles, org branding, config store, domain editor
-    automations/  # service (CRUD), scheduler (APScheduler cron), evaluator (trigger logic),
-                  #   nl_trigger (NL-to-trigger compiler), models (Pydantic schemas), routes
-    benchmark/    # offline model benchmark runner, RAG isolation, report generation
-    datasets/     # dataset service (CRUD, CSV upload, profiling), profiler (DataFrame column
-                  #   stats/type inference), dependencies, routes
-    db/           # SQLAlchemy connector, data loader, schema, stats_computer, migrations
-    insights/     # insights routes
-    llm/          # provider protocol (base.py), Gemini/Ollama/VertexAI implementations, factory
-    memory/       # in-memory conversation store (wraps auth's PersistentConversationStore)
-    prompts/      # Jinja2 prompt templates (.j2) for all agent personas
-    rag/          # ChromaDB vector store (VectorStore) and protocol (VectorStoreBackend)
-    storage/      # Cloudflare R2 file storage (r2.py), PDF text extraction (pdf_extractor.py),
-                  #   document service (CRUD + LLM context), upload routes
-    training/     # DDL, documentation, example queries, seed data, trainer bootstrap
-    voice/        # Deepgram speech-to-text WebSocket proxy (browser audio -> Nova-3 -> transcript)
-    config.py     # Pydantic Settings (all env vars)
-    exceptions.py # Custom exception classes
-    main.py       # FastAPI entry point
-  tests/
-  generate_data.py
-  pyproject.toml
-
-frontend/
-  src/
-    app/              # Next.js App Router pages
-      admin/          #   Admin panel (users, feature toggles, automations, notifications)
-      automations/    #   Automations page
-      login/          #   Login page
-      register/       #   Registration page
-    components/
-      admin/          # Admin UI: feature toggles, branding, domain editor, user mappings,
-                      #   conversation viewer
-      automations/    # Automation list, workflow builder/canvas, schedule picker, trigger
-                      #   condition builder, AI SQL generator, run history
-      chat/           # Chat panel, message input/list/bubble/actions, welcome screen
-      chunks/         # Chunk renderers: answer, chart, clarification, data table, error,
-                      #   insight, SQL, status, thinking trace, tool call/result, citation
-      dataset/        # CSV upload dialog, PDF upload dialog, dataset viewer
-      health/         # Health check gate
-      insights/       # Insight bell, popover, cards, modal
-      layout/         # App shell, header, left/right sidebars, user menu, dataset selector,
-                      #   docs dialog
-      notifications/  # Notification bell, popover, cards, list, detail modal
-      sample-questions/ # Sample questions modal
-      sidebar/        # Conversation list/item, process steps, search results
-      sql/            # SQL executor, chart configurator
-      ui/             # shadcn/ui primitives (button, input, dialog, sheet, tabs, etc.)
-    hooks/            # use-auto-scroll, use-client-config, use-health-check, use-media-query,
-                      #   use-sse-chat, use-syntax-theme, use-theme, use-voice-input
-    lib/              # api, automation-utils, chart-detector, chunk-parser, constants,
-                      #   export-report, file-utils, model-utils, sample-questions, sql-utils,
-                      #   sse-client, utils
-    stores/           # Zustand stores: auth, automation, chat, client-config, insight,
-                      #   notification, settings
-    types/            # TypeScript type definitions: admin, api, automation, chat, dataset, insight
-  package.json
+insightxpert.ai/
+  apps/
+    api/                          # Python 3.12 + FastAPI backend
+      src/insightxpert_api/
+        admin/                    # Admin overview cache, feature toggles
+        agents/                   # Agent implementations (vendored orchestrator)
+        audit/                    # Audit logging middleware + queue
+        auth/                     # Session signer, current_user dependency
+        automations/              # Schedule runner, trigger evaluator, notifications
+        connections/              # BYO external DB: Postgres connector, Fernet encryption
+        databases/                # DB registry: CRUD, visibility, profiling
+        db/                       # SQLAlchemy engines, DatabaseConnector, dialects/
+        insights/                 # Insights API routes
+        jobs/                     # Async job wrappers (sample questions)
+        llm/                      # Provider factory: Gemini + DeepSeek
+        metrics/                  # Per-turn query metrics, cost tracking
+        middleware/               # Audit middleware, CORS
+        orchestration/            # Conversations, messages, insights, agent traces
+        pipeline/                 # Pipeline stages wrapping vendored pipeline_core
+        profiling/                # 7-stage profile runner with SSE + batched LLM
+        prompts/                  # DB-first prompt template resolver
+        rag/                      # pgvector-backed vector store
+        routes/                   # All route files (chat, databases, admin, etc.)
+        sample_questions/         # 7-stage sample question generation pipeline
+        scripts/                  # Bootstrap and maintenance scripts
+        services/                 # Cross-cutting services
+        shared_snapshots/         # Chat sharing via capability URLs
+        sse/                      # EventEmitter + SSE chunk envelope
+        storage/                  # Object storage: GCS + local FS
+        users/                    # User CRUD, Argon2id hashing, bootstrapping
+        vendored/                 # Immutable vendored code (pipeline_core, agents_core)
+      tests/                      # pytest test suite (~280+ tests)
+      alembic/                    # Database migrations
+      pyproject.toml
+    web/                          # Next.js 15+ frontend
+      src/
+        app/                      # App Router pages (chat, login, admin, automations, etc.)
+        components/               # React components organized by domain
+        hooks/                    # Custom React hooks
+        lib/                      # Utility libraries, SSE client, API helpers
+        stores/                   # Zustand stores
+        types/                    # TypeScript type definitions
+    www/                          # Marketing landing page
+  packages/
+    types/                        # Shared TypeScript types
+  docs/
+    backend/                      # Backend architecture and reference docs
+    decisions/                    # Architecture decision records (D-001 through D-052+)
+    STATUS.md                     # Current project status and recent completions
+    superpowers/                  # Implementation specs, plans, and progress reports
+  turbo.json                      # Turborepo pipeline configuration
 ```
 
 ---
 
-## Running Locally
+## Development Setup
 
-### Backend
+### Prerequisites
+
+| Tool | Version | Purpose |
+|---|---|---|
+| Python | 3.12+ | Backend runtime |
+| Node.js | 20+ | Frontend runtime |
+| uv | Latest | Python package management |
+| Supabase CLI | Latest | Local Postgres database (for full local dev) |
+
+### Clone and Configure
 
 ```bash
-cd backend
-python generate_data.py          # load 250K rows into insightxpert.db
-uv run python -m insightxpert   # start FastAPI on :8000
+git clone <repo-url>
+cd insightxpert.ai
 ```
 
-Required env vars (`.env.local` in `backend/`):
+### Backend Setup
+
+```bash
+cd apps/api
+
+# Install Python dependencies
+uv sync
+
+# Copy and configure environment
+cp .env.example .env.local
+# Edit .env.local with your values (see below)
+
+# Run database migrations
+uv run alembic upgrade head
+
+# Start the FastAPI server
+uv run uvicorn insightxpert_api.main:app --reload --port 8000
+```
+
+**Required environment variables** (in `apps/api/.env.local`):
 
 | Variable | Description |
 |---|---|
-| `GEMINI_API_KEY` | Google Gemini API key |
-| `GEMINI_MODEL` | Model name (default: `gemini-2.5-flash`) |
-| `LLM_PROVIDER` | Provider to use: `gemini`, `ollama`, or `vertex_ai` (default: `gemini`) |
-| `DATABASE_URL` | SQLite path (default: `sqlite:///./insightxpert.db`) |
-| `CHROMA_PERSIST_DIR` | ChromaDB data directory (default: `./chroma_data`) |
-| `SECRET_KEY` | JWT signing secret (set a random 32+ char string for production) |
-| `DEEPGRAM_API_KEY` | Deepgram API key for voice input (optional, leave empty to disable) |
-| `OLLAMA_MODEL` | Ollama model name (default: `llama3.1`, used when `LLM_PROVIDER=ollama`) |
-| `OLLAMA_BASE_URL` | Ollama server URL (default: `http://localhost:11434`) |
-| `GCP_PROJECT_ID` | GCP project ID (required when `LLM_PROVIDER=vertex_ai`) |
-| `VERTEX_AI_REGION` | Vertex AI region (default: `global`) |
-| `VERTEX_AI_MODEL` | Vertex AI model name (default: `zai-org/glm-5-maas`) |
-| `LOG_LEVEL` | Logging level: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` (default: `INFO`) |
-
-### Frontend
-
-```bash
-cd frontend
-npm install
-npm run dev    # Next.js dev server on :3000
-```
-
----
-
-## Adding a New LLM Provider
-
-Providers live in `backend/src/insightxpert/llm/`. Each provider implements the `LLMProvider` protocol defined in `llm/base.py`. Current providers: Gemini (`gemini.py`), Ollama (`ollama.py`), Vertex AI (`vertex.py`).
-
-### 1. Implement the protocol
-
-Create `backend/src/insightxpert/llm/myprovider.py`:
-
-```python
-from __future__ import annotations
-from insightxpert.llm.base import LLMProvider, LLMResponse, ToolCall
-
-class MyProvider:
-    def __init__(self, api_key: str, model: str) -> None:
-        self._api_key = api_key
-        self._model = model
-
-    @property
-    def model(self) -> str:
-        return self._model
-
-    async def chat(
-        self, messages: list[dict], tools: list[dict] | None = None
-    ) -> LLMResponse:
-        # Call the external API and return LLMResponse
-        # LLMResponse fields: content, tool_calls, input_tokens, output_tokens
-        ...
-```
-
-`LLMProvider` is a `@runtime_checkable Protocol` — no explicit inheritance required. The class just needs to have the right method signatures.
-
-### 2. Register in the factory
-
-`backend/src/insightxpert/llm/factory.py`:
-
-```python
-elif provider == "myprovider":
-    from insightxpert.llm.myprovider import MyProvider
-    return MyProvider(api_key=settings.my_api_key, model=settings.my_model)
-```
-
-Add an `else` branch or extend the `if/elif` chain. Raise `ValueError` for unknown providers.
-
-### 3. Add config fields
-
-`backend/src/insightxpert/config.py`:
-
-```python
-class Settings(BaseSettings):
-    ...
-    my_api_key: str = ""
-    my_model: str = "my-model-default"
-```
-
-Also extend the `LLMProvider` enum:
-
-```python
-class LLMProvider(str, Enum):
-    ...
-    MY_PROVIDER = "myprovider"
-```
-
-### 4. Expose in the API
-
-`backend/src/insightxpert/api/routes.py` builds the `ProviderModels` list returned by `GET /api/config`. Add your provider and models there so the frontend model-switcher can discover them.
-
----
-
-## Adding a New Tool
-
-Tools are defined in `backend/src/insightxpert/agents/tools.py` (core tools), `agents/stat_tools.py` (statistical tools for the quant analyst), or `agents/advanced_tools.py` (advanced analysis tools). All use the `Tool` base class from `agents/tool_base.py`.
-
-### 1. Define the tool class
-
-```python
-from insightxpert.agents.tool_base import Tool, ToolContext, ToolRegistry
-import json
-
-class MyTool(Tool):
-    @property
-    def name(self) -> str:
-        return "my_tool"
-
-    @property
-    def description(self) -> str:
-        return "Does something useful. Describe when and how the LLM should call it."
-
-    def get_args_schema(self) -> dict:
-        return {
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "The search query",
-                }
-            },
-            "required": ["query"],
-        }
-
-    async def execute(self, context: ToolContext, args: dict) -> str:
-        result = do_something(args["query"])
-        return json.dumps({"result": result})
-```
-
-`execute()` must always return a JSON string. Errors are caught by `ToolRegistry.execute()` and returned as `{"error": "..."}` — never raise unhandled exceptions that would expose tracebacks to the LLM.
-
-`ToolContext` provides:
-- `context.db` — `DatabaseConnector` with an `execute(sql, row_limit)` method
-- `context.rag` — `VectorStoreBackend` for RAG retrieval
-- `context.row_limit` — configured SQL row limit
-- `context.analyst_results` — list of dicts from the analyst's SQL result (for stat tools)
-- `context.analyst_sql` — the SQL string that produced those results
-
-### 2. Register the tool
-
-In `default_registry()` in `tools.py`:
-
-```python
-def default_registry(...) -> ToolRegistry:
-    registry = ToolRegistry()
-    registry.register(RunSqlTool())
-    registry.register(GetSchemaTool())
-    registry.register(SearchSimilarTool())
-    registry.register(MyTool())          # add here
-    if clarification_enabled:
-        registry.register(ClarifyTool())
-    return registry
-```
-
-For stat tools, add to `statistician_registry()` in `stat_tools.py`.
-
----
-
-## Adding a New RAG Collection
-
-The vector store has four collections: `qa_pairs`, `ddl`, `docs`, `findings`. The protocol is defined in `rag/base.py` (`VectorStoreBackend`) and the ChromaDB implementation is in `rag/store.py` (`VectorStore`).
-
-To add a new collection:
-
-### 1. Add to `VectorStore.__init__`
-
-```python
-self._my_collection = self._client.get_or_create_collection("my_collection")
-```
-
-### 2. Add `add_*` and `search_*` methods to `VectorStore`
-
-Follow the pattern of existing methods (e.g. `add_finding`, `search_findings`). Use `self._doc_id(content)` for deduplication. Use `upsert` for idempotent writes.
-
-### 3. Add to `VectorStoreBackend` protocol
-
-`rag/base.py`:
-
-```python
-def add_my_document(self, content: str, metadata: dict | None = None) -> str: ...
-def search_my_collection(self, question: str, n: int = 3) -> list[dict]: ...
-```
-
-### 4. Add to `InMemoryVectorStore`
-
-For test compatibility, implement the same methods in the test fake used by `tests/conftest.py`.
-
-### 5. Add to `delete_all()`
-
-```python
-def delete_all(self) -> dict[str, int]:
-    ...
-    n_my = len(self._my_collection.get()["ids"])
-    self._my_collection.delete(where={"_id": {"$ne": ""}})
-    return {..., "my_collection": n_my}
-```
-
----
-
-## Adding Training Data
-
-Training data is bootstrapped on startup by `training/trainer.py`. On the first run it adds DDL, documentation, and example Q→SQL pairs to ChromaDB.
-
-### At bootstrap (static)
-
-Add to the respective files in `backend/src/insightxpert/training/` (see also `seed_data.py` for bootstrap seed data):
-
-- **Q→SQL pairs**: add a dict to `EXAMPLE_QUERIES` in `queries.py`:
-  ```python
-  {
-      "category": "Temporal",
-      "question": "Which hour has the most failed transactions?",
-      "sql": "SELECT hour_of_day, COUNT(*) AS failures FROM transactions WHERE transaction_status = 'FAILED' GROUP BY hour_of_day ORDER BY failures DESC LIMIT 1;",
-  }
-  ```
-- **Documentation**: add a paragraph to the `DOCUMENTATION` string in `documentation.py`
-- **DDL**: edit the `DDL` constant in `schema.py`
-
-Changes are picked up on next startup. The trainer is idempotent — documents are SHA-256 keyed and use ChromaDB `upsert`, so re-running does not create duplicates.
-
-### At runtime (via API)
-
-```bash
-# Add a Q→SQL pair
-curl -X POST /api/train \
-  -H "Content-Type: application/json" \
-  -d '{"type": "qa_pair", "content": "How many transactions succeeded?", "metadata": {"sql": "SELECT COUNT(*) FROM transactions WHERE transaction_status = 'SUCCESS';"}}'
-
-# Add documentation
-curl -X POST /api/train \
-  -d '{"type": "documentation", "content": "The fraud_flag column is 1 when a transaction was flagged for review..."}'
-
-# Add DDL
-curl -X POST /api/train \
-  -d '{"type": "ddl", "content": "CREATE TABLE transactions (...)"}'
-```
-
-Requires admin authentication.
-
----
-
-## Voice Input (Deepgram)
-
-Voice input is implemented as a WebSocket proxy in `backend/src/insightxpert/voice/routes.py`. The browser records audio (WebM/opus), sends it over a WebSocket at `/api/transcribe`, and the backend proxies it to Deepgram Nova-3 for real-time transcription.
-
-### Key files
-
-- `backend/src/insightxpert/voice/routes.py` — WebSocket endpoint, authenticates via JWT (cookie or query param), proxies audio to Deepgram
-- `frontend/src/hooks/use-voice-input.ts` — React hook for recording and receiving transcripts
-- `backend/src/insightxpert/config.py` — `DEEPGRAM_API_KEY` setting (leave empty to disable)
-
-### How it works
-
-1. Browser opens a WebSocket to `/api/transcribe`
-2. Backend authenticates via `__session` cookie or `?token=` query param
-3. Backend opens a second WebSocket to `wss://api.deepgram.com/v1/listen`
-4. Two concurrent tasks: `browser_to_deepgram` (audio) and `deepgram_to_browser` (transcripts)
-5. Transcripts are streamed back as JSON with interim and final results
-
-Voice is optional — if `DEEPGRAM_API_KEY` is empty the WebSocket closes with code `4002`.
-
----
-
-## Document Storage (R2 + PDF)
-
-File storage and PDF document management live in `backend/src/insightxpert/storage/`.
-
-### Key files
-
-- `storage/r2.py` — `R2StorageService`: Cloudflare R2 object storage via boto3 S3-compatible client (upload, delete, presigned URL generation). All methods are synchronous — callers must use `asyncio.to_thread()`.
-- `storage/pdf_extractor.py` — `extract_text_from_pdf()`: extracts text from PDF files using `pypdf`, adds page markers, detects scanned PDFs without OCR.
-- `storage/document_service.py` — `DocumentService`: CRUD for `Document` records (backed by SQLAlchemy), visibility rules (admins see all, users see own uploads + system docs), and `get_documents_context_markdown()` to inject extracted PDF text into LLM context.
-- `storage/routes.py` — FastAPI routes at `/api/documents` for PDF upload, listing, and deletion. Max upload size is 20 MB.
-
-### Adding a new file type
-
-1. Add an extractor function in `storage/` (similar to `pdf_extractor.py`)
-2. Update the validation in `storage/routes.py` to accept the new extension
-3. Call the extractor in the upload handler and store extracted text in the `Document` record
-
----
-
-## Automations
-
-Automations allow users to schedule recurring SQL queries with trigger conditions and receive notifications. The module is in `backend/src/insightxpert/automations/`.
-
-### Key files
-
-- `automations/models.py` — Pydantic request/response schemas: `CreateAutomationRequest`, `TriggerCondition`, `AutomationResponse`, `NotificationResponse`, etc.
-- `automations/service.py` — `AutomationService`: CRUD for automations, runs, notifications, and trigger templates. Uses normalized `automation_triggers` table with JSON blob fallback.
-- `automations/scheduler.py` — `AutomationScheduler`: APScheduler-based cron scheduler that loads active automations, executes their SQL queries, and evaluates triggers.
-- `automations/evaluator.py` — `TriggerEvaluator`: evaluates trigger conditions (threshold, row_count, change_detection, column_expression, slope) against query results.
-- `automations/nl_trigger.py` — NL-to-trigger compiler: uses the LLM to convert plain English trigger descriptions into structured `TriggerCondition` JSON.
-- `automations/routes.py` — FastAPI routes for automation CRUD, run history, trigger templates, notifications, and the NL trigger compiler.
-
-### Trigger condition types
-
-| Type | Description |
+| `DATABASE_URL` | Supabase Postgres connection string (metadata DB). Use `postgresql+psycopg://...` with pooler (port 6543) for serverless. |
+| `SESSION_SECRET` | Secret key for signing session cookies. Generate a random 64-char hex string. |
+| `LLM_API_KEY` | API key for the configured LLM provider (Gemini or DeepSeek). |
+| `LLM_PROVIDER` | `gemini` or `deepseek`. |
+| `LLM_MODEL` | Default model name (e.g., `deepseek-v4-flash`, `gemini-2.5-flash`). |
+
+**Optional variables for specific features:**
+
+| Variable | Description |
 |---|---|
-| `threshold` | Compare a single column value against a threshold |
-| `row_count` | Compare the number of result rows |
-| `change_detection` | Fire when a value changes by N% from the previous run |
-| `column_expression` | Check a column value across rows (any_row / all_rows) |
-| `slope` | Compute rate of change across recent runs |
+| `AUTOMATIONS_ENABLED` | Set to `true` to enable scheduled automations. |
+| `CREDENTIAL_ENCRYPTION_KEY` | Fernet key for BYO connection encryption. |
+| `GCS_BUCKET` | GCS bucket for uploaded database file storage. |
+| `SENTRY_DSN` | Sentry DSN for error monitoring (optional). |
+| `LOG_LEVEL` | Logging level: `DEBUG`, `INFO`, `WARNING`, `ERROR` (default: `INFO`). |
 
-### Frontend
-
-- `frontend/src/components/automations/` — automation list, workflow builder (visual canvas), schedule picker, trigger condition builder, AI SQL generator, run history
-- `frontend/src/stores/automation-store.ts` — Zustand store for automation state
-- `frontend/src/types/automation.ts` — TypeScript types
-- `frontend/src/app/automations/` — Automations page
-- `frontend/src/app/admin/automations/` — Admin automations view
-
----
-
-## Datasets
-
-The datasets module handles multi-dataset management with CSV/PDF upload, column profiling, and example query management. Located in `backend/src/insightxpert/datasets/`.
-
-### Key files
-
-- `datasets/service.py` — `DatasetService`: CRUD for datasets, columns, and example queries. Handles CSV upload with automatic profiling via `profile_dataframe()`. Provides `get_active_dataset()` with a 60s TTL cache.
-- `datasets/profiler.py` — `profile_dataframe()`: pure computational DataFrame profiler. Infers column types (INTEGER, REAL, TEXT, BOOLEAN, DATETIME), computes cardinality classification (unique/high/medium/low), null counts, numeric stats (min/max/mean), and sample values. Sanitizes column names for SQLite compatibility.
-- `datasets/dependencies.py` — `resolve_user_roles`: dependency for resolving user roles (admin, org-scoped) in dataset routes.
-- `datasets/routes.py` — FastAPI routes at `/api/datasets` for dataset CRUD, CSV upload, column management, and example queries.
-
-### Frontend
-
-- `frontend/src/components/dataset/csv-upload-dialog.tsx` — CSV file upload with preview
-- `frontend/src/components/dataset/pdf-upload-dialog.tsx` — PDF document upload
-- `frontend/src/components/dataset/dataset-viewer.tsx` — Dataset details and column browser
-- `frontend/src/components/layout/dataset-selector.tsx` — Header dropdown to switch active dataset
-- `frontend/src/types/dataset.ts` — TypeScript types
-
----
-
-## Benchmark Runner
-
-The offline benchmark suite in `backend/src/insightxpert/benchmark/` tests model accuracy across a question bank.
-
-### Key files
-
-- `benchmark/runner.py` — Core benchmark loop: iterates models and questions, collects chunk traces, measures timing
-- `benchmark/rag_isolation.py` — Creates isolated RAG stores per benchmark run to avoid cross-contamination
-
-Run with `python -m insightxpert.benchmark` from the `backend/` directory.
-
----
-
-## Running Tests
+### Frontend Setup
 
 ```bash
-cd backend
+cd apps/web
+
+# Install Node dependencies
+npm install
+
+# Start the Next.js dev server
+npm run dev
+```
+
+The dev server runs on `http://localhost:3000` and proxies `/api/*` to `http://localhost:8000` via Next.js rewrites.
+
+---
+
+## Backend Development
+
+### Module Pattern
+
+Most backend modules follow a consistent 3-layer pattern:
+
+```
+feature/
+  table.py        -- SQLAlchemy Core table definitions (plain MetaData, no ORM)
+  repository.py   -- Thin SQL layer: CRUD using SQLAlchemy Core, returns plain dicts
+  service.py      -- Business logic: Pydantic models in/out, validation, scoping
+```
+
+Repositories never import Pydantic models. Services never touch SQLAlchemy directly. This separation keeps the data layer swappable and the business logic testable.
+
+### Adding a Route
+
+1. **Table**: Add the table definition in `feature/table.py` using `sqlalchemy.Table`.
+2. **Repository**: Add CRUD methods in `feature/repository.py` using `engine.connect()` context managers.
+3. **Service**: Add business logic in `feature/service.py` with Pydantic request/response models.
+4. **Route**: Create `routes/<feature>.py` as an `APIRouter` with prefix `/api/v1/<feature>`. Import and mount in `routes/__init__.py`.
+5. **Migration**: Create an Alembic migration with `uv run alembic revision --autogenerate -m "description"`.
+
+### Adding a Pipeline Stage
+
+Pipeline stages live in `pipeline/`. Each stage implements the `Stage` Protocol:
+
+1. Create `pipeline/<stage_name>_stage.py`.
+2. Implement the stage's `run()` method (async generator yielding `ChatChunk` objects).
+3. If the stage requires a new chunk type, add it to the `ChunkType` enum in `sse/chunks.py`.
+4. If the stage requires a new prompt, create it as a `.j2` file in `vendored/pipeline_core/prompts/`.
+5. Wire the stage into the pipeline sequence in `pipeline/` or the orchestrator.
+
+### Adding a Dialect
+
+To support a new database dialect (currently SQLite + Postgres):
+
+1. Create `db/dialects/<dialect>.py` implementing the `DialectAdapter` Protocol (defined in `db/dialects/base.py`).
+2. Register the adapter in `db/dialects/__init__.py`.
+3. Create `sql_generation_<dialect>.j2` in `vendored/pipeline_core/prompts/`.
+
+The Protocol has 9 methods/properties. Zero changes to existing code are needed for a new dialect.
+
+### Running Tests
+
+```bash
+cd apps/api
+
+# Run all tests
 uv run pytest tests/ -v
 
-# Run a specific test file
+# Run specific test files
 uv run pytest tests/test_agent.py -v
-uv run pytest tests/test_rag.py -v
-uv run pytest tests/test_api_chat.py -v
-uv run pytest tests/test_datasets.py -v
-uv run pytest tests/test_orchestrator_integration.py -v
-uv run pytest tests/test_statistician.py -v
+uv run pytest tests/test_db_connector_dialect.py -v
 
 # With coverage
-uv run pytest tests/ --cov=insightxpert --cov-report=term-missing
+uv run pytest tests/ --cov=insightxpert_api --cov-report=term-missing
+
+# Run only tests without LLM dependency (skip gemini-marked tests)
+uv run pytest tests/ -v -m "not gemini"
 ```
 
-Tests use `pytest-asyncio` (mode = `auto`). The `conftest.py` sets up an in-memory SQLite database and an `InMemoryVectorStore` so tests never touch the production database or ChromaDB.
+### Test Markers
 
-Available test files: `test_agent`, `test_api_chat`, `test_admin_routes`, `test_clarifier`, `test_conversation_persistence`, `test_conversation_store_admin`, `test_data_loader`, `test_datasets`, `test_db`, `test_db_connector_dialect`, `test_error_scenarios`, `test_migrations`, `test_orchestrator_integration`, `test_prompts`, `test_statistician`, `test_validate_plan`.
+| Marker | Description |
+|---|---|
+| `gemini` | Tests that require a live LLM API call. Skipped in CI without credentials. |
+| `slow` | Long-running tests. Skipped in fast CI runs. |
+| `integration` | Tests that require a live database connection. |
 
-Frontend end-to-end tests:
+### Test Isolation
 
-```bash
-cd frontend
-npm run test:e2e          # Playwright headless
-npm run test:e2e:ui       # Playwright with UI
-```
+- Unit tests use an **in-memory SQLite** database created per test session (`conftest.py`).
+- Integration tests use a **per-test SQLite file** database, created and destroyed for each test function.
+- Tests should never touch the production database.
+- The `InMemoryVectorStore` fake is used for RAG-related tests, avoiding the need for pgvector in test environments.
 
 ---
 
 ## Frontend Development
 
-```bash
-cd frontend
-npm run dev       # Dev server on :3000
-npm run build     # Production build
-npm run lint      # ESLint
+### App Router Structure
+
+The frontend uses Next.js 15+ App Router with React Server Components:
+
+```
+app/
+  page.tsx                          # Main chat interface
+  layout.tsx                        # Root layout with HealthCheckGate
+  login/page.tsx                    # Login form
+  automations/
+    page.tsx                        # Automations list + new-automation dialog
+    layout.tsx                      # AuthGuard wrapper
+  databases/
+    page.tsx                        # Database browser
+    [id]/page.tsx                   # Database detail page
+  admin/
+    layout.tsx                      # Admin layout with sidebar nav
+    overview/page.tsx               # Dashboard with stats and sparklines
+    users/page.tsx                  # User management (invite, role, deactivate)
+    databases/page.tsx              # Admin database list with visibility controls
+    automations/page.tsx            # Admin automations view
+    prompts/page.tsx                # Prompt template admin
+    rag/page.tsx                    # RAG vector store admin
+    conversations/page.tsx          # Cross-user conversation viewer
+    metrics/page.tsx                # Query metrics and cost tracking
+    audit/page.tsx                  # Audit log viewer
+    notifications/page.tsx          # Notification management
+  share/[token]/page.tsx            # Shared conversation viewer
+  change-password/page.tsx          # Password change form
 ```
 
-The dev server proxies `/api/*` to `http://localhost:8000` via Next.js rewrites (configured in `next.config.ts`).
+### Zustand Stores
+
+State management uses Zustand with clear session-vs-local persistence boundaries:
+
+| Store | File | Persistence | Purpose |
+|---|---|---|---|
+| `chat-store` | `stores/chat-store.ts` | sessionStorage | Conversations, active conversation, streaming state, sidebar toggles, selected database |
+| `settings-store` | `stores/settings-store.ts` | None | Provider/model selection, agent mode, pipeline mode |
+| `client-config-store` | `stores/client-config-store.ts` | None | Feature flags, org branding, admin status |
+| `insight-store` | `stores/insight-store.ts` | None | Insights list, unread count, bookmark/delete with optimistic rollback |
+| `notification-store` | `stores/notification-store.ts` | None | Notifications list, unread count, mark-read with optimistic rollback |
+| `automation-store` | `stores/automation-store.ts` | None | Automation CRUD, test trigger state, trigger templates |
+
+**Convention**: Stores are non-persisted by default. Only `chat-store` persists (to `sessionStorage`, key `"insightxpert-chat"`), and it strips message arrays on save. Messages are lazy-loaded from the server.
+
+### Adding a Chunk Renderer
+
+The SSE pipeline emits typed chunks that the frontend renders with specific components.
+
+1. **Add the chunk type** to `ChunkType` in `types/chat.ts`.
+2. **Create the renderer component** in `components/chunks/<name>-chunk.tsx`.
+3. **Register it** in `components/chunks/chunk-renderer.tsx` -- add a branch in the dispatcher switch statement.
+4. **Add the SSE payload type** in `types/chunks.ts` if the chunk carries structured data.
+
+Example: adding an `answer_generated` chunk type and renderer:
+
+```tsx
+// components/chunks/answer-generated-chunk.tsx
+export function AnswerGeneratedChunk({ data }: { data: AnswerGeneratedData }) {
+  return <div>Answer generated in {data.duration_ms}ms</div>;
+}
+```
+
+### SSE Client
+
+The SSE client (`lib/sse-client.ts`) manages the streaming HTTP connection:
+
+- `createSSEStream(message, conversationId, callbacks, agentMode, options, token?)` opens a POST to `/api/v1/chat`.
+- Returns an `AbortController` for cancellation.
+- Reads the `ReadableStream` line-by-line, parsing `data: <json>` SSE lines.
+- Uses `queueMicrotask` to batch chunks from the same `reader.read()` batch, exploiting React 18 automatic batching.
+- `AgentMode` is `"basic" | "agentic" | "auto"`. `PipelineMode` is `"auto" | "linked" | "full_schema"`.
+
+### Component Patterns
+
+- **API calls**: Use `apiFetch` or `apiCall` from `lib/api.ts`. These attach credentials and base URL automatically.
+- **Auth guard**: Pages that require authentication wrap in `AuthGuard` (`components/auth/auth-guard.tsx`).
+- **Optimistic updates**: Stores update local state first, then call the API, and roll back on failure.
+- **File uploads**: Dialogs follow a consistent pattern: file picker + name input + upload + review/confirm (two-step flow).
 
 ---
 
-## Code Style
+## Code Quality
 
-### Backend
+### Backend (Python)
 
-- **ruff** for linting and import sorting (configured in `pyproject.toml`)
-- **mypy** for type checking
-- All new endpoints must have a `response_model` on the FastAPI route decorator
-- All new tools must have full type annotations
-- All new async endpoint handlers that call synchronous DB/store methods must wrap those calls in `await asyncio.to_thread(store.method, args)`
+| Tool | Configuration | Purpose |
+|---|---|---|
+| **ruff** | `pyproject.toml` | Linting + import sorting + formatting. Line length: 100. |
+| **mypy** | `pyproject.toml` | Static type checking in strict mode. |
 
-### Frontend
+Run checks:
 
-- **ESLint** with the `eslint-config-next` ruleset
-- **TypeScript strict mode** is on — no implicit `any`
-- All new stores should follow the Zustand `create<StateType>()` pattern
-- Prefer `useCallback` for event handlers passed to children to avoid unnecessary re-renders
+```bash
+cd apps/api
+uv run ruff check .
+uv run ruff format --check .
+uv run mypy src/
+```
+
+### Pre-commit Hooks
+
+The project uses pre-commit to enforce code quality on every commit:
+
+```bash
+uv run pre-commit install
+uv run pre-commit run --all-files  # Run manually
+```
+
+### Frontend (TypeScript)
+
+| Tool | Configuration | Purpose |
+|---|---|---|
+| **ESLint** | `eslint.config.mjs` with `eslint-config-next` | Linting |
+| **TypeScript** | `tsconfig.json` (strict mode) | Type checking |
+
+Run checks:
+
+```bash
+cd apps/web
+npm run lint
+npx tsc --noEmit
+```
+
+---
+
+## Decision Records
+
+Architecture decisions are documented as decision records in `docs/decisions/`. Each record follows a consistent template.
+
+### Adding a New Decision
+
+1. Copy `docs/decisions/.template.md` to `docs/decisions/D-NNN-short-title.md` (use the next available number).
+2. Fill in all sections: Context, Decision, Alternatives Considered, Consequences.
+3. Add the **code marker** in the affected source files (a comment referencing the decision number).
+4. Regenerate the index by running the index script (if one exists) or manually updating any index files.
+5. Set `Status` to `decided`. Use `proposed` for decisions still under discussion.
+
+### Decision Categories
+
+| Prefix | Category |
+|---|---|
+| D-001 to D-019 | Architecture: runtime, hosting, vendoring |
+| D-020 to D-029 | API design: routes, payloads, error shapes |
+| D-030 to D-039 | Patterns: Protocols, caches, threading |
+| D-040 to D-049 | Infrastructure: hosting, storage, pooling |
+| D-050 to D-059 | Security: auth, hashing, encryption |
+
+---
+
+## Testing Strategy
+
+### Backend Tests
+
+| Type | What they test | Marker | Count |
+|---|---|---|---|
+| **Unit** | Individual functions/modules: hashing, SQL validation, trigger evaluation | (none) | ~180 |
+| **Integration** | HTTP endpoints with in-memory SQLite: chat, databases, auth, admin | (none) | ~80 |
+| **LLM-dependent** | End-to-end pipeline with real LLM calls | `@pytest.mark.gemini` | ~20 |
+
+Run subsets:
+
+```bash
+uv run pytest tests/ -v                          # All tests (unit + integration, no LLM)
+uv run pytest tests/ -v -m "not gemini"          # Skip LLM-dependent tests
+uv run pytest tests/ -v -m "gemini"              # Only LLM-dependent tests
+uv run pytest tests/test_db_connector_dialect.py -v  # Dialect-specific tests
+```
+
+### Frontend Tests
+
+```bash
+cd apps/web
+npm run test              # Vitest unit tests (components, stores, utilities)
+npm run test:e2e          # Playwright end-to-end tests (headless)
+npm run test:e2e:ui       # Playwright with UI browser
+```
+
+---
+
+## Pull Request Process
+
+### Branch Naming
+
+Follow the convention: `<type>/<short-description>`
+
+| Type | Use for |
+|---|---|
+| `feat/` | New features |
+| `fix/` | Bug fixes |
+| `refactor/` | Code restructuring without behavior change |
+| `perf/` | Performance improvements |
+| `chore/` | Maintenance tasks, dependency updates |
+
+Examples: `feat/add-bigquery-dialect`, `fix/automation-duplicate-tick`, `perf/chat-preflight-parallel`.
+
+### PR Checklist
+
+Before opening a pull request:
+
+1. **Tests pass**: `uv run pytest tests/ -v -m "not gemini"` all green.
+2. **Lint passes**: `uv run ruff check .` and `npm run lint` clean.
+3. **Type checks pass**: `uv run mypy src/` and `npx tsc --noEmit` clean.
+4. **New decisions**: If your change introduces an architectural choice, add a decision record.
+5. **Migration**: If your change modifies the database schema, include an Alembic migration.
+6. **Chunk types**: If your change adds SSE chunk types, register them in both `sse/chunks.py` and `types/chat.ts`.
+7. **PR template**: Fill in the description with what, why, and how to test.
+8. **Decision records affected**: List any decisions your PR touches, supersedes, or creates.
+
+### CI Checks
+
+The CI pipeline runs on every PR:
+
+1. Backend: ruff, mypy, pytest (no LLM markers)
+2. Frontend: ESLint, TypeScript, Vitest
+3. Build: Verify both apps build without errors
 
 ---
 
@@ -501,19 +442,21 @@ The dev server proxies `/api/*` to `http://localhost:8000` via Next.js rewrites 
 
 ### Backend
 
-- All agent loops are `async def` functions that yield `ChatChunk` objects (via `AsyncGenerator[ChatChunk, None]`).
-- All DB calls in `async def` handlers must use `await asyncio.to_thread(...)`. The SQLite driver is synchronous C code; calling it directly on the event loop will block all concurrent requests.
-- Error messages returned to the LLM must not include Python tracebacks. `ToolRegistry.execute()` catches exceptions and returns `{"error": str(e)}` — keep error strings concise and actionable.
-- New feature toggles go in `FeatureToggles` in `admin/models.py` and must be surfaced in the admin UI via `FeatureToggles` component.
-- New services (like `AutomationService`, `DocumentService`, `DatasetService`) follow the same pattern: accept an SQLAlchemy `engine` in `__init__`, use `Session(self._engine)` context managers, and expose methods that return dicts (not ORM objects).
-- All new SQLAlchemy models go in `auth/models.py`. Use `_uuid()` for primary keys and `_utcnow()` for timestamps.
-- New API routers should be registered in `main.py` and follow the existing prefix convention (`/api/<module>`).
-- Synchronous storage services (like `R2StorageService`) must be called via `asyncio.to_thread()` from async handlers.
+- All agent loops are `async def` functions that yield `ChatChunk` objects via `AsyncGenerator`.
+- All synchronous DB calls in `async def` handlers must be wrapped in `await asyncio.to_thread(...)`. SQLAlchemy Core is synchronous; calling it directly blocks the event loop.
+- Error messages returned to the LLM must not include Python tracebacks.
+- New feature toggles go in the client-config route and must be surfaced in the admin UI.
+- New services follow the repository/service split pattern: accept an SQLAlchemy `engine` in `__init__`, use context managers, return plain dicts.
+- All new SQLAlchemy tables use `_uuid()` for primary keys and `_utcnow()` for timestamps.
+- New API routers mount at `/api/v1/<module>` and are registered in `main.py`.
+- Synchronous storage services (GCS, local FS) must be called via `asyncio.to_thread()`.
 
 ### Frontend
 
-- New chunk types must be added to `ChunkType` in `types/chat.ts` and handled in `chunks/chunk-renderer.tsx`.
-- New stores should be non-persisted by default. Only persist state that must survive a page refresh (conversation list, agent mode). Use `sessionStorage` for ephemeral session state, `localStorage` for true persistence.
-- All API calls go through `apiFetch` or `apiCall` in `lib/api.ts` — these attach credentials and base URL automatically.
-- New page routes go in `app/` using the Next.js App Router convention (directory with `page.tsx` and optional `layout.tsx`).
-- New TypeScript types go in `types/` — one file per domain (e.g., `automation.ts`, `dataset.ts`, `insight.ts`).
+- New chunk types must be added to `ChunkType` in `types/chat.ts` and handled in `components/chunks/chunk-renderer.tsx`.
+- New stores should be non-persisted by default. Use `sessionStorage` for session state, `localStorage` for true persistence.
+- All API calls go through `apiFetch` or `apiCall` in `lib/api.ts`.
+- New page routes follow Next.js App Router convention (directory with `page.tsx`).
+- New TypeScript types go in `types/` -- one file per domain.
+- Prefer `useCallback` for event handlers passed to children.
+- `React.memo` is used on expensive renderers (`AnswerChunk`, `InsightChunk`) to avoid re-parsing markdown on unrelated state updates.

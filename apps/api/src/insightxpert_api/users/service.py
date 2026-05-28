@@ -22,6 +22,10 @@ class EmailAlreadyExistsError(UsersServiceError):
     pass
 
 
+class WeakPasswordError(UsersServiceError):
+    pass
+
+
 class InvalidCredentialsError(UsersServiceError):
     pass
 
@@ -67,6 +71,32 @@ def invite(input: CreateUserInput) -> InviteResult:
     except sqlalchemy.exc.IntegrityError as e:
         raise EmailAlreadyExistsError(input.email) from e
     return InviteResult(user=_to_public(row), temp_password=temp)
+
+
+def register(email: str, password: str) -> User:
+    if len(password) < 8:
+        raise WeakPasswordError("Password must be at least 8 characters")
+    existing = repository.get_by_email(email)
+    if existing is not None:
+        raise EmailAlreadyExistsError(email)
+    now = _now()
+    row = UserWithHash(
+        id=str(uuid.uuid4()),
+        email=email,
+        password_hash=hash_password(password),
+        role="user",
+        is_active=True,
+        must_change_password=False,
+        sessions_valid_after=now,
+        created_at=now,
+        updated_at=now,
+        last_seen_at=None,
+    )
+    try:
+        repository.insert_user(row)
+    except sqlalchemy.exc.IntegrityError:
+        raise EmailAlreadyExistsError(email)
+    return _to_public(row)
 
 
 def authenticate(email: str, password: str) -> User | None:

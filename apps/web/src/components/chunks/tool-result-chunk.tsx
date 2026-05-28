@@ -5,7 +5,6 @@ import { ChevronRight, Table2 } from "lucide-react";
 import type { ChatChunk } from "@/types/chat";
 import { parseToolResult } from "@/lib/chunk-parser";
 import { DataTable } from "./data-table";
-import { useChatStore } from "@/stores/chat-store";
 import { Badge } from "@/components/ui/badge";
 import {
   Collapsible,
@@ -42,22 +41,6 @@ const ToolResultChunkInner = function ToolResultChunk({ chunk, parsedData, messa
   );
   const isAdvanced = chunk.data?.agent === "advanced" || chunk.data?.agent === "statistician" || chunk.data?.agent === "quant_analyst";
   const [open, setOpen] = useState(!isAdvanced);
-
-  // Subscribe to citation highlights scoped to this message. When a [^N]
-  // footnote in the answer above is clicked, the store records which row
-  // indices to flash; we forward them to DataTable.
-  const highlight = useChatStore((s) => s.messageHighlight);
-  const isOurHighlight =
-    highlight != null && messageId != null && highlight.messageId === messageId;
-  const highlightedRowIndices = isOurHighlight ? highlight.rowIndices : undefined;
-  const highlightTs = isOurHighlight ? highlight.ts : null;
-
-  // Auto-expand the table when a citation in our message is clicked, so the
-  // user actually sees the row that was highlighted.
-  React.useEffect(() => {
-    if (isOurHighlight && !open) setOpen(true);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [highlightTs]);
 
   if (!parsed) {
     const raw =
@@ -99,8 +82,6 @@ const ToolResultChunkInner = function ToolResultChunk({ chunk, parsedData, messa
             <DataTable
               columns={parsed.columns}
               rows={parsed.rows}
-              highlightedRowIndices={highlightedRowIndices}
-              highlightTs={highlightTs}
             />
           </div>
         </CollapsibleContent>
