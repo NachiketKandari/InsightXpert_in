@@ -358,6 +358,7 @@ async def run_profile_stream(
     tokens_before_out = int(getattr(llm, "output_tokens_used", 0) or 0)
     run_start = _time.perf_counter()
     stage_timings: dict[str, int] = {}
+    profile = None  # surviving reference for CancelledError path
 
     # Phase 1.4 — cap concurrent LLM-driven profile runs globally. Only
     # gate when an LLM stage will actually fire; the cheap schema+stats path
@@ -459,10 +460,10 @@ async def run_profile_stream(
             return profile
 
     except asyncio.CancelledError:
-        # Client disconnected mid-run. Re-raise so FastAPI / starlette can
-        # tear down cleanly instead of logging this as a real error (MF-PR-5).
+        # Connection closed mid-run. Log and return whatever profile we have
+        # so the caller can still persist schema + stats.
         log.info("profiling.run_cancelled", db_id=db_id)
-        raise
+        return profile
     except Exception as exc:
         log.error(
             "profiling.run_failed",

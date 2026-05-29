@@ -916,6 +916,12 @@ async def _run_profile_v2(
                         column_count=sum(len(t.columns) for t in profile.tables),
                     )
                 )
+    except asyncio.CancelledError:
+        # Task cancelled (client disconnect, shutdown).  run_profile_stream
+        # already returned what it had before the cancellation arrived, so the
+        # save + profile_done emission above already happened.  Swallow so the
+        # finally block can close the emitter cleanly.
+        log.info("profile.task_cancelled", db_id=db_id)
     except Exception as exc:
         log.warning("profile.run_failed", db_id=db_id, error=str(exc))
         if app is not None and user_id is not None:
