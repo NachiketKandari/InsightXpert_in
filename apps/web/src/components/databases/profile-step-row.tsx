@@ -51,6 +51,7 @@ export function ProfileStepRow({ step }: { step: ProfileStep }) {
       break;
     case "error":
       icon = <XCircle className="size-4 text-red-500" />;
+      detail = step.note?.replace(/^failed:\s*/, "") ?? null;
       tone = "text-red-600 dark:text-red-400";
       break;
   }
