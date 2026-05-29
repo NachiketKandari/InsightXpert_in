@@ -83,17 +83,18 @@ export default function DatabaseDetailPage({ params }: PageProps) {
     loadData();
   }, [loadData]);
 
-  // When a run succeeds or fails, show a toast. The profile refresh is skipped
-  // here to avoid an extra fetch; navigating away and back will load fresh data.
+  // When a run succeeds, refresh profile data so the UI updates immediately
+  // without requiring a page navigation. On failure, show an error toast.
   useEffect(() => {
     if (state.kind === "succeeded") {
       toast.success(
         `Profiled ${state.summary.table_count} tables · ${state.summary.column_count} columns`,
       );
+      loadData();
     } else if (state.kind === "failed") {
       toast.error(state.message);
     }
-  }, [state, dbId]);
+  }, [state, dbId, loadData]);
 
   const handleDeleteProfile = useCallback(async () => {
     if (!confirm("Delete all profiled data for this database? This cannot be undone.")) return;
