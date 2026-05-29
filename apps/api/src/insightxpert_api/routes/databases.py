@@ -61,7 +61,7 @@ from ..services.database_service import DatabaseService
 from ..services.profile_service import ProfileService
 from ..jobs.sample_questions_job import run_sample_questions_job
 from ..sample_questions import repository as sq_repo
-from ..sse.chunks import ChunkType, ProfileCostEstimatePayload, ProfileDonePayload
+from ..sse.chunks import ChunkType, ProfileCostEstimatePayload, ProfileDonePayload, ProfileErrorPayload
 from ..sse.emitter import EventEmitter
 from ..storage import build_store
 
@@ -916,6 +916,17 @@ async def _run_profile_v2(
                         column_count=sum(len(t.columns) for t in profile.tables),
                     )
                 )
+        else:
+            # Profiling returned no result (early CancelledError or unexpected
+            # failure). Emit a terminal error so the frontend doesn't just see
+            # the stream close with "connection closed before completion".
+            await emitter.emit(
+                ChunkType.profile_error,
+                ProfileErrorPayload(
+                    db_id=db_id,
+                    message="profiling did not produce a result",
+                ),
+            )
     except asyncio.CancelledError:
         # Task cancelled (client disconnect, shutdown).  run_profile_stream
         # already returned what it had before the cancellation arrived, so the
@@ -1047,8 +1058,8 @@ async def run_profile(
             provider=estimate.provider,
             model=estimate.model,
         )
-        asyncio.create_task(_emit_cost_estimate_and_close(emitter, payload))
-        return EventSourceResponse(emitter.stream())
+        _spawn_background_task(_emit_cost_estimate_and_close(emitter, payload))
+        return EventSourceResponse(emitter.stream(), ping=15)
 
     # Phase 1.4 — per-user daily cap on LLM-driven profile runs. Only
     # enforced when an LLM stage is on; the cheap schema+stats path is
@@ -1118,7 +1129,7 @@ async def run_profile(
             ref=ref,
         )
     )
-    return EventSourceResponse(emitter.stream())
+    return EventSourceResponse(emitter.stream(), ping=15)
 
 
 class VisibilityRequest(BaseModel):
