@@ -95,9 +95,15 @@ export function startProfileStream(
               return;
             }
             try {
-              const parsed = JSON.parse(data) as ProfileChunk;
-              if (parsed && typeof parsed === "object" && "type" in parsed && "payload" in parsed) {
-                callbacks.onChunk(parsed);
+              const parsed = JSON.parse(data);
+              if (parsed && typeof parsed === "object" && "type" in parsed) {
+                // Server sends `data` for the payload field (ChatChunk envelope);
+                // normalize to the `payload` key the state machine expects.
+                const chunk = {
+                  type: parsed.type,
+                  payload: parsed.data ?? parsed.payload,
+                } as ProfileChunk;
+                callbacks.onChunk(chunk);
               }
             } catch {
               // Drop malformed frames rather than tearing down the stream —
