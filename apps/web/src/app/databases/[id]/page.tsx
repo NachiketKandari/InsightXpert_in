@@ -4,6 +4,7 @@ import Link from "next/link";
 import { use, useCallback, useEffect, useState } from "react";
 import { ArrowLeft, Play, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { useQueryClient } from "@tanstack/react-query";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -61,6 +62,7 @@ export default function DatabaseDetailPage({ params }: PageProps) {
   const dbId = decodeURIComponent(rawId);
 
   const { isAdmin } = useCurrentUser();
+  const queryClient = useQueryClient();
   const [schema, setSchema] = useState<SchemaResponse | null>(null);
   const [profile, setProfile] = useState<DatabaseProfile | null>(null);
   const [profileLoading, setProfileLoading] = useState(true);
@@ -119,10 +121,11 @@ export default function DatabaseDetailPage({ params }: PageProps) {
         `Profiled ${state.summary.table_count} tables · ${state.summary.column_count} columns`,
       );
       loadData();
+      void queryClient.invalidateQueries({ queryKey: ["databases", "list"] });
     } else if (state.kind === "failed") {
       toast.error(state.message);
     }
-  }, [state, dbId, loadData]);
+  }, [state, dbId, loadData, queryClient]);
 
   const handleDeleteProfile = useCallback(async () => {
     if (!confirm("Delete all profiled data for this database? This cannot be undone.")) return;

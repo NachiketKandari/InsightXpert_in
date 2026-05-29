@@ -200,8 +200,9 @@ export function WelcomeScreen({ onSendMessage, onStop, isStreaming }: WelcomeScr
   useEffect(() => {
     if (profileState.kind === "succeeded") {
       ensure.mutate();
+      void queryClient.invalidateQueries({ queryKey: ["databases", "list"] });
     }
-  }, [profileState.kind, ensure]);
+  }, [profileState.kind, ensure, queryClient]);
 
   // Clear profiling UI on failure after a short delay.
   useEffect(() => {
