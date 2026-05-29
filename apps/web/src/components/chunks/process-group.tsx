@@ -45,7 +45,7 @@ function getGroupTitle(chunks: { chunk: ChatChunk }[], isGroupActive: boolean): 
   
   const last = chunks[chunks.length - 1]?.chunk;
   if (last?.type === "status") {
-    const msg = (last.data?.message as string) ?? last.content ?? "";
+    const msg = (last.data?.message as string) ?? (last.data?.content as string) ?? last.content ?? "";
     if (msg) return msg;
   }
   if (last?.type === "tool_call") {
