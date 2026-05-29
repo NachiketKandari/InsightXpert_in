@@ -70,8 +70,8 @@ def test_upload_csv_schema_is_queryable(authed_client: TestClient):
     body = r.json()
     assert "CREATE TABLE" in body["ddl"].upper()
     assert len(body["tables"]) >= 1
-    # The table name is derived from the db_id slug.
-    assert any("test_csv_schema" in t.lower() for t in body["tables"])
+    # CSV files are imported with table name "data" (sheet-derived naming).
+    assert "data" in body["tables"]
 
 
 def test_upload_csv_multitype_columns(authed_client: TestClient):

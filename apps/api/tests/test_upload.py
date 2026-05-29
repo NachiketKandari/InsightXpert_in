@@ -25,7 +25,8 @@ if TYPE_CHECKING:
 
 
 def test_file_to_dataframe_csv_utf8():
-    df, meta = _file_to_dataframe(b"a,b\n1,2\n3,4\n", "test.csv")
+    dfs, meta = _file_to_dataframe(b"a,b\n1,2\n3,4\n", "test.csv")
+    df = dfs["data"]
     assert len(df) == 2
     assert list(df.columns) == ["a", "b"]
     assert meta["encoding"] == "utf-8"
@@ -34,15 +35,15 @@ def test_file_to_dataframe_csv_utf8():
 
 def test_file_to_dataframe_csv_latin1():
     csv = "näme,scöre\nJürgen,95\n".encode("latin-1")
-    df, meta = _file_to_dataframe(csv, "latin1.csv")
-    assert len(df) == 1
+    dfs, meta = _file_to_dataframe(csv, "latin1.csv")
+    assert len(dfs["data"]) == 1
     assert meta["encoding"] == "latin-1"
 
 
 def test_file_to_dataframe_csv_cp1252():
     csv = "name,value\nJos\xe9,100\n".encode("cp1252")
-    df, meta = _file_to_dataframe(csv, "cp1252.csv")
-    assert len(df) == 1
+    dfs, meta = _file_to_dataframe(csv, "cp1252.csv")
+    assert len(dfs["data"]) == 1
     # latin-1 parses cp1252 byte sequences without error, so it may be
     # detected as latin-1 before cp1252 is tried.
     assert meta["encoding"] in ("latin-1", "cp1252")
@@ -57,7 +58,8 @@ def test_file_to_dataframe_xlsx():
     buf = io.BytesIO()
     wb.save(buf)
 
-    df, meta = _file_to_dataframe(buf.getvalue(), "test.xlsx")
+    dfs, meta = _file_to_dataframe(buf.getvalue(), "test.xlsx")
+    df = dfs["Sheet"]
     assert len(df) == 2
     assert list(df.columns)[:2] == ["product", "price"]
     assert meta["sheet_name"] == "Sheet"
@@ -72,10 +74,14 @@ def test_file_to_dataframe_multi_sheet():
     buf = io.BytesIO()
     wb.save(buf)
 
-    df, meta = _file_to_dataframe(buf.getvalue(), "multi.xlsx")
+    dfs, meta = _file_to_dataframe(buf.getvalue(), "multi.xlsx")
     assert len(meta["sheet_names"]) == 2
     assert meta["sheet_name"] == "Data"
-    assert len(df) == 0  # only header, no data rows
+    # Both sheets are now returned — Data has a header row, Notes is empty.
+    assert len(dfs) == 2
+    assert "Data" in dfs
+    assert "Notes" in dfs
+    assert len(dfs["Data"]) == 0  # only header, no data rows
 
 
 def test_file_to_dataframe_empty_csv():
@@ -86,7 +92,8 @@ def test_file_to_dataframe_empty_csv():
 
 def test_file_to_dataframe_empty_csv_headers_only():
     """CSV with headers but no data rows -> 0-row DataFrame (not an error)."""
-    df, meta = _file_to_dataframe(b"col1,col2\n", "headers.csv")
+    dfs, meta = _file_to_dataframe(b"col1,col2\n", "headers.csv")
+    df = dfs["data"]
     assert len(df) == 0
     assert len(df.columns) == 2
 
@@ -200,6 +207,10 @@ def test_upload_preview_csv(user_client):
     assert len(data["preview_rows"]) == 2
     assert data["preview_rows"][0]["name"] == "Alice"
     assert data["preview_rows"][0]["age"] == "30"
+    # CSV files get a single "data" sheet in the sheets array.
+    assert data["sheets"] is not None
+    assert len(data["sheets"]) == 1
+    assert data["sheets"][0]["sheet_name"] == "data"
 
 
 @pytest.mark.xfail(reason="fresh_db fixture broken — alembic configured for Postgres, not SQLite")
@@ -224,6 +235,9 @@ def test_upload_preview_xlsx(user_client):
     assert len(data["columns"]) == 2
     assert len(data["preview_rows"]) == 1
     assert data["preview_rows"][0]["item"] == "Apple"
+    # XLSX files now return per-sheet metadata.
+    assert data["sheets"] is not None
+    assert len(data["sheets"]) == 1
 
 
 @pytest.mark.xfail(reason="fresh_db fixture broken — alembic configured for Postgres, not SQLite")
@@ -271,3 +285,9 @@ def test_upload_csv_xlsx(user_client):
     assert data["db_id"] == "test_xlsx_upload"
     assert data["source"] == "uploaded"
     assert data["profile_required"] is True
+
+    # Schema should show the imported table (sheet name sanitized).
+    schema_resp = client.get("/api/v1/databases/test_xlsx_upload/schema")
+    assert schema_resp.status_code == 200
+    schema = schema_resp.json()
+    assert "Sheet" in schema["tables"] or any("sheet" in t.lower() for t in schema["tables"])

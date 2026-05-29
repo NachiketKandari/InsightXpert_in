@@ -17,7 +17,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { SSE_BASE_URL } from "@/lib/constants";
 import { useChatStore } from "@/stores/chat-store";
-import type { DatabaseUploadResponse, UploadPreviewResponse } from "@/types/database";
+import type { DatabaseUploadResponse, SheetPreview, UploadPreviewResponse } from "@/types/database";
 import { apiFetch } from "@/lib/api";
 
 const ACCEPTED_EXTS = [".csv", ".xlsx", ".xls"];
@@ -70,6 +70,7 @@ export function CsvUploadDialog({
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<UploadPreviewResponse | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [activeSheetIndex, setActiveSheetIndex] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const xhrRef = useRef<XMLHttpRequest | null>(null);
 
@@ -84,6 +85,7 @@ export function CsvUploadDialog({
     setUploadProgress(0);
     setPreview(null);
     setPreviewLoading(false);
+    setActiveSheetIndex(0);
     if (xhrRef.current) {
       xhrRef.current.abort();
       xhrRef.current = null;
@@ -243,6 +245,16 @@ export function CsvUploadDialog({
   const fileExt = file ? "." + file.name.split(".").pop()?.toLowerCase() : null;
   const isExcel = fileExt === ".xlsx" || fileExt === ".xls";
 
+  // When preview has per-sheet data, derive active sheet from index.
+  const activeSheet: SheetPreview | null =
+    preview?.sheets && preview.sheets.length > activeSheetIndex
+      ? preview.sheets[activeSheetIndex]
+      : null;
+  const activeColumns = activeSheet?.columns ?? preview?.columns ?? [];
+  const activePreviewRows = activeSheet?.preview_rows ?? preview?.preview_rows ?? [];
+  const activeRowCount = activeSheet?.row_count ?? preview?.row_count ?? 0;
+  const sheetCount = preview?.sheets?.length ?? (preview?.sheet_names?.length ?? 0);
+
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
@@ -318,13 +330,13 @@ export function CsvUploadDialog({
             <div className="rounded-lg border border-border/60 bg-muted/20 p-3 space-y-2">
               <div className="flex items-center justify-between">
                 <p className="text-xs font-medium">
-                  Preview — {preview.row_count.toLocaleString()} row{preview.row_count !== 1 ? "s" : ""}
+                  Preview — {activeRowCount.toLocaleString()} row{activeRowCount !== 1 ? "s" : ""}
                 </p>
                 {preview.sheet_name && (
                   <span className="text-[10px] text-muted-foreground">
                     Sheet: {preview.sheet_name}
-                    {preview.sheet_names && preview.sheet_names.length > 1 &&
-                      ` (of ${preview.sheet_names.length})`}
+                    {sheetCount > 1 &&
+                      ` (of ${sheetCount})`}
                   </span>
                 )}
                 {preview.encoding && preview.encoding !== "utf-8" && (
@@ -334,30 +346,52 @@ export function CsvUploadDialog({
                 )}
               </div>
 
+              {/* Sheet selector for multi-sheet files */}
+              {sheetCount > 1 && (
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-[10px] font-medium text-muted-foreground">Sheets:</span>
+                  {preview.sheet_names?.map((name, i) => (
+                    <button
+                      key={name}
+                      type="button"
+                      onClick={() => setActiveSheetIndex(i)}
+                      className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${
+                        i === activeSheetIndex
+                          ? "bg-primary text-primary-foreground"
+                          : "bg-muted hover:bg-muted-foreground/15 text-muted-foreground"
+                      }`}
+                    >
+                      {name}
+                      {preview.sheets?.[i] && ` (${preview.sheets[i].row_count})`}
+                    </button>
+                  ))}
+                </div>
+              )}
+
               {/* Data rows preview */}
-              {preview.preview_rows.length > 0 && (
+              {activePreviewRows.length > 0 && (
                 <div className="space-y-1">
                   <p className="text-[10px] font-medium text-muted-foreground">Data Preview</p>
                   <div className="overflow-x-auto rounded border border-border/30">
                     <table className="w-full text-[11px]">
                       <thead>
                         <tr className="border-b border-border/40 bg-muted/30">
-                          {preview.columns.slice(0, 10).map((col) => (
+                          {activeColumns.slice(0, 10).map((col) => (
                             <th key={col.name} className="text-left py-1 px-2 font-medium text-muted-foreground whitespace-nowrap">
                               {col.name}
                             </th>
                           ))}
-                          {preview.columns.length > 10 && (
+                          {activeColumns.length > 10 && (
                             <th className="text-left py-1 px-2 font-medium text-muted-foreground">
-                              +{preview.columns.length - 10} more
+                              +{activeColumns.length - 10} more
                             </th>
                           )}
                         </tr>
                       </thead>
                       <tbody>
-                        {preview.preview_rows.map((row, i) => (
+                        {activePreviewRows.map((row, i) => (
                           <tr key={i} className="border-b border-border/20 last:border-0">
-                            {preview.columns.slice(0, 10).map((col) => (
+                            {activeColumns.slice(0, 10).map((col) => (
                               <td key={col.name} className="py-1 px-2 whitespace-nowrap truncate max-w-[150px]">
                                 {row[col.name] ?? ""}
                               </td>
@@ -367,9 +401,9 @@ export function CsvUploadDialog({
                       </tbody>
                     </table>
                   </div>
-                  {preview.row_count > 5 && (
+                  {activeRowCount > 5 && (
                     <p className="text-[10px] text-muted-foreground">
-                      Showing first 5 of {preview.row_count.toLocaleString()} rows
+                      Showing first 5 of {activeRowCount.toLocaleString()} rows
                     </p>
                   )}
                 </div>
@@ -385,7 +419,7 @@ export function CsvUploadDialog({
                     </tr>
                   </thead>
                   <tbody>
-                    {preview.columns.slice(0, 15).map((col) => (
+                    {activeColumns.slice(0, 15).map((col) => (
                       <tr key={col.name} className="border-b border-border/20 last:border-0">
                         <td className="py-1 pr-2 font-mono truncate max-w-[120px]">{col.name}</td>
                         <td className="py-1 pr-2">
@@ -398,10 +432,10 @@ export function CsvUploadDialog({
                         </td>
                       </tr>
                     ))}
-                    {preview.columns.length > 15 && (
+                    {activeColumns.length > 15 && (
                       <tr>
                         <td colSpan={3} className="py-1 text-[10px] text-muted-foreground text-center">
-                          …and {preview.columns.length - 15} more columns
+                          …and {activeColumns.length - 15} more columns
                         </td>
                       </tr>
                     )}
@@ -409,9 +443,9 @@ export function CsvUploadDialog({
                 </table>
               </div>
 
-              {isExcel && preview.sheet_names && preview.sheet_names.length > 1 && (
+              {sheetCount > 1 && (
                 <p className="text-[10px] text-muted-foreground">
-                  This Excel file has {preview.sheet_names.length} sheets. Using the first sheet: &ldquo;{preview.sheet_name}&rdquo;.
+                  {sheetCount} sheets will be imported as {sheetCount} separate tables.
                 </p>
               )}
             </div>

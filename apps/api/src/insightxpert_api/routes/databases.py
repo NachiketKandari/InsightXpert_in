@@ -117,6 +117,13 @@ class PreviewColumn(BaseModel):
     distinct_count: int
 
 
+class SheetPreview(BaseModel):
+    sheet_name: str
+    columns: list[PreviewColumn]
+    preview_rows: list[dict[str, str]]
+    row_count: int
+
+
 class UploadPreviewResponse(BaseModel):
     columns: list[PreviewColumn]
     preview_rows: list[dict[str, str]]
@@ -124,6 +131,7 @@ class UploadPreviewResponse(BaseModel):
     encoding: str | None = None
     sheet_name: str | None = None
     sheet_names: list[str] | None = None
+    sheets: list[SheetPreview] | None = None
     file_size_bytes: int
 
 
@@ -272,12 +280,16 @@ async def upload_database(
     return UploadResponse(db_id=ref.db_id, source=ref.source)
 
 
-def _file_to_dataframe(raw_bytes: bytes, filename: str) -> tuple["pd.DataFrame", dict]:
-    """Parse CSV or Excel file into a DataFrame with metadata.
+def _file_to_dataframe(raw_bytes: bytes, filename: str) -> tuple[dict[str, "pd.DataFrame"], dict]:
+    """Parse CSV or Excel file into DataFrames with metadata.
 
-    Returns (dataframe, metadata) where metadata includes encoding, sheet info,
-    and original row count. Does NOT sanitise column names — that happens in
-    ``_dataframe_to_sqlite`` so preview can show original names.
+    Returns (dataframes_dict, metadata) where dataframes_dict maps sheet name
+    to DataFrame. For CSV files the dict has a single key ``"data"``. For XLSX
+    files every sheet becomes its own entry. Metadata includes encoding, sheet
+    info, and per-sheet row counts.
+
+    Does NOT sanitise column names — that happens in ``_dataframe_to_sqlite``
+    so preview can show original names.
     """
     import pandas as pd  # always available (in pyproject.toml dependencies)
 
@@ -307,21 +319,25 @@ def _file_to_dataframe(raw_bytes: bytes, filename: str) -> tuple["pd.DataFrame",
 
         sheet_names: list = xls.sheet_names
         meta["sheet_names"] = sheet_names
-        sheet_name = sheet_names[0]
-        meta["sheet_name"] = sheet_name
+        meta["sheet_name"] = sheet_names[0]
 
+        # Read all sheets — sheet_name=None returns dict[str, DataFrame].
         try:
-            df = pd.read_excel(xls, sheet_name=sheet_name, dtype=object)
+            dfs = pd.read_excel(xls, sheet_name=None, dtype=object)
         except Exception as exc:
-            raise HTTPException(status_code=400, detail=f"Could not read sheet '{sheet_name}': {exc}") from exc
+            raise HTTPException(status_code=400, detail=f"Could not read Excel file: {exc}") from exc
         finally:
             xls.close()
 
+        meta["original_rows"] = sum(len(d) for d in dfs.values())
         if len(sheet_names) > 1:
-            log.info("multi_sheet_excel", filename=filename, sheets=sheet_names, using=sheet_name)
-
-        meta["original_rows"] = len(df)
-        return df, meta
+            log.info(
+                "multi_sheet_excel",
+                filename=filename,
+                sheets=sheet_names,
+                per_sheet_rows={k: len(v) for k, v in dfs.items()},
+            )
+        return dfs, meta
 
     # CSV path — encoding detection via fallback chain.
     encodings = ["utf-8", "latin-1", "cp1252"]
@@ -348,7 +364,7 @@ def _file_to_dataframe(raw_bytes: bytes, filename: str) -> tuple["pd.DataFrame",
         raise HTTPException(status_code=400, detail="File has no data rows.")
 
     meta["original_rows"] = len(df)
-    return df, meta
+    return {"data": df}, meta
 
 
 def _infer_column_types(df: "pd.DataFrame") -> dict[str, str]:
@@ -467,6 +483,107 @@ def _dataframe_to_sqlite(df: "pd.DataFrame", db_id: str) -> bytes:
     return bytes(blob)
 
 
+def _sheet_name_to_table(sheet_name: str) -> str:
+    """Sanitize an Excel sheet name to a valid SQLite table name.
+
+    Lowercase, replace non-alphanumeric with underscore, prefix digit-leading
+    names with ``t_``. Empty names become ``unnamed``.
+    """
+    safe = re.sub(r"[^a-z0-9_]", "_", sheet_name.lower().strip())
+    if not safe:
+        safe = "unnamed"
+    if safe[0].isdigit():
+        safe = f"t_{safe}"
+    return safe
+
+
+def _dataframes_to_sqlite(dfs: dict[str, "pd.DataFrame"]) -> bytes:
+    """Write multiple DataFrames to a single in-memory SQLite database.
+
+    Each key in ``dfs`` becomes a table (after sanitisation via
+    ``_sheet_name_to_table``). Returns the serialised SQLite bytes.
+
+    Deduplicates table names when two sheet names sanitise to the same value
+    by appending ``_2``, ``_3``, etc.
+    """
+    import pandas as pd
+
+    con = sqlite3.connect(":memory:")
+    used_names: dict[str, int] = {}
+
+    for sheet_name, df in dfs.items():
+        # --- Sanitise column names (same as _dataframe_to_sqlite) ---
+        rename_map = {}
+        for col in df.columns:
+            safe = re.sub(r"[^a-zA-Z0-9_]", "_", str(col).strip())
+            if not safe or safe[0].isdigit():
+                safe = f"col_{safe}"
+            rename_map[col] = safe
+        df = df.rename(columns=rename_map)
+
+        seen: dict[str, int] = {}
+        final_cols: list[str] = []
+        for col in df.columns:
+            if col in seen:
+                seen[col] += 1
+                final_cols.append(f"{col}_{seen[col]}")
+            else:
+                seen[col] = 0
+                final_cols.append(col)
+        df.columns = pd.Index(final_cols)
+
+        col_types = _infer_column_types(df)
+
+        # --- Sanitise sheet name → table name ---
+        base = _sheet_name_to_table(sheet_name)
+        if base in used_names:
+            used_names[base] += 1
+            table_name = f"{base}_{used_names[base]}"
+        else:
+            used_names[base] = 1
+            table_name = base
+
+        cols_ddl = ", ".join(f'"{col}" {col_types[col]}' for col in df.columns)
+        con.execute(f'CREATE TABLE "{table_name}" ({cols_ddl})')
+
+        def _coerce(val: object, col_type: str) -> object:
+            if val is None or (isinstance(val, float) and val != val):
+                return None
+            if col_type == "INTEGER":
+                try:
+                    return int(float(str(val)))
+                except (ValueError, TypeError):
+                    return None
+            if col_type == "REAL":
+                try:
+                    return float(str(val))
+                except (ValueError, TypeError):
+                    return None
+            return str(val)
+
+        placeholders = ", ".join("?" * len(df.columns))
+        col_list = ", ".join(f'"{c}"' for c in df.columns)
+        batch: list[tuple[object, ...]] = []
+        for row in df.itertuples(index=False, name=None):
+            batch.append(tuple(_coerce(v, col_types[c]) for v, c in zip(row, df.columns)))
+            if len(batch) >= 500:
+                con.executemany(
+                    f'INSERT INTO "{table_name}" ({col_list}) VALUES ({placeholders})',
+                    batch,
+                )
+                batch.clear()
+        if batch:
+            con.executemany(
+                f'INSERT INTO "{table_name}" ({col_list}) VALUES ({placeholders})',
+                batch,
+            )
+
+    con.commit()
+    blob = con.serialize()
+    con.close()
+    return bytes(blob)
+
+
 @router.post("/upload-csv", response_model=UploadResponse)
 async def upload_csv(
     db_id: str = Form(...),
@@ -474,7 +591,7 @@ async def upload_csv(
     cu: CurrentUser = Depends(get_current_user),
     settings: Settings = Depends(get_settings),
 ) -> UploadResponse:
-    """Convert an uploaded CSV or Excel file to a single-table SQLite and register it.
+    """Convert an uploaded CSV or Excel file to SQLite and register it.
 
     Supports ``.csv``, ``.xlsx``, and ``.xls``. Mirrors ``upload_database``
     defences (MF-PR-1/2/4):
@@ -483,6 +600,9 @@ async def upload_csv(
       * Empty body → 400.
       * Malformed CSV/Excel → 400.
       * db_id validation (path-traversal guard).
+
+    Multi-sheet Excel files import every sheet as a separate table within the
+    same SQLite database. CSV files produce a single table named ``"data"``.
     """
     _validate_db_id(db_id)
 
@@ -526,11 +646,11 @@ async def upload_csv(
 
     raw_bytes = b"".join(chunks)
 
-    # Parse file → DataFrame (blocking CPU work; run in thread pool).
-    df, _meta = await asyncio.to_thread(_file_to_dataframe, raw_bytes, filename)
+    # Parse file → dict[str, DataFrame] (blocking CPU work; run in thread pool).
+    dfs, _meta = await asyncio.to_thread(_file_to_dataframe, raw_bytes, filename)
 
-    # Convert DataFrame → SQLite.
-    sqlite_bytes = await asyncio.to_thread(_dataframe_to_sqlite, df, db_id)
+    # Convert DataFrames → multi-table SQLite.
+    sqlite_bytes = await asyncio.to_thread(_dataframes_to_sqlite, dfs)
 
     svc = _db_svc(settings)
     ref = svc.save_upload(cu.id, db_id, sqlite_bytes)
@@ -543,6 +663,7 @@ async def upload_csv(
 @router.post("/upload-preview", response_model=UploadPreviewResponse)
 async def upload_preview(
     file: UploadFile = File(...),
+    sheet: str | None = None,
     cu: CurrentUser = Depends(get_current_user),
     settings: Settings = Depends(get_settings),
 ) -> UploadPreviewResponse:
@@ -550,6 +671,10 @@ async def upload_preview(
 
     Returns column metadata, inferred types, sample values, row count,
     and sheet information. Read-only — nothing is persisted.
+
+    For multi-sheet Excel files, ``sheet`` selects which sheet to preview
+    (defaults to the first sheet). The response includes a ``sheets`` field
+    with per-sheet metadata for all sheets.
     """
     import pandas as pd
 
@@ -580,20 +705,58 @@ async def upload_preview(
 
     raw_bytes = b"".join(chunks)
 
-    df, meta = await asyncio.to_thread(_file_to_dataframe, raw_bytes, filename)
-    col_types = _infer_column_types(df)
+    dfs, meta = await asyncio.to_thread(_file_to_dataframe, raw_bytes, filename)
+
+    # Choose which sheet to show in the main preview.
+    sheet_names = meta.get("sheet_names", list(dfs.keys()))
+    active_sheet = sheet if sheet and sheet in dfs else sheet_names[0]
+
+    # Build per-sheet previews.
+    sheets: list[SheetPreview] = []
+    total_row_count = 0
+    for sname, sdf in dfs.items():
+        s_col_types = _infer_column_types(sdf)
+        s_columns: list[PreviewColumn] = []
+        for col in sdf.columns:
+            series = sdf[col]
+            non_null = series.dropna()
+            nn_vals = non_null.astype(str).tolist()
+            sample = nn_vals[:3] + nn_vals[-2:] if len(nn_vals) > 5 else nn_vals[:5]
+            s_columns.append(
+                PreviewColumn(
+                    name=str(col),
+                    inferred_type=s_col_types.get(col, "TEXT"),
+                    sample_values=sample,
+                    null_count=int(series.isna().sum()),
+                    distinct_count=int(series.nunique()),
+                )
+            )
+        s_rows: list[dict[str, str]] = (
+            sdf.head(5).fillna("").astype(str).to_dict(orient="records")
+        )
+        sheets.append(
+            SheetPreview(
+                sheet_name=sname,
+                columns=s_columns,
+                preview_rows=s_rows,
+                row_count=len(sdf),
+            )
+        )
+        total_row_count += len(sdf)
+
+    active_df = dfs[active_sheet]
+    active_types = _infer_column_types(active_df)
 
     columns: list[PreviewColumn] = []
-    for col in df.columns:
-        series = df[col]
+    for col in active_df.columns:
+        series = active_df[col]
         non_null = series.dropna()
-        # Sample: first 3 + last 2 non-null values.
         nn_vals = non_null.astype(str).tolist()
         sample = nn_vals[:3] + nn_vals[-2:] if len(nn_vals) > 5 else nn_vals[:5]
         columns.append(
             PreviewColumn(
                 name=str(col),
-                inferred_type=col_types.get(col, "TEXT"),
+                inferred_type=active_types.get(col, "TEXT"),
                 sample_values=sample,
                 null_count=int(series.isna().sum()),
                 distinct_count=int(series.nunique()),
@@ -601,16 +764,17 @@ async def upload_preview(
         )
 
     preview_rows: list[dict[str, str]] = (
-        df.head(5).fillna("").astype(str).to_dict(orient="records")
+        active_df.head(5).fillna("").astype(str).to_dict(orient="records")
     )
 
     return UploadPreviewResponse(
         columns=columns,
         preview_rows=preview_rows,
-        row_count=len(df),
+        row_count=total_row_count,
         encoding=meta.get("encoding"),
-        sheet_name=meta.get("sheet_name"),
-        sheet_names=meta.get("sheet_names"),
+        sheet_name=active_sheet,
+        sheet_names=[s.sheet_name for s in sheets],
+        sheets=sheets,
         file_size_bytes=len(raw_bytes),
     )
 

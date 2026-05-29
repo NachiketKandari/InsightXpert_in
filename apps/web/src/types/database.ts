@@ -40,6 +40,13 @@ export interface PreviewColumn {
   distinct_count: number;
 }
 
+export interface SheetPreview {
+  sheet_name: string;
+  columns: PreviewColumn[];
+  preview_rows: Record<string, string>[];
+  row_count: number;
+}
+
 export interface UploadPreviewResponse {
   columns: PreviewColumn[];
   preview_rows: Record<string, string>[];
@@ -47,6 +54,7 @@ export interface UploadPreviewResponse {
   encoding: string | null;
   sheet_name: string | null;
   sheet_names: string[] | null;
+  sheets: SheetPreview[] | null;
   file_size_bytes: number;
 }
 
