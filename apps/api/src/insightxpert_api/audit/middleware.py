@@ -10,8 +10,9 @@ from __future__ import annotations
 import re
 from typing import Awaitable, Callable
 
-from fastapi import FastAPI, Request, Response
-from starlette.middleware.base import BaseHTTPMiddleware
+from typing import Callable
+
+from fastapi import FastAPI, Request
 
 from ..auth.session import SessionSigner
 from ..config import get_settings
@@ -147,41 +148,61 @@ def _user_id_from_cookie(request: Request) -> str | None:
         return None
 
 
-class AuditMiddleware(BaseHTTPMiddleware):
-    async def dispatch(
-        self,
-        request: Request,
-        call_next: Callable[[Request], Awaitable[Response]],
-    ) -> Response:
-        # Process the request first; audit after we know the status code.
-        response = await call_next(request)
+class AuditMiddleware:
+    def __init__(self, app: Callable) -> None:
+        self.app = app
+
+    async def __call__(self, scope: dict, receive: Callable, send: Callable) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        request = Request(scope, receive=receive)
+        method = request.method.upper()
+        if method in _SKIP_METHODS:
+            await self.app(scope, receive, send)
+            return
+
+        status_code: int | None = None
+
+        async def _send(message: dict) -> None:
+            nonlocal status_code
+            if message["type"] == "http.response.start":
+                status_code = message.get("status", 0)
+            await send(message)
+
         try:
-            method = request.method.upper()
-            if method in _SKIP_METHODS:
-                return response
-            path = request.url.path
-            resource_type, resource_id = _classify(path)
-            user_id = _user_id_from_cookie(request)
-            ip = request.client.host if request.client else None
-            ua = request.headers.get("user-agent")
-            row = AuditRow(
-                user_id=user_id,
-                method=method,
-                path=path,
-                resource_type=resource_type,
-                resource_id=resource_id,
-                status_code=response.status_code,
-                ip=ip,
-                user_agent=ua,
-            )
-            await get_queue().put(row)
-        except Exception as exc:  # noqa: BLE001 — never fail the user request
-            log.error(
-                "audit.middleware_failed",
-                error=str(exc),
-                error_type=type(exc).__name__,
-            )
-        return response
+            await self.app(scope, receive, _send)
+        except Exception:
+            status_code = status_code or 500
+            raise
+        finally:
+            try:
+                path = request.url.path
+                resource_type, resource_id = _classify(path)
+                user_id = _user_id_from_cookie(request)
+                ip = request.client.host if request.client else None
+                ua = request.headers.get("user-agent")
+                
+                sc = status_code if status_code is not None else 500
+
+                row = AuditRow(
+                    user_id=user_id,
+                    method=method,
+                    path=path,
+                    resource_type=resource_type,
+                    resource_id=resource_id,
+                    status_code=sc,
+                    ip=ip,
+                    user_agent=ua,
+                )
+                await get_queue().put(row)
+            except Exception as exc:  # noqa: BLE001 — never fail the user request
+                log.error(
+                    "audit.middleware_failed",
+                    error=str(exc),
+                    error_type=type(exc).__name__,
+                )
 
 
 def register(app: FastAPI) -> None:
