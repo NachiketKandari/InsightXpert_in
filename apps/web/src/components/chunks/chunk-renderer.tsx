@@ -107,10 +107,11 @@ function ChunkRendererInner({ chunk, isComplete, isStreaming, enrichmentTraces, 
 
   const willShowChart = useMemo(() => {
     if (!parsed) return false;
-    const ct =
-      suggestedChartType && VALID_CHART_TYPES.has(suggestedChartType)
+    const llmChoice =
+      suggestedChartType && VALID_CHART_TYPES.has(suggestedChartType) && suggestedChartType !== "table"
         ? suggestedChartType
-        : detectChartType(parsed.columns, parsed.rows);
+        : null;
+    const ct = llmChoice ?? detectChartType(parsed.columns, parsed.rows);
     return ct !== "none" && ct !== "table";
   }, [parsed, suggestedChartType]);
 
