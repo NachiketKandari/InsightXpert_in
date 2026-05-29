@@ -155,8 +155,8 @@ export default function UsersPage() {
         </Button>
       </div>
 
-      <div className="rounded-lg border border-border bg-card">
-        <div className="grid grid-cols-[1.5fr_0.8fr_0.6fr_1fr_auto] gap-3 border-b border-border px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+      <div className="rounded-lg border border-border bg-card overflow-x-auto">
+        <div className="grid grid-cols-[1.5fr_0.8fr_0.6fr_1fr_auto] min-w-[700px] gap-3 border-b border-border px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
           <div>Email</div>
           <div>Role</div>
           <div>Active</div>
@@ -181,7 +181,7 @@ export default function UsersPage() {
         {users.map((u) => (
           <div
             key={u.id}
-            className="grid grid-cols-[1.5fr_0.8fr_0.6fr_1fr_auto] items-center gap-3 border-b border-border/50 px-4 py-2 text-sm last:border-b-0"
+            className="grid grid-cols-[1.5fr_0.8fr_0.6fr_1fr_auto] min-w-[700px] items-center gap-3 border-b border-border/50 px-4 py-2 text-sm last:border-b-0"
           >
             <div className="truncate">
               <span className="font-medium">{u.email}</span>

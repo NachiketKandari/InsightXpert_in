@@ -71,7 +71,7 @@ export default function DatabasesPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-end justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold">Databases</h2>
           <p className="text-sm text-muted-foreground">
@@ -79,7 +79,7 @@ export default function DatabasesPage() {
             control who can query each one.
           </p>
         </div>
-        <div className="w-64">
+        <div className="w-full sm:w-64">
           <Input
             placeholder="Filter by db_id or owner email"
             value={filter}
@@ -88,8 +88,8 @@ export default function DatabasesPage() {
         </div>
       </div>
 
-      <div className="rounded-lg border border-border bg-card">
-        <div className="grid grid-cols-[1.5fr_1.2fr_0.8fr_0.8fr_0.9fr_auto] gap-3 border-b border-border px-5 py-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+      <div className="rounded-lg border border-border bg-card overflow-x-auto">
+        <div className="grid grid-cols-[1.5fr_1.2fr_0.8fr_0.8fr_0.9fr_auto] min-w-[800px] gap-3 border-b border-border px-5 py-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
           <div>Database</div>
           <div>Owner</div>
           <div>Visibility</div>
@@ -123,7 +123,7 @@ export default function DatabasesPage() {
           return (
             <div
               key={d.db_id}
-              className="grid grid-cols-[1.5fr_1.2fr_0.8fr_0.8fr_0.9fr_auto] items-center gap-3 border-b border-border/50 px-5 py-3 text-sm last:border-b-0"
+              className="grid grid-cols-[1.5fr_1.2fr_0.8fr_0.8fr_0.9fr_auto] min-w-[800px] items-center gap-3 border-b border-border/50 px-5 py-3 text-sm last:border-b-0"
             >
               <div className="font-mono text-xs">{d.db_id}</div>
               <div className="text-xs text-muted-foreground truncate">

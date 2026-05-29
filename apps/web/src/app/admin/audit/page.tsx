@@ -116,67 +116,72 @@ export default function AuditPage() {
   ];
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h2 className="text-lg font-semibold">Audit log</h2>
-        <p className="text-sm text-muted-foreground">
-          Every admin / mutating request, reverse-chronological.
-        </p>
+    <div className="flex flex-col" style={{ minHeight: "calc(100vh - 9rem)" }}>
+      <div className="shrink-0 space-y-4">
+        <div>
+          <h2 className="text-lg font-semibold">Audit log</h2>
+          <p className="text-sm text-muted-foreground">
+            Every admin / mutating request, reverse-chronological.
+          </p>
+        </div>
+
+        <div className="grid gap-3 rounded-lg border border-border bg-card p-3 md:grid-cols-5">
+          <div className="space-y-1 md:col-span-2">
+            <Label className="text-xs">User ID</Label>
+            <Input value={userFilter} onChange={(e) => setUserFilter(e.target.value)} placeholder="uuid" />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Method</Label>
+            <Select value={actionFilter} onValueChange={setActionFilter}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>Any</SelectItem>
+                <SelectItem value="GET">GET</SelectItem>
+                <SelectItem value="POST">POST</SelectItem>
+                <SelectItem value="PATCH">PATCH</SelectItem>
+                <SelectItem value="PUT">PUT</SelectItem>
+                <SelectItem value="DELETE">DELETE</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">From</Label>
+            <Input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">To</Label>
+            <Input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} />
+          </div>
+          <div className="md:col-span-5 flex items-center gap-2">
+            <Button onClick={apply} size="sm">Apply</Button>
+            <Button onClick={reset} size="sm" variant="outline">Reset</Button>
+            <span className="ml-auto text-xs text-muted-foreground">
+              {rows.length} loaded{query.hasNextPage ? " · more available" : ""}
+            </span>
+          </div>
+        </div>
       </div>
 
-      <div className="grid gap-3 rounded-lg border border-border bg-card p-3 md:grid-cols-5">
-        <div className="space-y-1 md:col-span-2">
-          <Label className="text-xs">User ID</Label>
-          <Input value={userFilter} onChange={(e) => setUserFilter(e.target.value)} placeholder="uuid" />
-        </div>
-        <div className="space-y-1">
-          <Label className="text-xs">Method</Label>
-          <Select value={actionFilter} onValueChange={setActionFilter}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL}>Any</SelectItem>
-              <SelectItem value="GET">GET</SelectItem>
-              <SelectItem value="POST">POST</SelectItem>
-              <SelectItem value="PATCH">PATCH</SelectItem>
-              <SelectItem value="PUT">PUT</SelectItem>
-              <SelectItem value="DELETE">DELETE</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-1">
-          <Label className="text-xs">From</Label>
-          <Input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
-        </div>
-        <div className="space-y-1">
-          <Label className="text-xs">To</Label>
-          <Input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} />
-        </div>
-        <div className="md:col-span-5 flex items-center gap-2">
-          <Button onClick={apply} size="sm">Apply</Button>
-          <Button onClick={reset} size="sm" variant="outline">Reset</Button>
-          <span className="ml-auto text-xs text-muted-foreground">
-            {rows.length} loaded{query.hasNextPage ? " · more available" : ""}
-          </span>
-        </div>
+      <div className="flex-1 min-h-0 mt-4">
+        {query.error ? (
+          <div className="rounded-md border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
+            Failed to load audit log.
+          </div>
+        ) : (
+          <VirtualizedTable<AuditRow>
+            rows={rows}
+            columns={columns}
+            rowKey={(r) => r.id}
+            isFetchingMore={query.isFetchingNextPage}
+            height="fill"
+            onEndReached={() => {
+              if (query.hasNextPage && !query.isFetchingNextPage) {
+                void query.fetchNextPage();
+              }
+            }}
+          />
+        )}
       </div>
-
-      {query.error ? (
-        <div className="rounded-md border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
-          Failed to load audit log.
-        </div>
-      ) : (
-        <VirtualizedTable<AuditRow>
-          rows={rows}
-          columns={columns}
-          rowKey={(r) => r.id}
-          isFetchingMore={query.isFetchingNextPage}
-          onEndReached={() => {
-            if (query.hasNextPage && !query.isFetchingNextPage) {
-              void query.fetchNextPage();
-            }
-          }}
-        />
-      )}
     </div>
   );
 }

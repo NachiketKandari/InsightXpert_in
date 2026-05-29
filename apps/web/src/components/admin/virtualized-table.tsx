@@ -37,8 +37,8 @@ export interface VirtualizedTableProps<T> {
   isFetchingMore?: boolean;
   renderExpanded?: (row: T) => React.ReactNode;
   emptyLabel?: string;
-  /** Height of the scrolling viewport in pixels. */
-  height?: number;
+  /** Height of the scrolling viewport. Use "fill" to fill remaining parent height. */
+  height?: number | "fill";
 }
 
 export function VirtualizedTable<T>({
@@ -52,6 +52,7 @@ export function VirtualizedTable<T>({
   emptyLabel = "No results.",
   height = 560,
 }: VirtualizedTableProps<T>) {
+  const resolvedHeight = height === "fill" ? "100%" : `${height}px`;
   const parentRef = useRef<HTMLDivElement | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
 
@@ -82,9 +83,9 @@ export function VirtualizedTable<T>({
 
   if (rows.length === 0) {
     return (
-      <div className="rounded-lg border border-border bg-card">
+      <div className="rounded-lg border border-border bg-card overflow-x-auto">
         <div
-          className="grid gap-3 border-b border-border px-5 py-3 text-xs font-medium uppercase tracking-wide text-muted-foreground"
+          className="grid gap-3 border-b border-border px-5 py-3 text-xs font-medium uppercase tracking-wide text-muted-foreground min-w-max"
           style={{ gridTemplateColumns: gridTemplate }}
         >
           {renderExpanded && <div />}
@@ -101,78 +102,80 @@ export function VirtualizedTable<T>({
 
   return (
     <div className="rounded-lg border border-border bg-card">
-      <div
-        className="grid gap-3 border-b border-border px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground"
-        style={{ gridTemplateColumns: gridTemplate }}
-      >
-        {renderExpanded && <div />}
-        {columns.map((c) => (
-          <div key={c.key}>{c.header}</div>
-        ))}
-      </div>
-      <div
-        ref={parentRef}
-        style={{ height, overflow: "auto" }}
-        className="relative"
-      >
+      <div className="overflow-x-auto">
         <div
-          style={{
-            height: `${virtualizer.getTotalSize()}px`,
-            position: "relative",
-            width: "100%",
-          }}
+          className="grid gap-3 border-b border-border px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground min-w-max"
+          style={{ gridTemplateColumns: gridTemplate }}
         >
-          {virtualizer.getVirtualItems().map((v) => {
-            const row = rows[v.index];
-            const key = rowKey(row);
-            const isOpen = expanded === key;
-            return (
-              <div
-                key={key}
-                data-index={v.index}
-                ref={virtualizer.measureElement}
-                style={{
-                  position: "absolute",
-                  top: 0,
-                  left: 0,
-                  width: "100%",
-                  transform: `translateY(${v.start}px)`,
-                }}
-              >
+          {renderExpanded && <div />}
+          {columns.map((c) => (
+            <div key={c.key}>{c.header}</div>
+          ))}
+        </div>
+        <div
+          ref={parentRef}
+          style={{ height: resolvedHeight, overflowY: "auto" }}
+          className="relative"
+        >
+          <div
+            style={{
+              height: `${virtualizer.getTotalSize()}px`,
+              position: "relative",
+              width: "100%",
+            }}
+          >
+            {virtualizer.getVirtualItems().map((v) => {
+              const row = rows[v.index];
+              const key = rowKey(row);
+              const isOpen = expanded === key;
+              return (
                 <div
-                  className={cn(
-                    "grid items-center gap-3 border-b border-border/50 px-5 py-3 text-sm",
-                    renderExpanded && "cursor-pointer hover:bg-muted/40",
-                    isOpen && "bg-muted/30",
-                  )}
-                  style={{ gridTemplateColumns: gridTemplate }}
-                  onClick={() => {
-                    if (!renderExpanded) return;
-                    setExpanded(isOpen ? null : key);
+                  key={key}
+                  data-index={v.index}
+                  ref={virtualizer.measureElement}
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    width: "100%",
+                    transform: `translateY(${v.start}px)`,
                   }}
                 >
-                  {renderExpanded && (
-                    <ChevronRight
-                      className={cn(
-                        "size-4 text-muted-foreground transition-transform",
-                        isOpen && "rotate-90",
-                      )}
-                    />
-                  )}
-                  {columns.map((c) => (
-                    <div key={c.key} className="min-w-0 truncate">
-                      {c.render(row)}
-                    </div>
-                  ))}
-                </div>
-                {isOpen && renderExpanded && (
-                  <div className="border-b border-border/50 bg-muted/20 px-4 py-3">
-                    {renderExpanded(row)}
+                  <div
+                    className={cn(
+                      "grid items-center gap-3 border-b border-border/50 px-5 py-3 text-sm min-w-max",
+                      renderExpanded && "cursor-pointer hover:bg-muted/40",
+                      isOpen && "bg-muted/30",
+                    )}
+                    style={{ gridTemplateColumns: gridTemplate }}
+                    onClick={() => {
+                      if (!renderExpanded) return;
+                      setExpanded(isOpen ? null : key);
+                    }}
+                  >
+                    {renderExpanded && (
+                      <ChevronRight
+                        className={cn(
+                          "size-4 text-muted-foreground transition-transform",
+                          isOpen && "rotate-90",
+                        )}
+                      />
+                    )}
+                    {columns.map((c) => (
+                      <div key={c.key} className="min-w-0 truncate">
+                        {c.render(row)}
+                      </div>
+                    ))}
                   </div>
-                )}
-              </div>
-            );
-          })}
+                  {isOpen && renderExpanded && (
+                    <div className="border-b border-border/50 bg-muted/20 px-4 py-3">
+                      {renderExpanded(row)}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
       </div>
       {isFetchingMore && (

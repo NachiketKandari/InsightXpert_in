@@ -130,106 +130,111 @@ export default function MetricsPage() {
   ];
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-lg font-semibold">Query metrics</h2>
-        <p className="text-sm text-muted-foreground">
-          Every chat turn, with SQL, mode, tokens, and feedback.
-        </p>
+    <div className="flex flex-col" style={{ minHeight: "calc(100vh - 9rem)" }}>
+      <div className="shrink-0 space-y-6">
+        <div>
+          <h2 className="text-lg font-semibold">Query metrics</h2>
+          <p className="text-sm text-muted-foreground">
+            Every chat turn, with SQL, mode, tokens, and feedback.
+          </p>
+        </div>
+
+        <div className="grid gap-3 rounded-lg border border-border bg-card p-3 md:grid-cols-6">
+          <div className="space-y-1">
+            <Label className="text-xs">User ID</Label>
+            <Input value={userFilter} onChange={(e) => setUserFilter(e.target.value)} placeholder="uuid" />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Database</Label>
+            <Input value={dbFilter} onChange={(e) => setDbFilter(e.target.value)} placeholder="db_id" />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Thumbs</Label>
+            <Select value={thumbsFilter} onValueChange={setThumbsFilter}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>Any</SelectItem>
+                <SelectItem value="up">Up</SelectItem>
+                <SelectItem value="down">Down</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Agent mode</Label>
+            <Select value={agentMode} onValueChange={setAgentMode}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>Any</SelectItem>
+                <SelectItem value="sql">sql</SelectItem>
+                <SelectItem value="agent">agent</SelectItem>
+                <SelectItem value="rag">rag</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">From</Label>
+            <Input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">To</Label>
+            <Input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} />
+          </div>
+          <div className="md:col-span-6 flex items-center gap-2">
+            <Button onClick={apply} size="sm">Apply</Button>
+            <Button onClick={reset} size="sm" variant="outline">Reset</Button>
+            <span className="ml-auto text-xs text-muted-foreground">
+              {rows.length} loaded{query.hasNextPage ? " · more available" : ""}
+            </span>
+          </div>
+        </div>
       </div>
 
-      <div className="grid gap-3 rounded-lg border border-border bg-card p-3 md:grid-cols-6">
-        <div className="space-y-1">
-          <Label className="text-xs">User ID</Label>
-          <Input value={userFilter} onChange={(e) => setUserFilter(e.target.value)} placeholder="uuid" />
-        </div>
-        <div className="space-y-1">
-          <Label className="text-xs">Database</Label>
-          <Input value={dbFilter} onChange={(e) => setDbFilter(e.target.value)} placeholder="db_id" />
-        </div>
-        <div className="space-y-1">
-          <Label className="text-xs">Thumbs</Label>
-          <Select value={thumbsFilter} onValueChange={setThumbsFilter}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL}>Any</SelectItem>
-              <SelectItem value="up">Up</SelectItem>
-              <SelectItem value="down">Down</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-1">
-          <Label className="text-xs">Agent mode</Label>
-          <Select value={agentMode} onValueChange={setAgentMode}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL}>Any</SelectItem>
-              <SelectItem value="sql">sql</SelectItem>
-              <SelectItem value="agent">agent</SelectItem>
-              <SelectItem value="rag">rag</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-1">
-          <Label className="text-xs">From</Label>
-          <Input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
-        </div>
-        <div className="space-y-1">
-          <Label className="text-xs">To</Label>
-          <Input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} />
-        </div>
-        <div className="md:col-span-6 flex items-center gap-2">
-          <Button onClick={apply} size="sm">Apply</Button>
-          <Button onClick={reset} size="sm" variant="outline">Reset</Button>
-          <span className="ml-auto text-xs text-muted-foreground">
-            {rows.length} loaded{query.hasNextPage ? " · more available" : ""}
-          </span>
-        </div>
+      <div className="flex-1 min-h-0 mt-6">
+        {query.error ? (
+          <div className="rounded-md border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
+            Failed to load metrics.
+          </div>
+        ) : (
+          <VirtualizedTable<MetricsRow>
+            rows={rows}
+            columns={columns}
+            rowKey={(r) => r.id}
+            isFetchingMore={query.isFetchingNextPage}
+            height="fill"
+            onEndReached={() => {
+              if (query.hasNextPage && !query.isFetchingNextPage) {
+                void query.fetchNextPage();
+              }
+            }}
+            renderExpanded={(r) => (
+              <div className="space-y-3 text-xs">
+                {r.question && (
+                  <div>
+                    <p className="font-medium text-muted-foreground">Question</p>
+                    <p className="whitespace-pre-wrap">{r.question}</p>
+                  </div>
+                )}
+                {r.sql && (
+                  <div>
+                    <p className="font-medium text-muted-foreground">SQL</p>
+                    <pre className="overflow-x-auto rounded bg-muted p-2 font-mono text-[11px] leading-snug">
+                      {r.sql}
+                    </pre>
+                  </div>
+                )}
+                {r.agent_trace_summary && (
+                  <div>
+                    <p className="font-medium text-muted-foreground">Agent trace</p>
+                    <pre className="whitespace-pre-wrap rounded bg-muted p-2 font-mono text-[11px] leading-snug">
+                      {r.agent_trace_summary}
+                    </pre>
+                  </div>
+                )}
+              </div>
+            )}
+          />
+        )}
       </div>
-
-      {query.error ? (
-        <div className="rounded-md border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
-          Failed to load metrics.
-        </div>
-      ) : (
-        <VirtualizedTable<MetricsRow>
-          rows={rows}
-          columns={columns}
-          rowKey={(r) => r.id}
-          isFetchingMore={query.isFetchingNextPage}
-          onEndReached={() => {
-            if (query.hasNextPage && !query.isFetchingNextPage) {
-              void query.fetchNextPage();
-            }
-          }}
-          renderExpanded={(r) => (
-            <div className="space-y-3 text-xs">
-              {r.question && (
-                <div>
-                  <p className="font-medium text-muted-foreground">Question</p>
-                  <p className="whitespace-pre-wrap">{r.question}</p>
-                </div>
-              )}
-              {r.sql && (
-                <div>
-                  <p className="font-medium text-muted-foreground">SQL</p>
-                  <pre className="overflow-x-auto rounded bg-muted p-2 font-mono text-[11px] leading-snug">
-                    {r.sql}
-                  </pre>
-                </div>
-              )}
-              {r.agent_trace_summary && (
-                <div>
-                  <p className="font-medium text-muted-foreground">Agent trace</p>
-                  <pre className="whitespace-pre-wrap rounded bg-muted p-2 font-mono text-[11px] leading-snug">
-                    {r.agent_trace_summary}
-                  </pre>
-                </div>
-              )}
-            </div>
-          )}
-        />
-      )}
     </div>
   );
 }

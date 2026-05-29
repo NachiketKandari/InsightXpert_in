@@ -90,7 +90,7 @@ export function SchemaPanel({
         </TabsContent>
 
         <TabsContent value="ddl" className="p-3">
-          <pre className="max-h-[480px] overflow-auto rounded-md bg-muted p-3 text-xs font-mono whitespace-pre">
+          <pre className="max-h-[50vh] overflow-auto rounded-md bg-muted p-3 text-xs font-mono whitespace-pre">
             {schema?.ddl ?? "(no schema)"}
           </pre>
         </TabsContent>
