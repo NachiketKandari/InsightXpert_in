@@ -302,11 +302,15 @@ def _unwrap_profile(
     stage: str,
     *,
     fallback: "DatabaseProfile | None" = None,
+    emitter: "EventEmitter | None" = None,
 ) -> "DatabaseProfile | None":
     """Unpack an ``asyncio.gather`` result for a profile-returning stage.
 
-    On success, returns the ``DatabaseProfile``. On failure, logs a warning
-    and returns *fallback* so downstream stages can continue.
+    On success, returns the ``DatabaseProfile``. On failure, emits a
+    ``profile_stage_completed`` chunk with ``note=\"failed: …\"`` so the
+    frontend stepper shows the stage as errored (instead of leaving it
+    silently stuck in "running"), logs a warning, and returns *fallback*
+    so downstream stages can continue.
     """
     if isinstance(result, BaseException):
         log.warning(
@@ -316,6 +320,18 @@ def _unwrap_profile(
             error=str(result),
             error_type=type(result).__name__,
         )
+        if emitter is not None:
+            import asyncio as _asyncio
+
+            _asyncio.create_task(
+                _emit_stage_completed(
+                    emitter,
+                    stage,
+                    db_id,
+                    duration_ms=0,
+                    note=f"failed: {type(result).__name__}",
+                )
+            )
         return fallback
     if isinstance(result, DatabaseProfile):
         return result
@@ -412,7 +428,7 @@ async def run_profile_stream(
             phase2_results = await asyncio.gather(
                 *phase2_tasks, return_exceptions=True
             )
-            profile = _unwrap_profile(phase2_results[0], db_id, "stats")
+            profile = _unwrap_profile(phase2_results[0], db_id, "stats", emitter=emitter)
 
             # --- Phase 3: summaries + quirks + lsh (parallel) -------------
             # summaries and quirks both need the profile (with stats populated).
@@ -443,8 +459,8 @@ async def run_profile_stream(
             phase3_results = await asyncio.gather(
                 *phase3_tasks, return_exceptions=True
             )
-            profile = _unwrap_profile(phase3_results[0], db_id, "summaries", fallback=profile)
-            profile = _unwrap_profile(phase3_results[1], db_id, "quirks", fallback=profile)
+            profile = _unwrap_profile(phase3_results[0], db_id, "summaries", fallback=profile, emitter=emitter)
+            profile = _unwrap_profile(phase3_results[1], db_id, "quirks", fallback=profile, emitter=emitter)
 
             # --- Phase 4: vectors (depends on summaries for embed text) ---
             await _maybe_run_vectors(

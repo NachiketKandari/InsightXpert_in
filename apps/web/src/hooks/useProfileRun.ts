@@ -181,7 +181,11 @@ export function useProfileRun(dbId: string): UseProfileRun {
                 case "profile_stage_completed": {
                   const note = chunk.payload.note;
                   const nextState: ProfileStepState =
-                    note === "skipped" ? "skipped" : "done";
+                    note === "skipped"
+                      ? "skipped"
+                      : note?.startsWith("failed:")
+                        ? "error"
+                        : "done";
                   const steps = ensureRunning().map((s) =>
                     s.stage === chunk.payload.stage
                       ? {

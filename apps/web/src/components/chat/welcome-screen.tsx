@@ -133,11 +133,16 @@ export function WelcomeScreen({ onSendMessage, onStop, isStreaming }: WelcomeScr
                   return { kind: "running", steps, requestedFlags: flags };
                 }
                 case "profile_stage_completed": {
+                  const note = chunk.payload.note;
                   const nextState: ProfileStepState =
-                    chunk.payload.note === "skipped" ? "skipped" : "done";
+                    note === "skipped"
+                      ? "skipped"
+                      : note?.startsWith("failed:")
+                        ? "error"
+                        : "done";
                   const steps = ensureRunning().map((s) =>
                     s.stage === chunk.payload.stage
-                      ? { ...s, state: nextState, durationMs: chunk.payload.duration_ms, note: chunk.payload.note }
+                      ? { ...s, state: nextState, durationMs: chunk.payload.duration_ms, note }
                       : s,
                   );
                   return { kind: "running", steps, requestedFlags: flags };
