@@ -32,6 +32,7 @@ from pydantic import BaseModel
 
 from ..config import Settings
 from ..logging import get_logger
+from ..vendored.agents_core.common import strip_json_fences
 
 log = get_logger("mode_router")
 
@@ -147,7 +148,7 @@ async def classify_mode(
     latency_ms = int((time.monotonic() - start) * 1000)
 
     try:
-        parsed = json.loads(text)
+        parsed = json.loads(strip_json_fences(text))
         mode = parsed.get("mode")
         reason = str(parsed.get("reason", "")).strip() or "no reason given"
         if mode not in ("basic", "agentic"):

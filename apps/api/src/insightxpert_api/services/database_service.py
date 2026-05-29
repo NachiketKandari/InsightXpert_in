@@ -62,6 +62,8 @@ class _LazyDatabaseRef:
     file.
     """
 
+    dialect = "sqlite"
+
     def __init__(self, db_id: str, source: str, key: str, store: object) -> None:
         self.db_id = db_id
         self.source = source
@@ -167,7 +169,7 @@ class DatabaseService:
                     conn.execute(
                         text(
                             "SELECT db_id, kind, connection_config_encrypted "
-                            "FROM databases WHERE kind IN ('postgres', 'libsql', 'sqlite_external')"
+                            "FROM databases WHERE kind IN ('postgres', 'libsql', 'sqlite_external', 'mysql')"
                         )
                     )
                     .mappings()
@@ -188,7 +190,7 @@ class DatabaseService:
         import json as _json
 
         from ..connections.encryption import decrypt
-        from ..connections.types import PostgresConnection
+        from ..connections.types import MySQLConnection, PostgresConnection
 
         refs: list[DatabaseRef] = []
         for row in self._fetch_non_sqlite_rows():
@@ -207,6 +209,9 @@ class DatabaseService:
                 cfg_dict = _json.loads(decrypt(encrypted))
                 if kind_val == "postgres":
                     cfg = PostgresConnection(**cfg_dict)
+                    url = cfg.to_dsn()
+                elif kind_val == "mysql":
+                    cfg = MySQLConnection(**cfg_dict)
                     url = cfg.to_dsn()
                 else:
                     _log.warning(
@@ -309,6 +314,17 @@ class DatabaseService:
                 return None
             cfg = PostgresConnection(**_json.loads(decrypt(encrypted)))
             return _resolve(kind="postgres", config=cfg)
+
+        if kind == "mysql":
+            from ..connections.encryption import decrypt
+            from ..connections.types import MySQLConnection
+            import json as _json
+
+            encrypted = (row or {}).get("connection_config_encrypted")
+            if not encrypted:
+                return None
+            cfg = MySQLConnection(**_json.loads(decrypt(encrypted)))
+            return _resolve(kind="mysql", config=cfg)
 
         # libsql / sqlite_external — surface the NotImplemented from the
         # central dispatch so the error message is consistent.
