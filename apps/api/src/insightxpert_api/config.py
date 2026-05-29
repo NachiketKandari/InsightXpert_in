@@ -68,6 +68,9 @@ class Settings(BaseSettings):
     session_secret: str
     session_ttl_seconds: int = 60 * 60 * 24 * 30  # 30 days sliding
     session_cookie_name: str = "ix_session"
+    # Cross-subdomain cookie sharing (www ↔ api). Only set in prod/staging.
+    # Leading dot = all subdomains. Leave empty for local dev.
+    cookie_domain: str = ""
 
     # Bootstrap admin (applied once on first boot, then ignored if any user exists)
     bootstrap_admin_email: str | None = None

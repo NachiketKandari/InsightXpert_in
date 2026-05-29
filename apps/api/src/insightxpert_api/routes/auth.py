@@ -39,7 +39,8 @@ def _set_session_cookie(response: Response, settings: Settings, token: str) -> N
         max_age=settings.session_ttl_seconds,
         httponly=True,
         secure=(settings.app_env != "local"),
-        samesite="lax",
+        samesite="none" if settings.app_env != "local" else "lax",
+        domain=settings.cookie_domain or None,
         path="/",
     )
 
@@ -116,7 +117,13 @@ async def register(
 
 @router.post("/logout")
 async def logout(response: Response, settings: Settings = Depends(get_settings)) -> dict[str, str]:
-    response.delete_cookie(settings.session_cookie_name, path="/")
+    response.delete_cookie(
+        settings.session_cookie_name,
+        path="/",
+        domain=settings.cookie_domain or None,
+        samesite="none" if settings.app_env != "local" else "lax",
+        secure=(settings.app_env != "local"),
+    )
     return {"status": "ok"}
 
 
