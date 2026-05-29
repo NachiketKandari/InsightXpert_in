@@ -44,7 +44,7 @@ databases_table = Table(
         name="databases_visibility_check",
     ),
     CheckConstraint(
-        "kind IN ('sqlite_file','libsql','sqlite_external','postgres')",
+        "kind IN ('sqlite_file','libsql','sqlite_external','postgres','mysql')",
         name="databases_kind_check",
     ),
 )

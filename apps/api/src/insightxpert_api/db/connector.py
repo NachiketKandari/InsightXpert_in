@@ -137,6 +137,13 @@ def resolve_connector(
         # NOTE: Caller MUST call .dispose() on the returned connector when done.
         # PostgresConnector owns its own connection pool (pool_size=2).
         return PostgresConnector(config)
+    if kind == "mysql":
+        from ..connections.mysql_connector import MySQLConnector
+        from ..connections.types import MySQLConnection
+
+        if not isinstance(config, MySQLConnection):
+            raise ValueError("mysql dispatch requires a MySQLConnection config")
+        return MySQLConnector(config)
     if kind in ("libsql", "sqlite_external"):
         raise NotImplementedError(
             f"connector kind '{kind}' is reserved but not yet wired (Turso cutover plan)"

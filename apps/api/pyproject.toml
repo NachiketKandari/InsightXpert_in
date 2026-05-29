@@ -28,6 +28,7 @@ dependencies = [
   "apscheduler>=3.10,<4.0",
   "croniter>=2.0",
   "psycopg[binary]>=3.1",
+  "pymysql>=1.1",
   "sentry-sdk[fastapi]>=2.18",
   "cryptography>=42.0",
   "pgvector>=0.3.0",

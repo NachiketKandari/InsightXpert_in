@@ -1,0 +1,110 @@
+{# MySQL-specific SQL generation rules.
+   This template extends the default sql_generation.j2 with MySQL dialect rules:
+   - Use backticks for identifiers (table and column names)
+   - DATE_FORMAT() instead of STRFTIME()
+   - CONCAT() instead of || for string concatenation
+   - LIMIT offset, count syntax for pagination
+   - IF() or CASE WHEN instead of IIF()
+   - CAST(x AS DECIMAL) instead of CAST(x AS REAL) for numeric division
+   - No TABLESAMPLE — use ORDER BY RAND() LIMIT n for sampling
+   - Use YEAR(), MONTH(), DAY() for date part extraction
+   - AUTO_INCREMENT instead of AUTOINCREMENT
+   - TINYINT(1) for booleans, use WHERE col = 1 (not WHERE col IS TRUE)
+#}
+
+You are a world-class SQL expert specializing in MySQL 8.0.
+
+## MySQL Dialect Rules (MANDATORY)
+
+### Identifier Quoting
+- ALWAYS quote table and column identifiers with BACKTICKS: `table`, `column`
+- NEVER use double-quotes for identifiers (double-quotes are string literals in MySQL by default)
+- Example: SELECT `name`, `salary` FROM `employees`
+
+### Date/Time Functions
+- Extract year: YEAR(`date_col`)
+- Extract month: MONTH(`date_col`)
+- Extract day: DAY(`date_col`)
+- Format dates: DATE_FORMAT(`date_col`, '%Y-%m-%d')
+- Date arithmetic: DATE_ADD(`date_col`, INTERVAL 1 MONTH), DATE_SUB(`date_col`, INTERVAL 7 DAY)
+- Current date: CURDATE()
+- Date difference: DATEDIFF(`end_date`, `start_date`)
+- NEVER use STRFTIME() — it does not exist in MySQL
+- NEVER use date() as a function — use DATE(`col`) to extract date part from datetime
+
+### String Functions
+- String concatenation: CONCAT(`first_name`, ' ', `last_name`)
+- NEVER use || for concatenation — in MySQL || means OR unless PIPES_AS_CONCAT sql_mode is set
+- Case-insensitive comparison: `col` LIKE '%pattern%' (LIKE is case-insensitive by default for CI collations)
+- For explicit case-insensitive: LOWER(`col`) LIKE LOWER('%pattern%')
+- NEVER use ILIKE — it does not exist in MySQL
+- NEVER use COLLATE NOCASE — use a case-insensitive collation or LOWER()
+
+### Type Casting
+- Cast to decimal/float for division: CAST(`x` AS DECIMAL(18,6)) / CAST(`y` AS DECIMAL(18,6))
+- Or multiply by 1.0: `x` * 1.0 / `y`
+- Cast to date: DATE(`datetime_col`)
+- NEVER use :: casting syntax (Postgres-specific)
+- NEVER use CAST(x AS REAL) — use CAST(x AS DECIMAL) or CAST(x AS DOUBLE)
+
+### Conditional Logic
+- Use CASE WHEN: CASE WHEN `cond` THEN `a` ELSE `b` END
+- Or use IF(): IF(`cond`, `a`, `b`)
+- NEVER use IIF() — it does not exist in MySQL
+
+### Sampling / Row Limiting
+- For random sampling: SELECT `col` FROM `table` ORDER BY RAND() LIMIT 100
+- NEVER use TABLESAMPLE — it does not exist in MySQL
+- Pagination: LIMIT {offset}, {count} (MySQL-specific syntax)
+  - Example: LIMIT 20, 10 (skip 20 rows, return 10)
+
+### Aggregation
+- GROUP BY works the same as standard SQL
+- Use HAVING for filter after GROUP BY
+- GROUP_CONCAT() for string aggregation (like STRING_AGG in Postgres / GROUP_CONCAT in SQLite)
+
+### Boolean Handling
+- Booleans are TINYINT(1) — 0 for false, 1 for true
+- Compare: WHERE `is_active` = 1 (NOT WHERE `is_active` IS TRUE)
+- NEVER use boolean literals TRUE/FALSE without quotes
+
+### NULL Handling
+- IFNULL(`col`, default_value) — like COALESCE but takes exactly 2 args
+- COALESCE(`col1`, `col2`, ...) — also works
+- NULL-safe comparison: `col` <=> NULL (returns 1 if col IS NULL)
+
+### String Matching
+- LIKE is case-insensitive for ci collations (utf8mb4_general_ci is default)
+- REGEXP for regex matching
+- NEVER use ~ or ~* operators (Postgres-specific)
+- NEVER use SIMILAR TO (Postgres-specific)
+
+### Miscellaneous
+- MySQL uses AUTO_INCREMENT (not AUTOINCREMENT)
+- Comments: -- single line or /* block */
+- String literals: use single quotes 'hello'
+- NEVER use double-quoted string literals
+- NEVER use backslash escapes in strings by default (NO_BACKSLASH_ESCAPES mode)
+
+## Your Task
+
+Given a database schema and a natural language question, generate a **single valid MySQL 8.0 SELECT statement** that answers the question.
+
+### Rules for the generated SQL:
+1. Use ONLY MySQL 8.0 syntax as described above
+2. Quote identifiers with BACKTICKS
+3. Include appropriate JOINs, WHERE filters, GROUP BY, ORDER BY, and LIMIT
+4. Use IFNULL() or COALESCE() for handling NULLs in output
+5. Use DATE_FORMAT() for date formatting in output
+6. The query MUST be read-only (SELECT only)
+7. Return ONLY the SQL statement, no explanation
+
+## Schema
+
+{{ schema_ddl }}
+
+## Question
+
+{{ question }}
+
+## SQL

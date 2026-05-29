@@ -46,6 +46,25 @@ class PostgresConnection(_RedactingMixin, BaseModel):
         )
 
 
+class MySQLConnection(_RedactingMixin, BaseModel):
+    kind: Literal["mysql"] = "mysql"
+    host: str
+    port: int = 3306
+    database: str
+    username: str
+    password: str
+    ssl_enabled: bool = True
+    charset: str = "utf8mb4"
+
+    def to_dsn(self) -> str:
+        pw = quote(self.password, safe="")
+        return (
+            f"mysql+pymysql://{quote(self.username, safe='')}:{pw}"
+            f"@{self.host}:{self.port}/{quote(self.database, safe='')}"
+            f"?charset={self.charset}"
+        )
+
+
 class LibsqlConnection(_RedactingMixin, BaseModel):
     kind: Literal["libsql"] = "libsql"
     url: str

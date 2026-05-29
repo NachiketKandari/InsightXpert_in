@@ -25,6 +25,7 @@ def get_adapter(name: str) -> DialectAdapter:
     # Lazy imports trigger self-registration via side-effect at module load.
     # Both psycopg and sqlite3 are declared deps — if an import fails here, it
     # IS a misconfiguration and we want it loud, not swallowed.
+    from . import mysql as _mysql  # noqa: F401
     from . import postgres as _postgres  # noqa: F401
     from . import sqlite as _sqlite  # noqa: F401
 

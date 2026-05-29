@@ -6,7 +6,7 @@
 
 import { apiFetch } from "@/lib/api";
 
-export type ConnectionKind = "postgres" | "libsql";
+export type ConnectionKind = "postgres" | "mysql" | "libsql";
 
 export interface PostgresConfig {
   host: string;
@@ -18,12 +18,22 @@ export interface PostgresConfig {
   schema: string;
 }
 
+export interface MySQLConfig {
+  host: string;
+  port: number;
+  database: string;
+  username: string;
+  password: string;
+  ssl_enabled: boolean;
+  charset: string;
+}
+
 export interface LibsqlConfig {
   url: string;
   auth_token: string;
 }
 
-export type ConnectionConfig = PostgresConfig | LibsqlConfig;
+export type ConnectionConfig = PostgresConfig | MySQLConfig | LibsqlConfig;
 
 export interface ConnectionRequest {
   db_id: string;

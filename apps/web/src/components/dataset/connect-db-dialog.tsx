@@ -28,6 +28,7 @@ import {
   testConnection,
   type ConnectionKind,
   type LibsqlConfig,
+  type MySQLConfig,
   type PostgresConfig,
 } from "@/lib/connections/api";
 import { useChatStore } from "@/stores/chat-store";
@@ -63,6 +64,16 @@ const DEFAULT_POSTGRES: PostgresConfig = {
   schema: "public",
 };
 
+const DEFAULT_MYSQL: MySQLConfig = {
+  host: "",
+  port: 3306,
+  database: "",
+  username: "",
+  password: "",
+  ssl_enabled: true,
+  charset: "utf8mb4",
+};
+
 const DEFAULT_LIBSQL: LibsqlConfig = { url: "", auth_token: "" };
 
 export function ConnectDbDialog({
@@ -73,6 +84,7 @@ export function ConnectDbDialog({
   const [kind, setKind] = useState<ConnectionKind>("postgres");
   const [dbId, setDbId] = useState("");
   const [pg, setPg] = useState<PostgresConfig>(DEFAULT_POSTGRES);
+  const [mysql, setMysql] = useState<MySQLConfig>(DEFAULT_MYSQL);
   const [libsql, setLibsql] = useState<LibsqlConfig>(DEFAULT_LIBSQL);
   const [testing, setTesting] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -87,6 +99,7 @@ export function ConnectDbDialog({
     setKind("postgres");
     setDbId("");
     setPg(DEFAULT_POSTGRES);
+    setMysql(DEFAULT_MYSQL);
     setLibsql(DEFAULT_LIBSQL);
     setTesting(false);
     setSaving(false);
@@ -120,6 +133,12 @@ export function ConnectDbDialog({
       pg.username.length > 0 &&
       pg.password.length > 0 &&
       pg.port > 0
+    : kind === "mysql"
+    ? mysql.host.length > 0 &&
+      mysql.database.length > 0 &&
+      mysql.username.length > 0 &&
+      mysql.password.length > 0 &&
+      mysql.port > 0
     : libsql.url.length > 0 && libsql.auth_token.length > 0;
 
   const canTest = dbIdValid && configReady && !testing && !saving;
@@ -128,7 +147,7 @@ export function ConnectDbDialog({
   const requestBody = () => ({
     db_id: dbId,
     kind,
-    config: kind === "postgres" ? pg : libsql,
+    config: kind === "postgres" ? pg : kind === "mysql" ? mysql : libsql,
   });
 
   const handleTest = async () => {
@@ -180,7 +199,7 @@ export function ConnectDbDialog({
             Connect a database
           </DialogTitle>
           <DialogDescription>
-            Point InsightXpert at your existing Postgres or libSQL/Turso
+            Point InsightXpert at your existing Postgres, MySQL, or libSQL/Turso
             database. Credentials are encrypted at rest. Queries run in
             read-only mode (we strongly recommend a read-only role on your
             side too).
@@ -215,9 +234,10 @@ export function ConnectDbDialog({
               invalidateTest();
             }}
           >
-            <TabsList className="grid w-full grid-cols-2">
+            <TabsList className="grid w-full grid-cols-3">
               <TabsTrigger value="postgres">Postgres</TabsTrigger>
-              <TabsTrigger value="libsql">libSQL / Turso</TabsTrigger>
+              <TabsTrigger value="mysql">MySQL</TabsTrigger>
+              <TabsTrigger value="libsql">libSQL</TabsTrigger>
             </TabsList>
 
             <TabsContent value="postgres" className="space-y-3 pt-3">
@@ -328,6 +348,123 @@ export function ConnectDbDialog({
                     placeholder="public"
                     disabled={testing || saving}
                   />
+                </div>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="mysql" className="space-y-3 pt-3">
+              <div className="grid grid-cols-3 gap-3">
+                <div className="col-span-2 space-y-1.5">
+                  <Label htmlFor="my-host">Host</Label>
+                  <Input
+                    id="my-host"
+                    value={mysql.host}
+                    onChange={(e) => {
+                      setMysql({ ...mysql, host: e.target.value });
+                      invalidateTest();
+                    }}
+                    placeholder="db.example.com"
+                    disabled={testing || saving}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="my-port">Port</Label>
+                  <Input
+                    id="my-port"
+                    type="number"
+                    value={mysql.port}
+                    onChange={(e) => {
+                      setMysql({ ...mysql, port: Number(e.target.value) || 0 });
+                      invalidateTest();
+                    }}
+                    disabled={testing || saving}
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="my-db">Database</Label>
+                <Input
+                  id="my-db"
+                  value={mysql.database}
+                  onChange={(e) => {
+                    setMysql({ ...mysql, database: e.target.value });
+                    invalidateTest();
+                  }}
+                  placeholder="analytics"
+                  disabled={testing || saving}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="my-user">Username</Label>
+                  <Input
+                    id="my-user"
+                    value={mysql.username}
+                    onChange={(e) => {
+                      setMysql({ ...mysql, username: e.target.value });
+                      invalidateTest();
+                    }}
+                    autoComplete="off"
+                    disabled={testing || saving}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="my-pass">Password</Label>
+                  <Input
+                    id="my-pass"
+                    type="password"
+                    value={mysql.password}
+                    onChange={(e) => {
+                      setMysql({ ...mysql, password: e.target.value });
+                      invalidateTest();
+                    }}
+                    autoComplete="new-password"
+                    disabled={testing || saving}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="my-ssl">SSL</Label>
+                  <Select
+                    value={mysql.ssl_enabled ? "enabled" : "disabled"}
+                    onValueChange={(v) => {
+                      setMysql({ ...mysql, ssl_enabled: v === "enabled" });
+                      invalidateTest();
+                    }}
+                    disabled={testing || saving}
+                  >
+                    <SelectTrigger id="my-ssl">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="enabled">Enabled</SelectItem>
+                      <SelectItem value="disabled">Disabled</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="my-charset">Charset</Label>
+                  <Select
+                    value={mysql.charset}
+                    onValueChange={(v) => {
+                      setMysql({ ...mysql, charset: v });
+                      invalidateTest();
+                    }}
+                    disabled={testing || saving}
+                  >
+                    <SelectTrigger id="my-charset">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="utf8mb4">utf8mb4</SelectItem>
+                      <SelectItem value="utf8">utf8</SelectItem>
+                      <SelectItem value="latin1">latin1</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
             </TabsContent>

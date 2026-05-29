@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field
 from ..auth import CurrentUser, get_current_user
 from ..connections.encryption import encrypt
 from ..connections.postgres_connector import PostgresConnector
-from ..connections.types import LibsqlConnection, PostgresConnection
+from ..connections.types import LibsqlConnection, MySQLConnection, PostgresConnection
 from ..databases import repository as databases_repo
 from ..logging import get_logger
 from ..profiling import repository as profiles_repo
@@ -44,6 +44,11 @@ def _build_typed_config(kind: str, raw: dict[str, Any]) -> Any:
             return PostgresConnection(**raw)
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"invalid postgres config: {e}")
+    if kind == "mysql":
+        try:
+            return MySQLConnection(**raw)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"invalid mysql config: {e}")
     if kind == "libsql":
         try:
             return LibsqlConnection(**raw)
@@ -60,6 +65,21 @@ async def test_connection(
     cfg = _build_typed_config(req.kind, req.config)
     if req.kind == "postgres":
         conn = PostgresConnector(cfg)
+        try:
+            tables = conn.list_tables()
+        except Exception as e:
+            _log.warning("connection test failed: %s", e)
+            raise HTTPException(
+                status_code=400,
+                detail="connection failed: unable to reach host or invalid credentials",
+            )
+        finally:
+            conn.dispose()
+        return {"ok": True, "tables": tables}
+    if req.kind == "mysql":
+        from ..connections.mysql_connector import MySQLConnector
+
+        conn = MySQLConnector(cfg)
         try:
             tables = conn.list_tables()
         except Exception as e:
