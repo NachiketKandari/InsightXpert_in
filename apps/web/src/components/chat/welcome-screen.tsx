@@ -1,10 +1,12 @@
 "use client";
 
 import { useRef, useState, useCallback, useEffect, useMemo, startTransition, type KeyboardEvent } from "react";
+import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
-import { Shuffle, Sparkles, Upload, CheckCircle2, Loader2 } from "lucide-react";
+import { AlertTriangle, Shuffle, Sparkles, Upload, CheckCircle2, Loader2 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DatabasePickerPanel } from "@/components/dataset/database-picker-panel";
 import { InputToolbar } from "./input-toolbar";
@@ -101,6 +103,7 @@ export function WelcomeScreen({ onSendMessage, onStop, isStreaming }: WelcomeScr
         with_quirks: false,
         with_lsh: false,
         with_vectors: false,
+        with_table_descriptions: false,
       };
 
       profileControllerRef.current = startProfileStream(
@@ -406,6 +409,33 @@ export function WelcomeScreen({ onSendMessage, onStop, isStreaming }: WelcomeScr
       <p className="mt-2 text-center text-[11px] text-muted-foreground/60">
         AI can make mistakes. Please double-check responses.
       </p>
+
+      {/* Unprofiled DB notice — shown when user has selected a DB that hasn't been profiled yet. */}
+      {selectedDbId && !selectedDbHasProfile && !databasesLoading && (
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mt-3 flex items-center gap-2 rounded-lg border border-orange-500/30 bg-orange-500/5 px-4 py-2.5 max-w-2xl w-full"
+        >
+          <AlertTriangle className="size-4 text-orange-500 shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="text-xs text-muted-foreground">
+              <Badge
+                variant="outline"
+                className="mr-1.5 text-[10px] leading-none border-orange-500/50 text-orange-600 dark:text-orange-400"
+              >
+                Not Profiled
+              </Badge>
+              This database needs to be profiled before you can query it.
+            </p>
+          </div>
+          <Button asChild size="sm" variant="outline" className="h-7 text-xs">
+            <Link href={`/databases/${encodeURIComponent(selectedDbId)}`}>
+              Run Profile
+            </Link>
+          </Button>
+        </motion.div>
+      )}
 
       {/* First-class database picker — shown only on the landing screen so
           users don't have to hunt for the header dropdown. */}

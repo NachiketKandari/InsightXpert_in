@@ -42,7 +42,17 @@ export function DatabaseCard({ item }: DatabaseCardProps) {
             {rows > 0 ? ` · ${formatCount(rows)} rows` : ""}
           </span>
         ) : (
-          <span>Not profiled</span>
+          <Link
+            href={`/databases/${encodeURIComponent(item.db_id)}`}
+            className="inline-flex"
+          >
+            <Badge
+              variant="outline"
+              className="text-[10px] uppercase border-orange-500/50 text-orange-600 dark:text-orange-400 hover:bg-orange-500/10 transition-colors"
+            >
+              Not profiled
+            </Badge>
+          </Link>
         )}
       </div>
 

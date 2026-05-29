@@ -9,6 +9,7 @@ import { apiCall, apiFetch } from "@/lib/api";
 import type {
   DatabaseListItem,
   DatabaseProfile,
+  ProfileFlags,
   SchemaResponse,
 } from "@/types/database";
 import type { SampleQuestions } from "@/types/sample-questions";
@@ -75,6 +76,18 @@ export async function deleteProfile(dbId: string): Promise<boolean> {
     { method: "DELETE" },
   );
   return res.ok || res.status === 204;
+}
+
+// Server-configured profile defaults. Admin sets env; users get a simple
+// "Run Profile" button that applies these flags automatically.
+//   GET /api/v1/profile-defaults
+export interface ProfileDefaultsResponse {
+  flags: Partial<ProfileFlags>;
+  is_admin: boolean;
+}
+
+export async function fetchProfileDefaults(): Promise<ProfileDefaultsResponse | null> {
+  return apiCall<ProfileDefaultsResponse>("/api/v1/profile-defaults");
 }
 
 // Revert a column profile field override to its generated value.

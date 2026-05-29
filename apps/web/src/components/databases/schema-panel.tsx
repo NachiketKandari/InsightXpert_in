@@ -64,16 +64,23 @@ export function SchemaPanel({
                 return (
                   <li
                     key={name}
-                    className="py-2 flex items-center justify-between"
+                    className="py-2"
                   >
-                    <span className="font-mono text-sm">{name}</span>
-                    {tp && (
-                      <span className="text-xs text-muted-foreground">
-                        {tp.columns.length} col
-                        {tp.columns.length !== 1 ? "s" : ""}
-                        {tp.row_count != null &&
-                          ` · ${tp.row_count.toLocaleString()} rows`}
-                      </span>
+                    <div className="flex items-center justify-between">
+                      <span className="font-mono text-sm">{name}</span>
+                      {tp && (
+                        <span className="text-xs text-muted-foreground">
+                          {tp.columns.length} col
+                          {tp.columns.length !== 1 ? "s" : ""}
+                          {tp.row_count != null &&
+                            ` · ${tp.row_count.toLocaleString()} rows`}
+                        </span>
+                      )}
+                    </div>
+                    {tp?.description && (
+                      <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
+                        {tp.description}
+                      </p>
                     )}
                   </li>
                 );
@@ -133,6 +140,11 @@ function TableProfileBlock({
         </span>
       </CollapsibleTrigger>
       <CollapsibleContent>
+        {table.description && (
+          <p className="mt-1 mb-2 pl-6 pr-2 text-xs text-muted-foreground leading-relaxed">
+            {table.description}
+          </p>
+        )}
         <ul className="mt-1 space-y-1 pl-6">
           {table.columns.map((c) => (
             <ColumnCard

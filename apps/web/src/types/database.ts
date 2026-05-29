@@ -100,6 +100,7 @@ export interface TableProfile {
   name: string;
   row_count: number;
   columns: ColumnProfile[];
+  description: string;
 }
 
 export interface DatabaseProfile {
@@ -114,6 +115,7 @@ export interface ProfileFlags {
   with_quirks: boolean;
   with_lsh: boolean;
   with_vectors: boolean;
+  with_table_descriptions: boolean;
 }
 
 export interface ProfileRunRequest extends ProfileFlags {
@@ -128,7 +130,8 @@ export type ProfileStage =
   | "summaries"
   | "quirks"
   | "lsh"
-  | "vectors";
+  | "vectors"
+  | "table_descriptions";
 
 export const PROFILE_STAGE_ORDER: readonly ProfileStage[] = [
   "schema",
@@ -138,6 +141,7 @@ export const PROFILE_STAGE_ORDER: readonly ProfileStage[] = [
   "quirks",
   "lsh",
   "vectors",
+  "table_descriptions",
 ] as const;
 
 export interface ProfileStageStartedPayload {

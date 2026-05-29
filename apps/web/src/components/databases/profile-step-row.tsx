@@ -18,6 +18,7 @@ const STAGE_LABELS: Record<ProfileStep["stage"], string> = {
   quirks: "LLM quirk detection",
   lsh: "LSH index",
   vectors: "Embedding vectors",
+  table_descriptions: "Table descriptions",
 };
 
 export function ProfileStepRow({ step }: { step: ProfileStep }) {

@@ -72,6 +72,13 @@ class Settings(BaseSettings):
     # Leading dot = all subdomains. Leave empty for local dev.
     cookie_domain: str = ""
 
+    # Default profiling flags applied when a non-admin user clicks "Run Profile".
+    # JSON object matching ProfileFlags fields. Admins can still override per-run.
+    profile_default_flags: str = (
+        '{"with_summaries":true,"with_quirks":true,'
+        '"with_lsh":true,"with_vectors":true,"with_table_descriptions":true}'
+    )
+
     # Bootstrap admin (applied once on first boot, then ignored if any user exists)
     bootstrap_admin_email: str | None = None
     bootstrap_admin_password: str | None = None

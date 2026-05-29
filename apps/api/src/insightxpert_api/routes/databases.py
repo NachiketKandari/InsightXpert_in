@@ -837,6 +837,7 @@ class ProfileRunRequest(BaseModel):
     with_quirks: bool = False
     with_lsh: bool = False
     with_vectors: bool = False
+    with_table_descriptions: bool = False
     confirmed: bool = False
     user_hints: str = ""
 
@@ -1038,15 +1039,17 @@ async def run_profile(
         with_quirks=req.with_quirks,
         with_lsh=req.with_lsh,
         with_vectors=req.with_vectors,
+        with_table_descriptions=req.with_table_descriptions,
     )
 
     # --- cost-gate branch ------------------------------------------------
     # Any expensive flag on + not confirmed → emit a single estimate chunk
     # and close the stream. FE re-POSTs with confirmed=true to run.
     if flags.any and not req.confirmed:
-        _, column_count = count_columns(ref)
+        table_count, column_count = count_columns(ref)
         estimate = estimate_cost(
             column_count, flags, settings.profiling_batch_size,
+            table_count=table_count,
             provider=settings.llm_provider,
             model=_chat_model(settings),
         )

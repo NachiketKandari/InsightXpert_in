@@ -71,7 +71,7 @@ export type ProfileRunState =
     };
 
 const anyExpensive = (f: ProfileFlags): boolean =>
-  f.with_summaries || f.with_quirks || f.with_lsh || f.with_vectors;
+  f.with_summaries || f.with_quirks || f.with_lsh || f.with_vectors || f.with_table_descriptions;
 
 function seedSteps(): ProfileStep[] {
   return PROFILE_STAGE_ORDER.map((stage) => ({
@@ -94,6 +94,8 @@ function flagForStage(flags: ProfileFlags, stage: ProfileStage): boolean {
       return flags.with_lsh;
     case "vectors":
       return flags.with_vectors;
+    case "table_descriptions":
+      return flags.with_table_descriptions;
     case "schema":
     case "stats":
     case "join_graph":
@@ -219,7 +221,8 @@ export function useProfileRun(dbId: string): UseProfileRun {
                       (s.stage === "summaries" ||
                         s.stage === "quirks" ||
                         s.stage === "lsh" ||
-                        s.stage === "vectors") &&
+                        s.stage === "vectors" ||
+                        s.stage === "table_descriptions") &&
                       flagForStage(flags, s.stage) &&
                       s.state === "skipped",
                   );

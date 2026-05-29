@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect } from "react";
+import Link from "next/link";
 import { Database, Check, Loader2 } from "lucide-react";
 import { motion } from "framer-motion";
+import { Badge } from "@/components/ui/badge";
 import { useDatabases } from "@/hooks/use-databases";
 import { useChatStore } from "@/stores/chat-store";
 
@@ -84,7 +86,23 @@ export function DatabasePickerPanel() {
                 }`}
               />
               <div className="flex-1 min-w-0">
-                <div className="font-mono text-xs truncate">{db.db_id}</div>
+                <div className="flex items-center gap-1.5">
+                  <span className="font-mono text-xs truncate">{db.db_id}</span>
+                  {!db.has_profile && (
+                    <Link
+                      href={`/databases/${encodeURIComponent(db.db_id)}`}
+                      onClick={(e) => e.stopPropagation()}
+                      title="Not profiled — click to profile"
+                    >
+                      <Badge
+                        variant="outline"
+                        className="text-[9px] leading-none px-1 py-0 border-orange-500/50 text-orange-600 dark:text-orange-400"
+                      >
+                        unprofiled
+                      </Badge>
+                    </Link>
+                  )}
+                </div>
                 <div className="text-[10px] uppercase tracking-wider text-muted-foreground/60">
                   {db.source}
                 </div>

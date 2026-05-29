@@ -12,8 +12,15 @@ import { AutoDisableWarning } from "@/components/databases/auto-disable-warning"
 import { ProfileStepper } from "@/components/databases/profile-stepper";
 import { SchemaPanel } from "@/components/databases/schema-panel";
 import { StageCheckboxGroup } from "@/components/databases/stage-checkbox-group";
+import { useCurrentUser } from "@/hooks/use-current-user";
 import { useProfileRun, type ProfileStep } from "@/hooks/useProfileRun";
-import { deleteProfile, fetchProfile, fetchSchema } from "@/lib/databases/api";
+import {
+  deleteProfile,
+  fetchProfile,
+  fetchProfileDefaults,
+  fetchSchema,
+  type ProfileDefaultsResponse,
+} from "@/lib/databases/api";
 import {
   PROFILE_STAGE_ORDER,
   type DatabaseProfile,
@@ -21,6 +28,14 @@ import {
   type ProfileFlags,
   type SchemaResponse,
 } from "@/types/database";
+
+const EMPTY_FLAGS: ProfileFlags = {
+  with_summaries: false,
+  with_quirks: false,
+  with_lsh: false,
+  with_vectors: false,
+  with_table_descriptions: false,
+};
 
 const PENDING_STEPS: ProfileStep[] = PROFILE_STAGE_ORDER.map((stage) => ({
   stage,
@@ -31,6 +46,12 @@ const PENDING_STEPS: ProfileStep[] = PROFILE_STAGE_ORDER.map((stage) => ({
   note: null,
 }));
 
+function mergeDefaults(
+  defaults: Partial<ProfileFlags> | undefined,
+): ProfileFlags {
+  return { ...EMPTY_FLAGS, ...defaults };
+}
+
 interface PageProps {
   params: Promise<{ id: string }>;
 }
@@ -39,18 +60,25 @@ export default function DatabaseDetailPage({ params }: PageProps) {
   const { id: rawId } = use(params);
   const dbId = decodeURIComponent(rawId);
 
+  const { isAdmin } = useCurrentUser();
   const [schema, setSchema] = useState<SchemaResponse | null>(null);
   const [profile, setProfile] = useState<DatabaseProfile | null>(null);
   const [profileLoading, setProfileLoading] = useState(true);
   const [schemaLoading, setSchemaLoading] = useState(true);
-  const [flags, setFlags] = useState<ProfileFlags>({
-    with_summaries: false,
-    with_quirks: false,
-    with_lsh: false,
-    with_vectors: false,
-  });
+  const [defaults, setDefaults] = useState<ProfileDefaultsResponse | null>(null);
+  const [flags, setFlags] = useState<ProfileFlags>(EMPTY_FLAGS);
 
   const { state, start, confirmCost, reset } = useProfileRun(dbId);
+
+  // Fetch profile defaults from server on mount.
+  useEffect(() => {
+    fetchProfileDefaults().then((d) => {
+      if (d) {
+        setDefaults(d);
+        setFlags(mergeDefaults(d.flags));
+      }
+    });
+  }, []);
 
   const [costEstimate, setCostEstimate] =
     useState<ProfileCostEstimatePayload | null>(null);
@@ -188,29 +216,50 @@ export default function DatabaseDetailPage({ params }: PageProps) {
               a cost estimate when the run starts.
             </p>
 
-            <div className="mt-4">
-              <StageCheckboxGroup
-                flags={flags}
-                onChange={setFlags}
-                disabled={runInFlight}
-              />
-            </div>
-
-            <div className="mt-4 flex items-center gap-2">
-              <Button
-                onClick={() => start(flags)}
-                disabled={runInFlight}
-                className="flex-1"
-              >
-                <Play className="size-4 mr-1.5" />
-                {runInFlight ? "Running…" : "Run profiling"}
-              </Button>
-              {(state.kind === "succeeded" || state.kind === "failed") && (
-                <Button variant="ghost" size="sm" onClick={reset}>
-                  Reset
+            {isAdmin ? (
+              <>
+                <div className="mt-4">
+                  <StageCheckboxGroup
+                    flags={flags}
+                    onChange={setFlags}
+                    disabled={runInFlight}
+                  />
+                </div>
+                <div className="mt-4 flex items-center gap-2">
+                  <Button
+                    onClick={() => start(flags)}
+                    disabled={runInFlight}
+                    className="flex-1"
+                  >
+                    <Play className="size-4 mr-1.5" />
+                    {runInFlight ? "Running…" : "Run profiling"}
+                  </Button>
+                  {(state.kind === "succeeded" || state.kind === "failed") && (
+                    <Button variant="ghost" size="sm" onClick={reset}>
+                      Reset
+                    </Button>
+                  )}
+                </div>
+              </>
+            ) : (
+              <div className="mt-4">
+                <Button
+                  onClick={() => start(flags)}
+                  disabled={runInFlight}
+                  className="w-full"
+                >
+                  <Play className="size-4 mr-1.5" />
+                  {runInFlight ? "Running…" : "Run profiling"}
                 </Button>
-              )}
-            </div>
+                {(state.kind === "succeeded" || state.kind === "failed") && (
+                  <div className="mt-2">
+                    <Button variant="ghost" size="sm" onClick={reset} className="w-full">
+                      Reset
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
 
             {profile && !runInFlight && (
               <div className="mt-3 pt-3 border-t border-border">

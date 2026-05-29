@@ -35,6 +35,12 @@ const STAGES: readonly StageRow[] = [
     description: "Column-embedding vectors for semantic search.",
     expensive: true,
   },
+  {
+    key: "with_table_descriptions",
+    label: "Table Descriptions",
+    description: "LLM-generated paragraph per table describing purpose and key columns (1 call per table).",
+    expensive: true,
+  },
 ] as const;
 
 interface StageCheckboxGroupProps {

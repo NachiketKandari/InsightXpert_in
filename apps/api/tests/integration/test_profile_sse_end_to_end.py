@@ -92,7 +92,7 @@ def test_profile_cost_gate_closes_stream_without_run(authed_client: TestClient, 
 
 
 def test_profile_sse_end_to_end_confirmed(authed_client: TestClient, fake_llm_ok):
-    """With confirmed=true and every flag on, the 6 stages must emit
+    """With confirmed=true and every flag on, the 7 stages must emit
     start/complete in order and conclude with profile_done.
     """
     # Inject the mock LLM onto app.state so the route's LLM-resolve path
@@ -115,7 +115,7 @@ def test_profile_sse_end_to_end_confirmed(authed_client: TestClient, fake_llm_ok
 
     # Expected contract: for each of the 6 stages, a started/completed pair,
     # then profile_done. Order must match STAGE_ORDER.
-    expected_stages = ["schema", "stats", "summaries", "quirks", "lsh", "vectors"]
+    expected_stages = ["schema", "stats", "join_graph", "summaries", "quirks", "lsh", "vectors", "table_descriptions"]
     stage_starts = [
         e["data"]["stage"] for e in events if e["type"] == "profile_stage_started"
     ]
@@ -135,8 +135,8 @@ def test_profile_sse_end_to_end_confirmed(authed_client: TestClient, fake_llm_ok
 
 
 def test_profile_schema_stats_only_no_llm(authed_client: TestClient):
-    """All flags off → no cost-gate, no LLM needed, still emits 6 stage pairs
-    (summaries/quirks/lsh/vectors are marked note='skipped').
+    """All flags off → no cost-gate, no LLM needed, still emits 7 stage pairs
+    (summaries/quirks/lsh/vectors/table_descriptions are marked note='skipped').
     """
     r = authed_client.post(
         "/api/v1/databases/toxicology/profile",
@@ -145,12 +145,12 @@ def test_profile_schema_stats_only_no_llm(authed_client: TestClient):
     assert r.status_code == 200, r.text
     events = _parse_sse_stream(r.text)
     starts = [e["data"]["stage"] for e in events if e["type"] == "profile_stage_started"]
-    assert starts == ["schema", "stats", "summaries", "quirks", "lsh", "vectors"]
+    assert starts == ["schema", "stats", "join_graph", "summaries", "quirks", "lsh", "vectors", "table_descriptions"]
     # Skipped stages carry note='skipped'
     skipped = [
         e["data"]
         for e in events
         if e["type"] == "profile_stage_completed" and e["data"].get("note") == "skipped"
     ]
-    assert [s["stage"] for s in skipped] == ["summaries", "quirks", "lsh", "vectors"]
+    assert [s["stage"] for s in skipped] == ["summaries", "quirks", "lsh", "vectors", "table_descriptions"]
     assert events[-1]["type"] == "profile_done"

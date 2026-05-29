@@ -89,10 +89,11 @@ class ProfileFlags:
     with_quirks: bool = False
     with_lsh: bool = False
     with_vectors: bool = False
+    with_table_descriptions: bool = False
 
     @property
     def any_llm(self) -> bool:
-        return self.with_summaries or self.with_quirks
+        return self.with_summaries or self.with_quirks or self.with_table_descriptions
 
     @property
     def any(self) -> bool:
@@ -101,6 +102,7 @@ class ProfileFlags:
             or self.with_quirks
             or self.with_lsh
             or self.with_vectors
+            or self.with_table_descriptions
         )
 
 
@@ -119,6 +121,7 @@ def estimate_cost(
     flags: ProfileFlags,
     batch_size: int,
     *,
+    table_count: int = 0,
     provider: str = "",
     model: str = "",
 ) -> CostEstimate:
@@ -126,7 +129,8 @@ def estimate_cost(
     bs = max(1, batch_size)
     calls_summaries = math.ceil(columns / bs) if flags.with_summaries else 0
     calls_quirks = math.ceil(columns / bs) if flags.with_quirks else 0
-    total = calls_summaries + calls_quirks
+    calls_table_descs = table_count if flags.with_table_descriptions else 0
+    total = calls_summaries + calls_quirks + calls_table_descs
     # Flash ~2s per call; floor 10s so the confirmation modal never says "0s".
     seconds = max(10, total * 2)
     return CostEstimate(
@@ -473,6 +477,17 @@ async def run_profile_stream(
                 stage_timings=stage_timings,
             )
 
+            # --- Phase 5: table descriptions (depends on summaries + quirks) ---
+            profile = await _maybe_run_table_descriptions(
+                emitter=emitter,
+                db_id=db_id,
+                profile=profile,
+                run=effective.with_table_descriptions,
+                llm=llm,
+                user_hints=user_hints,
+                stage_timings=stage_timings,
+            )
+
             return profile
 
     except asyncio.CancelledError:
@@ -708,6 +723,44 @@ async def _maybe_run_vectors(
         db_id,
         duration_ms=duration_ms,
     )
+
+
+async def _maybe_run_table_descriptions(
+    *,
+    emitter: EventEmitter,
+    db_id: str,
+    profile: DatabaseProfile,
+    run: bool,
+    llm: object | None,
+    user_hints: str = "",
+    stage_timings: dict[str, int] | None = None,
+) -> DatabaseProfile:
+    import time as _time
+
+    if not run or llm is None:
+        await _emit_stage_started(emitter, "table_descriptions", db_id)
+        await _emit_stage_completed(
+            emitter, "table_descriptions", db_id, duration_ms=0, note="skipped"
+        )
+        return profile
+
+    t0 = _time.perf_counter()
+    await _emit_stage_started(emitter, "table_descriptions", db_id)
+    from .table_description import TableDescriptionGenerator
+
+    profile = await TableDescriptionGenerator(llm).async_generate(
+        profile, unified_evidence=user_hints
+    )
+    duration_ms = int((_time.perf_counter() - t0) * 1000)
+    if stage_timings is not None:
+        stage_timings["table_descriptions"] = duration_ms
+    await _emit_stage_completed(
+        emitter,
+        "table_descriptions",
+        db_id,
+        duration_ms=duration_ms,
+    )
+    return profile
 
 
 __all__ = [

@@ -45,6 +45,7 @@ class TableProfile(BaseModel):
     name: str
     row_count: int
     columns: list[ColumnProfile]
+    description: str = ""
 
 
 class DatabaseProfile(BaseModel):

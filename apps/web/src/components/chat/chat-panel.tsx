@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { ListChecks, Share2 } from "lucide-react";
+import Link from "next/link";
+import { AlertTriangle, ListChecks, Share2 } from "lucide-react";
 import { useSSEChat } from "@/hooks/use-sse-chat";
 import { useChatStore } from "@/stores/chat-store";
 import { useSettingsStore } from "@/stores/settings-store";
@@ -9,6 +10,7 @@ import { useDatabases } from "@/hooks/use-databases";
 import { WelcomeScreen } from "@/components/chat/welcome-screen";
 import { MessageList } from "@/components/chat/message-list";
 import { MessageInput } from "@/components/chat/message-input";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ShareDialog } from "@/components/chat/share-dialog";
 
@@ -35,6 +37,8 @@ export function ChatPanel() {
   const conversationId = conversation?.id ?? null;
 
   const currentDb = databases.find((d) => d.db_id === selectedDbId);
+  const isUnprofiled = selectedDbId && currentDb && !currentDb.has_profile;
+
   const dbKindHint: "bundled" | "uploaded" | "postgres" | "libsql" | "none" | "unknown" =
     !selectedDbId
       ? "none"
@@ -54,6 +58,28 @@ export function ChatPanel() {
     },
     [sendMessage, agentMode],
   );
+
+  const unprofiledNotice = isUnprofiled ? (
+    <div className="flex items-center gap-2 px-3 py-2 mx-3 mb-1 rounded-md border border-orange-500/30 bg-orange-500/5">
+      <AlertTriangle className="size-3.5 text-orange-500 shrink-0" />
+      <div className="flex-1 min-w-0">
+        <p className="text-xs text-muted-foreground">
+          <Badge
+            variant="outline"
+            className="mr-1.5 text-[10px] leading-none border-orange-500/50 text-orange-600 dark:text-orange-400"
+          >
+            Not Profiled
+          </Badge>
+          This database needs to be profiled before you can query it.
+        </p>
+      </div>
+      <Button asChild size="sm" variant="outline" className="h-7 text-xs">
+        <Link href={`/databases/${encodeURIComponent(selectedDbId)}`}>
+          Run Profile
+        </Link>
+      </Button>
+    </div>
+  ) : null;
 
   return (
     <div className="flex h-full flex-col">
@@ -106,11 +132,15 @@ export function ChatPanel() {
             ) : null}
           </div>
           <MessageList onRetry={handleSend} />
-          <MessageInput
-            onSend={handleSend}
-            onStop={stopStreaming}
-            isStreaming={isStreaming}
-          />
+          {isUnprofiled ? (
+            unprofiledNotice
+          ) : (
+            <MessageInput
+              onSend={handleSend}
+              onStop={stopStreaming}
+              isStreaming={isStreaming}
+            />
+          )}
         </>
       ) : (
         <WelcomeScreen
