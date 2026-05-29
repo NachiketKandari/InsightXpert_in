@@ -456,23 +456,6 @@ async def run_profile_stream(
                 stage_timings=stage_timings,
             )
 
-            # --- final done ----------------------------------------------
-            total_duration_ms = int((_time.perf_counter() - run_start) * 1000)
-            await emitter.emit(
-                ChunkType.profile_done,
-                ProfileDonePayload(
-                    db_id=db_id,
-                    table_count=len(profile.tables),
-                    column_count=all_columns,
-                    summaries_populated=sum(
-                        1
-                        for t in profile.tables
-                        for c in t.columns
-                        if c.short_summary
-                    ),
-                    total_duration_ms=total_duration_ms,
-                ),
-            )
             return profile
 
     except asyncio.CancelledError:

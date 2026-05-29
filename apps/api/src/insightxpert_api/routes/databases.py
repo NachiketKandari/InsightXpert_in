@@ -61,7 +61,7 @@ from ..services.database_service import DatabaseService
 from ..services.profile_service import ProfileService
 from ..jobs.sample_questions_job import run_sample_questions_job
 from ..sample_questions import repository as sq_repo
-from ..sse.chunks import ChunkType, ProfileCostEstimatePayload
+from ..sse.chunks import ChunkType, ProfileCostEstimatePayload, ProfileDonePayload
 from ..sse.emitter import EventEmitter
 from ..storage import build_store
 
@@ -856,6 +856,7 @@ async def _run_profile_v2(
     ref: object | None = None,
 ) -> None:
     try:
+        run_start = time.monotonic()
         profile = await run_profile_stream(
             emitter,
             db_id=db_id,
@@ -874,6 +875,21 @@ async def _run_profile_v2(
         )
         if profile is not None:
             prof_svc.save(session_id, db_id, profile)
+            # Emit profile_done AFTER save so the frontend doesn't race a GET
+            # before the row is committed (PostgreSQL over the network).
+            total_duration_ms = int((time.monotonic() - run_start) * 1000)
+            await emitter.emit(
+                ChunkType.profile_done,
+                ProfileDonePayload(
+                    db_id=db_id,
+                    table_count=len(profile.tables),
+                    column_count=sum(len(t.columns) for t in profile.tables),
+                    summaries_populated=sum(
+                        1 for t in profile.tables for c in t.columns if c.short_summary
+                    ),
+                    total_duration_ms=total_duration_ms,
+                ),
+            )
             # Persist join graph from disk to DB so the schema linker can load it.
             if settings.indices_dir:
                 jg_path = Path(settings.indices_dir) / db_id / "join_graph.json"
@@ -1080,7 +1096,7 @@ async def run_profile(
                 log.warning("profile.llm_construct_failed", error=str(exc))
                 llm = None
 
-    asyncio.create_task(
+    _spawn_background_task(
         _run_profile_v2(
             db_id=db_id,
             db_path=ref.local_path,
