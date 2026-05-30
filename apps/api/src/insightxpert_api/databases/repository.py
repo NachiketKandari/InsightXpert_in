@@ -123,6 +123,22 @@ def list_owned(owner_user_id: str) -> list[dict[str, Any]]:
     return [dict(r._mapping) for r in rows]
 
 
+def list_owner_map() -> dict[str, str | None]:
+    """Return ``{db_id: owner_user_id}`` for every row in the ``databases`` table.
+
+    Used by the list endpoint so the FE can gate owner-only actions without an
+    extra round-trip per database.
+    """
+    with get_engine().connect() as conn:
+        rows = conn.execute(
+            select(
+                databases_table.c.db_id,
+                databases_table.c.owner_user_id,
+            )
+        ).all()
+    return {r.db_id: r.owner_user_id for r in rows}
+
+
 def delete(db_id: str) -> bool:
     """Delete a row and any rows in database_shares. Returns True if deleted."""
     with get_engine().begin() as conn:

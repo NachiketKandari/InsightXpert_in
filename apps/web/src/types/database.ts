@@ -22,6 +22,8 @@ export interface DatabaseListItem {
   table_count: number | null;
   column_count: number | null;
   row_count: number | null;
+  /** Owner user ID — null for bundled/seeded DBs with no owner row. */
+  owner_user_id: string | null;
 }
 
 export interface DatabaseUploadResponse {

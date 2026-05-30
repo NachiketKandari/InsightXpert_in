@@ -101,6 +101,7 @@ class DatabaseListItem(BaseModel):
     table_count: int | None = None
     column_count: int | None = None
     row_count: int | None = None
+    owner_user_id: str | None = None
 
 
 class UploadResponse(BaseModel):
@@ -195,10 +196,11 @@ async def list_databases(
     # Run all three independent data fetches in parallel — they have no
     # dependency on each other. Wall time drops from sum-of-three to
     # max-of-three.
-    refs, visible_ids, summaries = await asyncio.gather(
+    refs, visible_ids, summaries, owners = await asyncio.gather(
         asyncio.to_thread(svc.list, cu.id),
         asyncio.to_thread(visibility_service.visible_ids, cu.id, is_admin),
         asyncio.to_thread(profiles_repo.list_summaries),
+        asyncio.to_thread(databases_repo.list_owner_map),
     )
     out: list[DatabaseListItem] = []
     for r in refs:
@@ -217,6 +219,7 @@ async def list_databases(
                 table_count=s["table_count"] if s else None,
                 column_count=s["column_count"] if s else None,
                 row_count=s["row_count"] if s else None,
+                owner_user_id=owners.get(r.db_id),
             )
         )
     return out

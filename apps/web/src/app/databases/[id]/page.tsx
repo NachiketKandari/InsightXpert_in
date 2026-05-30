@@ -14,6 +14,7 @@ import { ProfileStepper } from "@/components/databases/profile-stepper";
 import { SchemaPanel } from "@/components/databases/schema-panel";
 import { StageCheckboxGroup } from "@/components/databases/stage-checkbox-group";
 import { useCurrentUser } from "@/hooks/use-current-user";
+import { useDatabases } from "@/hooks/use-databases";
 import { useProfileRun, type ProfileStep } from "@/hooks/useProfileRun";
 import {
   deleteProfile,
@@ -62,8 +63,9 @@ export default function DatabaseDetailPage({ params }: PageProps) {
   const { id: rawId } = use(params);
   const dbId = decodeURIComponent(rawId);
 
-  const { isAdmin } = useCurrentUser();
+  const { isAdmin, user } = useCurrentUser();
   const queryClient = useQueryClient();
+  const { data: dbList } = useDatabases();
   const [schema, setSchema] = useState<SchemaResponse | null>(null);
   const [profile, setProfile] = useState<DatabaseProfile | null>(null);
   const [profileLoading, setProfileLoading] = useState(true);
@@ -72,6 +74,9 @@ export default function DatabaseDetailPage({ params }: PageProps) {
   const [flags, setFlags] = useState<ProfileFlags>(EMPTY_FLAGS);
 
   const { state, start, confirmCost, reset } = useProfileRun(dbId);
+
+  const ownerUserId = (dbList ?? []).find((d) => d.db_id === dbId)?.owner_user_id ?? null;
+  const canDelete = isAdmin || (user?.id != null && ownerUserId === user.id);
 
   // Fetch profile defaults from server on mount.
   useEffect(() => {
@@ -276,15 +281,17 @@ export default function DatabaseDetailPage({ params }: PageProps) {
                   <Download className="size-3.5 mr-1.5" />
                   Download profile (.xlsx)
                 </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="w-full text-muted-foreground hover:text-destructive"
-                  onClick={handleDeleteProfile}
-                >
-                  <Trash2 className="size-3.5 mr-1.5" />
-                  Delete profile data
-                </Button>
+                {canDelete && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="w-full text-muted-foreground hover:text-destructive"
+                    onClick={handleDeleteProfile}
+                  >
+                    <Trash2 className="size-3.5 mr-1.5" />
+                    Delete profile data
+                  </Button>
+                )}
               </div>
             )}
           </div>
