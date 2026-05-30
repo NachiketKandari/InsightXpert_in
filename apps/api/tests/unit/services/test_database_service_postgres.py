@@ -18,10 +18,27 @@ def _svc_with_stubbed_pg_rows(tmp_path: Path, rows: list[dict]) -> DatabaseServi
     return svc
 
 
+_TEST_KEY = "GbhRElFcz5W3rC9V8a4GQYoT3p6jZCqZ4EQRQyGzwYY="
+
+
 def test_list_unions_postgres_rows_from_databases_table(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    monkeypatch.setenv("DATABASE_URL_TOXICOLOGY_PG", "postgresql://u:p@h:5432/d")
+    monkeypatch.setenv("CREDENTIAL_ENCRYPTION_KEY", _TEST_KEY)
+    from insightxpert_api.config import get_settings
+    get_settings.cache_clear()
+    from insightxpert_api.connections.encryption import encrypt
+    import json
+
+    cfg = {
+        "kind": "postgres",
+        "host": "h",
+        "port": 5432,
+        "username": "u",
+        "password": "p",
+        "database": "d",
+    }
+    encrypted_cfg = encrypt(json.dumps(cfg))
 
     svc = _svc_with_stubbed_pg_rows(
         tmp_path,
@@ -30,8 +47,7 @@ def test_list_unions_postgres_rows_from_databases_table(
                 "db_id": "toxicology_pg",
                 "kind": "postgres",
                 "visibility": "public",
-                "connection_url_env_var": "DATABASE_URL_TOXICOLOGY_PG",
-                "dialect": "postgres",
+                "connection_config_encrypted": encrypted_cfg,
             }
         ],
     )
@@ -45,16 +61,17 @@ def test_list_unions_postgres_rows_from_databases_table(
     pg = by_id["toxicology_pg"]
     assert pg.dialect == "postgres"
     assert pg.local_path is None
-    assert pg.connection_url == "postgresql://u:p@h:5432/d"
-    assert pg.connection_url_env_var == "DATABASE_URL_TOXICOLOGY_PG"
+    assert pg.connection_url == "postgresql+psycopg://u:p@h:5432/d?sslmode=require"
 
 
-def test_missing_env_var_skips_row(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+def test_decrypt_failure_skips_row(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    """Listing must not fail hard when an env var is unset — just drop the row
-    with a warning. Hard-fail on use is the operator's cue."""
-    monkeypatch.delenv("DATABASE_URL_TOXICOLOGY_PG", raising=False)
+    """Listing must not fail hard when decryption fails — just drop the row with a warning."""
+    monkeypatch.setenv("CREDENTIAL_ENCRYPTION_KEY", _TEST_KEY)
+    from insightxpert_api.config import get_settings
+    get_settings.cache_clear()
+
     svc = _svc_with_stubbed_pg_rows(
         tmp_path,
         [
@@ -62,8 +79,7 @@ def test_missing_env_var_skips_row(
                 "db_id": "toxicology_pg",
                 "kind": "postgres",
                 "visibility": "public",
-                "connection_url_env_var": "DATABASE_URL_TOXICOLOGY_PG",
-                "dialect": "postgres",
+                "connection_config_encrypted": "invalid-garbage-encrypted-string",
             }
         ],
     )

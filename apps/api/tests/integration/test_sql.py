@@ -33,7 +33,7 @@ def test_sql_execute_syntax_error(authed_client: TestClient):
         json={"db_id": "california_schools", "sql": "SELECT not valid sql!!"},
     )
     assert r.status_code == 400
-    assert r.json()["detail"] == "sql_syntax"
+    assert r.json()["detail"] == "sql_error"
 
 
 def test_sql_execute_unknown_db(authed_client: TestClient):

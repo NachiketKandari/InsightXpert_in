@@ -30,5 +30,6 @@ def test_client_config_shape(client: TestClient):
         "agent_process_sidebar",
         "clarification_enabled",
         "stats_context_injection",
+        "onboarding_enabled",
     }
     assert set(feats.keys()) == expected

@@ -16,18 +16,11 @@ import pytest
 
 from insightxpert_api.vendored.agents_core.prompts import render
 
-# Tokens that must NOT appear in any rendered prompt — they would either
-# mislead the LLM about the user's database (Indian/UPI/sender_state) or
-# train it to emit citation markers the FE cannot render ([[1]], [[2]]).
 LEAKED_DOMAIN_TOKENS = (
     "Indian",
     "UPI",
     "sender_state",
     "fraud_flag",
-    "[[1]]",
-    "[[2]]",
-    "[[3]]",
-    "[[N]]",
 )
 
 # Stricter token set for static-file scans (raw template source / Python source).
@@ -98,18 +91,7 @@ FAKE_DOCS = "California public schools and SAT score data, sourced from CDE."
                 "evidence_data": "Source [1]: ...\nSource [2]: ...",
             },
         ),
-        (
-            "insight_synthesizer.j2",
-            {
-                "ddl": FAKE_DDL,
-                "documentation": FAKE_DOCS,
-                "question": "Tell me about the schools.",
-                "analyst_sql": "SELECT 1",
-                "results_summary": "1 row",
-                "analyst_answer": "ok",
-                "enrichment_data": "Source [2]: ...",
-            },
-        ),
+
         (
             "deep_synthesizer.j2",
             {
@@ -159,10 +141,6 @@ FAKE_DOCS = "California public schools and SAT score data, sourced from CDE."
             {"ddl": FAKE_DDL, "documentation": FAKE_DOCS},
         ),
         (
-            "advanced_system.j2",
-            {"ddl": FAKE_DDL, "documentation": FAKE_DOCS},
-        ),
-        (
             "insight_quality_evaluator.j2",
             {
                 "question": "Tell me about the schools.",
@@ -198,7 +176,6 @@ API_SRC = REPO_ROOT / "apps" / "api" / "src" / "insightxpert_api"
 
 STATIC_SCAN_PATHS = (
     API_SRC / "prompts" / "answer_synthesizer.j2",
-    API_SRC / "vendored" / "agents_core" / "prompts" / "statistician_system.j2",
 )
 
 

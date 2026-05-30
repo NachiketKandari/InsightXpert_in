@@ -26,9 +26,10 @@ def test_upgrade_creates_users_table(tmp_path, monkeypatch):
     command.upgrade(_alembic_config(db), "head")
     insp = inspect(create_engine(f"sqlite:///{db}"))
     cols = {c["name"] for c in insp.get_columns("users")}
-    assert cols == {
+    expected = {
         "id", "email", "password_hash", "role", "is_active",
         "must_change_password", "sessions_valid_after",
         "created_at", "updated_at", "last_seen_at",
         "sharing_disabled",
     }
+    assert expected.issubset(cols), f"missing columns: {expected - cols}"

@@ -33,9 +33,12 @@ def test_decrypt_rejects_tampered(monkeypatch):
 
 
 def test_missing_key_raises(monkeypatch):
-    monkeypatch.delenv("CREDENTIAL_ENCRYPTION_KEY", raising=False)
-    get_settings.cache_clear()
+    from insightxpert_api.config import Settings
     from insightxpert_api.connections.encryption import _get_fernet
+
+    settings = Settings()
+    settings.credential_encryption_key = None
+    monkeypatch.setattr("insightxpert_api.connections.encryption.get_settings", lambda: settings)
 
     with pytest.raises(ValueError, match="CREDENTIAL_ENCRYPTION_KEY"):
         _get_fernet()

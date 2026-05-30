@@ -9,6 +9,7 @@ All writes use a single ``engine.begin()`` transaction; reads use
 
 from __future__ import annotations
 
+import threading
 import time
 import uuid
 from typing import Any
@@ -174,6 +175,9 @@ def list_due_automations(now_ts: int, *, _engine: Engine | None = None) -> list[
     return [dict(r._mapping) for r in rows]
 
 
+_sqlite_claim_lock = threading.Lock()
+
+
 def claim_due_automations(
     *, now_ts: int, batch_size: int
 ) -> list[dict[str, Any]]:
@@ -190,8 +194,8 @@ def claim_due_automations(
     engine = get_background_engine()
     dialect = engine.dialect.name
 
-    with engine.begin() as conn:
-        if dialect == "postgresql":
+    if dialect == "postgresql":
+        with engine.begin() as conn:
             stmt = (
                 select(automations)
                 .where(
@@ -205,33 +209,41 @@ def claim_due_automations(
                 .limit(batch_size)
                 .with_for_update(skip_locked=True)
             )
-        else:
-            stmt = (
-                select(automations)
-                .where(
-                    and_(
-                        automations.c.is_active.is_(True),
-                        (automations.c.next_run_at.is_(None))
-                        | (automations.c.next_run_at <= now_ts),
-                    )
-                )
-                .order_by(automations.c.next_run_at.asc())
-                .limit(batch_size)
+            rows = conn.execute(stmt).all()
+            if not rows:
+                return []
+            claimed_ids = [r._mapping["id"] for r in rows]
+            conn.execute(
+                update(automations)
+                .where(automations.c.id.in_(claimed_ids))
+                .values(next_run_at=now_ts + 1)
             )
-        rows = conn.execute(stmt).all()
-        if not rows:
-            return []
-        claimed_ids = [r._mapping["id"] for r in rows]
-        # Park next_run_at past the due predicate so a concurrent SELECT on
-        # another replica won't see these rows. The runner's
-        # mark_run_completed will re-set next_run_at to the true cron tick
-        # post-execution.
-        conn.execute(
-            update(automations)
-            .where(automations.c.id.in_(claimed_ids))
-            .values(next_run_at=now_ts + 1)
-        )
-        return [dict(r._mapping) for r in rows]
+            return [dict(r._mapping) for r in rows]
+    else:
+        with _sqlite_claim_lock:
+            with engine.begin() as conn:
+                stmt = (
+                    select(automations)
+                    .where(
+                        and_(
+                            automations.c.is_active.is_(True),
+                            (automations.c.next_run_at.is_(None))
+                            | (automations.c.next_run_at <= now_ts),
+                        )
+                    )
+                    .order_by(automations.c.next_run_at.asc())
+                    .limit(batch_size)
+                )
+                rows = conn.execute(stmt).all()
+                if not rows:
+                    return []
+                claimed_ids = [r._mapping["id"] for r in rows]
+                conn.execute(
+                    update(automations)
+                    .where(automations.c.id.in_(claimed_ids))
+                    .values(next_run_at=now_ts + 1)
+                )
+                return [dict(r._mapping) for r in rows]
 
 
 def list_active_automations(*, _engine: Engine | None = None) -> list[dict[str, Any]]:

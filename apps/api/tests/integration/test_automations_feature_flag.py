@@ -10,21 +10,29 @@ from fastapi.testclient import TestClient
 from insightxpert_api.main import create_app
 
 
-def test_automations_route_404_when_flag_off(fresh_db):
-    # flag default is False; no env override
+def test_automations_route_404_when_flag_off(monkeypatch, fresh_db):
+    from insightxpert_api.config import get_settings
+    monkeypatch.setenv("AUTOMATIONS_ENABLED", "false")
+    get_settings.cache_clear()
     client = TestClient(create_app())
     r = client.get("/api/v1/automations")
     # Without auth we might get 401, but route itself shouldn't be mounted → 404
     assert r.status_code == 404
 
 
-def test_notifications_route_404_when_flag_off(fresh_db):
+def test_notifications_route_404_when_flag_off(monkeypatch, fresh_db):
+    from insightxpert_api.config import get_settings
+    monkeypatch.setenv("AUTOMATIONS_ENABLED", "false")
+    get_settings.cache_clear()
     client = TestClient(create_app())
     r = client.get("/api/v1/notifications")
     assert r.status_code == 404
 
 
-def test_trigger_templates_route_404_when_flag_off(fresh_db):
+def test_trigger_templates_route_404_when_flag_off(monkeypatch, fresh_db):
+    from insightxpert_api.config import get_settings
+    monkeypatch.setenv("AUTOMATIONS_ENABLED", "false")
+    get_settings.cache_clear()
     client = TestClient(create_app())
     r = client.get("/api/v1/automations/templates")
     assert r.status_code == 404

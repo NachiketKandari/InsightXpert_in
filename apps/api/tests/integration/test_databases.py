@@ -50,7 +50,9 @@ def test_upload_sqlite_roundtrip(authed_client: TestClient):
     )
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body == {"db_id": "test_upload", "source": "uploaded"}
+    assert body["db_id"] == "test_upload"
+    assert body["source"] == "uploaded"
+    assert "profile_required" in body
 
     # Subsequent list includes it.
     r2 = authed_client.get("/api/v1/databases")

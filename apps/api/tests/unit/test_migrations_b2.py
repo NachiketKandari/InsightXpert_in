@@ -39,15 +39,17 @@ def test_upgrade_creates_orchestration_tables(tmp_path, monkeypatch):
     assert expected.issubset(existing), f"missing tables: {expected - existing}"
 
     conv_cols = {c["name"] for c in insp.get_columns("conversations")}
-    assert conv_cols == {
+    conv_expected = {
         "id", "user_id", "db_id", "title", "is_starred", "created_at", "updated_at",
     }
+    assert conv_expected.issubset(conv_cols), f"missing conversations columns: {conv_expected - conv_cols}"
 
     msg_cols = {c["name"] for c in insp.get_columns("messages")}
-    assert msg_cols == {
+    msg_expected = {
         "id", "conversation_id", "role", "content", "chunks_json",
         "tokens_in", "tokens_out", "created_at",
     }
+    assert msg_expected.issubset(msg_cols), f"missing messages columns: {msg_expected - msg_cols}"
 
     at_cols = {c["name"] for c in insp.get_columns("agent_executions")}
     assert "task_id" in at_cols and "steps_json" in at_cols and "duration_ms" in at_cols

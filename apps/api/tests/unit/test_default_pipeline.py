@@ -20,6 +20,11 @@ class _FakeSettings:
     gemini_embed_model: str = "gemini-embedding-001"
     max_refinement_iterations: int = 2
     sql_row_limit: int = 1000
+    indices_dir: str = "./indices"
+    single_sql_column_threshold: int = 25
+    llm_provider: str = "gemini"
+    deepseek_api_key: str = ""
+    deepseek_chat_model: str = ""
 
 
 def test_default_pipeline_has_seven_ordered_stages(tmp_path):
@@ -28,7 +33,7 @@ def test_default_pipeline_has_seven_ordered_stages(tmp_path):
     prof_svc = ProfileService(store)
 
     pipeline = default_pipeline(_FakeSettings(), db_svc, prof_svc)
-    stages = pipeline.stages
+    stages = pipeline._stages
     assert len(stages) == 7
     assert [s.name for s in stages] == [
         "profiler",

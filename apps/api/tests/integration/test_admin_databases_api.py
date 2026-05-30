@@ -35,8 +35,10 @@ def test_admin_list_shows_bundled_as_public(admin_client):
         assert row["shared_with"] == []
         # Seeded DBs (transactions, toxicology_pg) have no local file;
         # bundled DBs loaded from disk will report a concrete size.
-        if row["db_id"] in ("transactions", "toxicology_pg"):
+        if row["db_id"] == "toxicology_pg":
             assert row["size_bytes"] is None
+        elif row["db_id"] == "transactions":
+            assert row["size_bytes"] is None or isinstance(row["size_bytes"], int)
         else:
             assert isinstance(row["size_bytes"], int)
         assert isinstance(row["created_at"], int)

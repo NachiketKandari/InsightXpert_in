@@ -235,10 +235,10 @@ async def test_automation_runner_emits_usage_when_tokens_burned(fresh_db) -> Non
         # via a wrapped get_automation that also tweaks the adapter.
         original = r.repository.get_automation
 
-        def _side_effect(aid):
+        def _side_effect(aid, *args, **kwargs):
             fake_llm.input_tokens_used += 2_500
             fake_llm.output_tokens_used += 700
-            return original(aid)
+            return original(aid, *args, **kwargs)
 
         with patch.object(r.repository, "get_automation", side_effect=_side_effect):
             await r._execute_one(_App(), "a1")

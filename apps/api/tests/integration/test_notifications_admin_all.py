@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from fastapi.testclient import TestClient
+from insightxpert_api.main import create_app
 from insightxpert_api.automations import notifications as notif_module
 
 
@@ -45,8 +47,11 @@ def test_admin_all_unread_filter(admin_client_automations):
     assert "n1" not in titles
 
 
-def test_admin_all_feature_flag_off(admin_client):
+def test_admin_all_feature_flag_off(monkeypatch, fresh_db):
     """With AUTOMATIONS_ENABLED=false, the route isn't mounted → 404."""
-    client, _ = admin_client
+    from insightxpert_api.config import get_settings
+    monkeypatch.setenv("AUTOMATIONS_ENABLED", "false")
+    get_settings.cache_clear()
+    client = TestClient(create_app())
     r = client.get("/api/v1/notifications/all")
     assert r.status_code == 404

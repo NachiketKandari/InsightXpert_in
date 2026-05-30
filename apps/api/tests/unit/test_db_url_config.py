@@ -18,7 +18,7 @@ def _make_settings(**overrides: str) -> Settings:
         "GEMINI_API_KEY": "test-key",
     }
     base.update(overrides)
-    return Settings(**base)  # type: ignore[call-arg]
+    return Settings(_env_file=None, **base)  # type: ignore[call-arg]
 
 
 def test_default_database_url_is_sqlite():
@@ -41,7 +41,7 @@ def test_pool_kwargs_present_for_non_sqlite_url(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", pg_url)
     s = _make_settings()
     # These fields must exist and be non-zero so get_engine() can forward them.
-    assert s.db_pool_size == 5
+    assert s.db_pool_size == 15
     assert s.db_max_overflow == 10
-    assert s.db_pool_timeout == 30
-    assert s.db_pool_pre_ping is True
+    assert s.db_pool_timeout == 10
+    assert s.db_pool_pre_ping is False

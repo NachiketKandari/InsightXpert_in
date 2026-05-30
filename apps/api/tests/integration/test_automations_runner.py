@@ -260,10 +260,10 @@ async def test_token_accounting_records_source_ref_id_as_run_id(
     # what would happen if the runner had invoked the LLM mid-run.
     real_insert_run = auto_repo.insert_run
 
-    def _insert_and_consume(values):
+    def _insert_and_consume(values, **kwargs):
         fake_llm.input_tokens_used += 10
         fake_llm.output_tokens_used += 5
-        return real_insert_run(values)
+        return real_insert_run(values, **kwargs)
 
     import unittest.mock as _mock
 

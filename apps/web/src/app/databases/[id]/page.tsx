@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { use, useCallback, useEffect, useState } from "react";
-import { ArrowLeft, Play, Trash2 } from "lucide-react";
+import { ArrowLeft, Download, Play, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -22,6 +22,7 @@ import {
   fetchSchema,
   type ProfileDefaultsResponse,
 } from "@/lib/databases/api";
+import { downloadProfileXlsx } from "@/lib/download-profile-xlsx";
 import {
   PROFILE_STAGE_ORDER,
   type DatabaseProfile,
@@ -265,7 +266,16 @@ export default function DatabaseDetailPage({ params }: PageProps) {
             )}
 
             {profile && !runInFlight && (
-              <div className="mt-3 pt-3 border-t border-border">
+              <div className="mt-3 pt-3 border-t border-border space-y-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="w-full"
+                  onClick={() => downloadProfileXlsx(profile)}
+                >
+                  <Download className="size-3.5 mr-1.5" />
+                  Download profile (.xlsx)
+                </Button>
                 <Button
                   variant="ghost"
                   size="sm"

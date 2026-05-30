@@ -132,7 +132,9 @@ def test_chat_poll_persists_chunks(authed_client: TestClient, patched_pipeline):
     cid = r.json()["conversation_id"]
     g = authed_client.get(f"/api/v1/conversations/{cid}")
     assert g.status_code == 200
-    assert len(g.json()["chunks"]) > 0
+    messages = g.json()["messages"]
+    assistant = next(m for m in messages if m["role"] == "assistant")
+    assert len(assistant["chunks"]) > 0
 
 
 def test_single_conversation_per_chat_call(authed_client: TestClient, patched_pipeline):

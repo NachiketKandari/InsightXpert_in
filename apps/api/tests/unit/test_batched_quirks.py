@@ -83,7 +83,12 @@ async def test_batched_quirks_45_cols_fires_3_batch_calls():
     assert len(aliased) == 45
 
 
-async def test_batched_quirks_partial_response_triggers_fallback(capsys):
+async def test_batched_quirks_partial_response_triggers_fallback(monkeypatch):
+    import insightxpert_api.profiling.batched_quirks as bq
+    from unittest.mock import MagicMock
+    mock_log = MagicMock()
+    monkeypatch.setattr(bq, "log", mock_log)
+
     profile, schema = _make_profile(20)
 
     async def _answer(prompt: str) -> str:
@@ -112,11 +117,11 @@ async def test_batched_quirks_partial_response_triggers_fallback(capsys):
     ]
     assert len(aliased) == 20
 
-    # Partial-response event was logged (captured from stdout; structlog's
-    # PrintLoggerFactory writes there, and re-configuring mid-test is
-    # unreliable because loggers cache on first use across the suite).
-    captured = capsys.readouterr().out
-    assert "profiling.batch_response_partial" in captured
+    # Partial-response event was logged (captured via mock)
+    assert any(
+        call.args[0] == "profiling.batch_response_partial"
+        for call in mock_log.warning.call_args_list
+    )
 
 
 async def test_batched_quirks_no_candidates_is_noop():

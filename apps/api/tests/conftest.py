@@ -42,7 +42,7 @@ def settings() -> Settings:
 
 
 @pytest.fixture
-def client() -> Iterator[TestClient]:
+def client(fresh_db) -> Iterator[TestClient]:
     with TestClient(create_app()) as c:
         yield c
 
@@ -128,8 +128,10 @@ def fresh_db(tmp_path, monkeypatch):
 
     from insightxpert_api.config import get_settings
     from insightxpert_api.db.engine import reset_engine_cache
+    from insightxpert_api.profiling.cache import get_process_profile_cache
     get_settings.cache_clear()
     reset_engine_cache()
+    get_process_profile_cache().clear()
 
     api_dir = Path(__file__).resolve().parents[1]  # apps/api
     cfg = Config(str(api_dir / "alembic.ini"))
@@ -141,6 +143,7 @@ def fresh_db(tmp_path, monkeypatch):
 
     reset_engine_cache()
     get_settings.cache_clear()
+    get_process_profile_cache().clear()
 
 
 # --- auth fixtures --------------------------------------------------------

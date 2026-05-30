@@ -9,6 +9,7 @@ test.describe("share-chat", () => {
     page,
     browser,
   }) => {
+    test.setTimeout(60000);
     await loginAsAdmin(page);
     await page.goto("/");
 
@@ -23,6 +24,7 @@ test.describe("share-chat", () => {
     // exists (i.e. the first message round-trip is underway). Wait for it.
     const shareOpenBtn = page.getByTestId("share-open-btn");
     await expect(shareOpenBtn).toBeVisible({ timeout: 30_000 });
+    await expect(shareOpenBtn).toBeEnabled({ timeout: 45_000 });
 
     // Open the share dialog and create a link.
     await shareOpenBtn.click();
@@ -49,6 +51,11 @@ test.describe("share-chat", () => {
     const revokeBtn = page.getByTestId("share-revoke-btn");
     await expect(revokeBtn).toBeVisible();
     await revokeBtn.click();
+
+    // Wait for the share dialog to transition back to the "Create share link" state
+    // (which confirms the delete mutation completed and the state was refetched).
+    const createBtnAfterRevoke = page.getByTestId("share-create-btn");
+    await expect(createBtnAfterRevoke).toBeVisible({ timeout: 15_000 });
 
     // Re-open the dialog (it may close after revoke) and confirm the URL is gone.
     // Then verify the previously-shared URL now returns 404.

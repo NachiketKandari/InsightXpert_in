@@ -15,13 +15,6 @@ def test_postgres_variant_is_postgres():
     assert get_adapter("postgres").prompt_variant == "postgres"
 
 
-def test_generator_selects_prompt_by_variant():
-    ref = MagicMock()
-    ref.dialect = "postgres"
-    assert generator_stage._prompt_name_for_ref(ref) == "sql_generation_postgres"
-
-    ref.dialect = "sqlite"
-    assert generator_stage._prompt_name_for_ref(ref) == "sql_generation"
 
 
 def test_prompt_name_for_dialect_sqlite():

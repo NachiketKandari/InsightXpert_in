@@ -87,11 +87,16 @@ async def test_batched_summary_45_cols_fires_3_batch_calls():
     assert len(populated) == 45
 
 
-async def test_batched_summary_partial_response_falls_back(capsys):
+async def test_batched_summary_partial_response_falls_back(monkeypatch):
     """A batch of 20 that returns only 18 entries → 2 single-col fallbacks.
 
     Also asserts the ``profiling.batch_response_partial`` structlog event is emitted.
     """
+    import insightxpert_api.profiling.batched_summary as bs
+    from unittest.mock import MagicMock
+    mock_log = MagicMock()
+    monkeypatch.setattr(bs, "log", mock_log)
+
     profile, schema = _make_profile(20)
 
     async def _answer(prompt: str) -> str:
@@ -123,11 +128,11 @@ async def test_batched_summary_partial_response_falls_back(capsys):
     populated = [c for t in result.tables for c in t.columns if c.short_summary]
     assert len(populated) == 20
 
-    # batch_response_partial was emitted. Captured via stdout — structlog's
-    # PrintLoggerFactory writes structured events there, and re-configuring
-    # it here is unreliable because loggers cache on first use across tests.
-    captured = capsys.readouterr().out
-    assert "profiling.batch_response_partial" in captured
+    # batch_response_partial was emitted. Captured via mock.
+    assert any(
+        call.args[0] == "profiling.batch_response_partial"
+        for call in mock_log.warning.call_args_list
+    )
 
 
 async def test_batched_summary_empty_profile_is_noop():
