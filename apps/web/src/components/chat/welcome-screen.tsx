@@ -358,7 +358,8 @@ export function WelcomeScreen({ onSendMessage, onStop, isStreaming }: WelcomeScr
   }, [allQuestions]);
 
   return (
-    <div className="flex flex-1 flex-col items-center justify-center px-3 sm:px-4 py-8 sm:py-12 overflow-y-auto">
+    <div className="flex-1 overflow-y-auto">
+      <div className="min-h-full flex flex-col items-center justify-center px-3 sm:px-4 py-8 sm:py-12">
       <motion.div
         initial={{ opacity: 0, y: -10 }}
         animate={{ opacity: 1, y: 0 }}
@@ -602,6 +603,7 @@ export function WelcomeScreen({ onSendMessage, onStop, isStreaming }: WelcomeScr
         onboardingCompleted={onboardingCompleted}
         loading={onboardingLoading || databasesLoading}
       />
+      </div>
     </div>
   );
 }
