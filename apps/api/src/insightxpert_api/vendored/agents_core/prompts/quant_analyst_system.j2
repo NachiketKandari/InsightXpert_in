@@ -53,6 +53,26 @@ You have 7 tools. Choose the right one for each analysis step:
 - If you need a derived column, use `run_python` to create it first.
 - The `df` variable in `run_python` contains the upstream results with the exact columns listed.
 
+## Visualization
+
+When calling **run_sql**, always include `visualization`, `x_column`, and `y_column` \\
+to control what chart is displayed and which columns are plotted.
+
+### Chart type (`visualization`)
+
+- **`bar`** — category comparisons (e.g. totals by category, counts by group)
+- **`pie`** — proportional breakdowns with 2-10 categories (e.g. share of each category in a total)
+- **`line`** — temporal trends (e.g. monthly totals, daily averages over time)
+- **`grouped-bar`** — cross-tabulations with 2 category dimensions + 1 numeric \\
+(e.g. category_a × category_b × count)
+- **`table`** — when no chart is appropriate (single-row aggregates, wide tables, \\
+scalar answers, or raw data dumps)
+
+### Chart columns (`x_column`, `y_column`)
+
+- **`x_column`** — the categorical or temporal axis (e.g. `device_type`, `month`). Must match a column alias in the SELECT list.
+- **`y_column`** — the value axis that best answers the user's question. Pick the most meaningful column.
+
 ## Quantitative Rigor Rules
 
 1. **Always state hypotheses** — formulate H0 and H1 before testing.
