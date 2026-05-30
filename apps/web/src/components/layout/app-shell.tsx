@@ -43,7 +43,7 @@ export const AppShell = React.memo(function AppShell({ children }: { children: R
   }, [isMobile, setLeftSidebar]);
 
   return (
-    <div className="flex flex-col h-screen overflow-hidden bg-background">
+    <div className="flex flex-col h-dvh overflow-hidden bg-background">
       <Header />
 
       <div className="flex flex-1 overflow-hidden">
