@@ -11,7 +11,6 @@ import { ArrowLeft } from "lucide-react";
 import { AuthGuard } from "@/components/auth/auth-guard";
 import { Button } from "@/components/ui/button";
 import { PageContainer } from "@/components/layout/page-container";
-import { useClientConfig } from "@/hooks/use-client-config";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { cn } from "@/lib/utils";
 import { AUTOMATIONS_ENABLED } from "@/lib/automations/feature-flag";
@@ -32,14 +31,8 @@ const TABS: { href: string; label: string }[] = [
 ];
 
 function AdminGuard({ children }: { children: React.ReactNode }) {
-  const { isLoading: isConfigLoading, fetchConfig } = useClientConfig();
-  const { isAdmin, isLoading: isUserLoading } = useCurrentUser();
-  const isLoading = isConfigLoading || isUserLoading;
+  const { isAdmin, isLoading } = useCurrentUser();
   const router = useRouter();
-
-  useEffect(() => {
-    fetchConfig();
-  }, [fetchConfig]);
 
   useEffect(() => {
     if (!isLoading && !isAdmin) {
