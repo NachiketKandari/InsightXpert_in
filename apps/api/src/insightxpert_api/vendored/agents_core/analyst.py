@@ -398,7 +398,7 @@ async def analyst_loop(
 
     system_prompt = render_prompt(
         "analyst_system.j2",
-        engine=db.engine,
+        engine=db.engine if db is not None else None,
         ddl=active_ddl,
         documentation=active_docs,
         similar_qa=similar_qa,

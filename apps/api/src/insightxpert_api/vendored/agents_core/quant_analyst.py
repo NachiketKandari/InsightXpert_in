@@ -123,7 +123,7 @@ async def quant_analyst_loop(
 
     system_prompt = render_prompt(
         "quant_analyst_system.j2",
-        engine=db.engine,
+        engine=db.engine if db is not None else None,
         ddl=ddl,
         documentation=documentation,
         analyst_sql=merged_sql or "(no SQL)",
