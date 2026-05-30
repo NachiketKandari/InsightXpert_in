@@ -41,7 +41,7 @@ class RunSqlTool(Tool):
                     "description": "Column name from the SELECT to use as the y-axis (values). Must match a column alias in the query. Choose the column that best answers the user's question — e.g. a rate or percentage rather than a raw count.",
                 },
             },
-            "required": ["sql"],
+            "required": ["sql", "visualization", "x_column", "y_column"],
         }
 
     async def execute(self, context: ToolContext, args: dict) -> str:
