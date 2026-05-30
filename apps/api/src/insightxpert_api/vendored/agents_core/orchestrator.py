@@ -453,6 +453,10 @@ async def _run_sql_analyst(
             dataset_id=dataset_id,
             org_id=org_id,
         ):
+            # Skip streaming-only signals — no trace value
+            if chunk.type in ("answer_delta", "status"):
+                continue
+
             step: dict = {
                 "type": chunk.type,
                 "timestamp": chunk.timestamp or time.time(),
@@ -567,6 +571,10 @@ async def _run_quant_analyst(
             dataset_id=dataset_id,
             org_id=org_id,
         ):
+            # Skip streaming-only signals — no trace value
+            if chunk.type in ("answer_delta", "status"):
+                continue
+
             step: dict = {
                 "type": chunk.type,
                 "timestamp": chunk.timestamp or time.time(),
