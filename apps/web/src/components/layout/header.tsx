@@ -13,6 +13,7 @@ import {
 import { AppLogo } from "@/components/ui/app-logo";
 import { useClientConfigStore } from "@/stores/client-config-store";
 import { useClientConfig } from "@/hooks/use-client-config";
+import { useCurrentUser } from "@/hooks/use-current-user";
 import { DatasetSelector } from "./dataset-selector";
 import { NotificationBell } from "@/components/notifications/notification-bell";
 import { InsightBell } from "@/components/insights/insight-bell";
@@ -26,6 +27,7 @@ export const Header = React.memo(function Header() {
   const setSqlExecutorOpen = useChatStore((s) => s.setSqlExecutorOpen);
   const displayName = useClientConfigStore((s) => s.config?.branding?.display_name);
   const { isFeatureEnabled } = useClientConfig();
+  const { isAdmin } = useCurrentUser();
   const showSqlExecutor = isFeatureEnabled("sql_executor");
 
   return (
@@ -74,7 +76,7 @@ export const Header = React.memo(function Header() {
             <TooltipContent side="bottom">SQL Executor</TooltipContent>
           </Tooltip>
         )}
-        <DocsDialog />
+        {isAdmin && <DocsDialog />}
         <InsightBell />
         <NotificationBell />
       </div>
