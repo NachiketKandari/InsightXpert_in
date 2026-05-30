@@ -67,6 +67,7 @@ async def orchestrator_loop(
     rag_retrieval: bool = True,
     analyst_impl=None,
     documentation_override: str | None = None,
+    enrichment_enabled: bool = True,
 ) -> AsyncGenerator[ChatChunk, None]:
     """Run the orchestrator pipeline.
 
@@ -222,6 +223,11 @@ async def orchestrator_loop(
     # If analyst failed or returned a clarification, stop here
     if collector.had_error or not collector.answer:
         logger.info("Skipping enrichment: error=%s, answer_empty=%s", collector.had_error, not collector.answer)
+        return
+
+    # Admin toggle: skip enrichment when globally disabled
+    if not enrichment_enabled:
+        logger.info("Skipping enrichment: enrichment_enabled=False (admin toggle)")
         return
 
     # ── Phase 2: Evaluate whether enrichment is needed ───────────────

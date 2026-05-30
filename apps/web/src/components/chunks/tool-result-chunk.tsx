@@ -24,6 +24,8 @@ interface ToolResultChunkProps {
    * cited rows in our DataTable.
    */
   messageId?: string;
+  /** Optional chart to render after the data table, inside the collapsible. */
+  children?: React.ReactNode;
 }
 
 /** Derive a human-readable badge label from the tool name. */
@@ -34,7 +36,7 @@ function toolBadgeLabel(toolName?: string): string {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-const ToolResultChunkInner = function ToolResultChunk({ chunk, parsedData, messageId }: ToolResultChunkProps) {
+const ToolResultChunkInner = function ToolResultChunk({ chunk, parsedData, messageId, children }: ToolResultChunkProps) {
   const parsed = useMemo(
     () => parsedData !== undefined ? parsedData : parseToolResult(chunk),
     [chunk, parsedData],
@@ -83,6 +85,7 @@ const ToolResultChunkInner = function ToolResultChunk({ chunk, parsedData, messa
               columns={parsed.columns}
               rows={parsed.rows}
             />
+            {children}
           </div>
         </CollapsibleContent>
       </div>

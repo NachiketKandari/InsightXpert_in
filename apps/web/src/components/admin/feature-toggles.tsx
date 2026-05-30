@@ -14,6 +14,7 @@ import {
   HelpCircle,
   Sparkles,
   Map,
+  BrainCircuit,
 } from "lucide-react";
 
 const FEATURE_DEFS: {
@@ -81,6 +82,12 @@ const FEATURE_DEFS: {
     label: "Onboarding Tour",
     description: "Show the guided onboarding tour for new users on their first visit",
     icon: Map,
+  },
+  {
+    key: "enrichment_enabled",
+    label: "SQL Refinement & Enrichment",
+    description: "After the initial answer, run deeper analysis (dimension enrichment, synthesis). Adds latency and token cost.",
+    icon: BrainCircuit,
   },
 ];
 

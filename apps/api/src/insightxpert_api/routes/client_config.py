@@ -23,6 +23,7 @@ _FEATURES: dict[str, bool] = {
     "conversation_export": False,
     "agent_process_sidebar": True,
     "clarification_enabled": True,
+    "enrichment_enabled": False,  # post-analysis SQL refinement + enrichment
     "stats_context_injection": False,
     "onboarding_enabled": True,
 }

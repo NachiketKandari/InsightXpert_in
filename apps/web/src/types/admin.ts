@@ -9,6 +9,7 @@ export interface FeatureToggles {
   clarification_enabled: boolean;
   stats_context_injection: boolean;
   onboarding_enabled: boolean;
+  enrichment_enabled: boolean;
 }
 
 export interface OrgBranding {

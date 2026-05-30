@@ -55,6 +55,7 @@ from ..vendored.agents_core.orchestrator import orchestrator_loop
 from ..vendored.agents_core.training.documentation import (
     documentation_from_profile,
 )
+from .client_config import _FEATURES
 
 router = APIRouter(prefix="/api/v1", tags=["chat"])
 log = get_logger("chat")
@@ -715,6 +716,7 @@ async def _run_orchestrator(
                 stats_context_injection=False,  # StatsResolver not wired
                 clarification_enabled=False,
                 documentation_override=documentation_md,
+                enrichment_enabled=_FEATURES.get("enrichment_enabled", False),
             ):
                 envelope = _vendored_to_envelope(vchunk)
                 if envelope is None:

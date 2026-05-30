@@ -151,37 +151,23 @@ function ChunkRendererInner({ chunk, isComplete, isStreaming, enrichmentTraces, 
     }
     case "tool_result":
       content = (
-        <>
-          <ToolResultChunk chunk={chunk} parsedData={parsed} messageId={messageId} />
+        <ToolResultChunk chunk={chunk} parsedData={parsed} messageId={messageId}>
           {willShowChart && parsed && (
-            <>
-              <motion.div
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.2, ease: "easeOut" }}
-              >
-                <ProgressStep label="Creating visualization" />
-              </motion.div>
-              <motion.div
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.3, ease: "easeOut", delay: 0.7 }}
-                className="mt-3"
-              >
-                <React.Suspense fallback={<ProgressStep label="Loading chart" />}>
-                  <ChartBlockLazy
-                    columns={parsed.columns}
-                    rows={parsed.rows}
-                    suggestedChartType={suggestedChartType}
-                    xColumn={xColumn}
-                    yColumn={yColumn}
-                    eager={isStreaming}
-                  />
-                </React.Suspense>
-              </motion.div>
-            </>
+            <div className="mt-4 pt-4 border-t border-border/50">
+              <ProgressStep label="Creating visualization" />
+              <React.Suspense fallback={<ProgressStep label="Loading chart" />}>
+                <ChartBlockLazy
+                  columns={parsed.columns}
+                  rows={parsed.rows}
+                  suggestedChartType={suggestedChartType}
+                  xColumn={xColumn}
+                  yColumn={yColumn}
+                  eager={isStreaming}
+                />
+              </React.Suspense>
+            </div>
           )}
-        </>
+        </ToolResultChunk>
       );
       break;
     case "answer": {
