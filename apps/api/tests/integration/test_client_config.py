@@ -31,5 +31,6 @@ def test_client_config_shape(client: TestClient):
         "clarification_enabled",
         "stats_context_injection",
         "onboarding_enabled",
+        "enrichment_enabled",
     }
     assert set(feats.keys()) == expected

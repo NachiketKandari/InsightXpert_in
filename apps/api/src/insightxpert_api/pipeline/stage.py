@@ -13,10 +13,18 @@ so the UI sees work-in-progress.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
 from ..sse.emitter import EventEmitter
+
+_FENCED_SQL = re.compile(r"```sql\s*(.*?)\s*```", re.IGNORECASE | re.DOTALL)
+
+
+def clean_sql(raw: str) -> str:
+    """Strip whitespace and trailing semicolons from an extracted SQL string."""
+    return raw.strip().rstrip(";").strip()
 
 
 @dataclass
@@ -27,6 +35,10 @@ class PipelineContext:
     conversation_id: str
     emitter: EventEmitter | None = None
     state: dict[str, Any] = field(default_factory=dict)
+
+    async def emit(self, chunk_type: Any, payload: Any) -> None:
+        if self.emitter is not None:
+            await self.emitter.emit(chunk_type, payload)
 
 
 @runtime_checkable

@@ -100,13 +100,13 @@ async def metrics(request: Request) -> str:
         "Total SSE emitters evicted by the idle reaper task.",
     ))
 
-    # LLM call counters — placeholder; Group A will populate call sites.
+    # LLM call counters (chat/profile/automation/trigger_compile). Wired at gemini.py and deepseek.py.
     # NOTE: values are 0 until the unified LLM emission helper (Phase 1.2) lands.
     llm_help_emitted = False
     for source, count in llm_calls_total.items():
         line_parts = []
         if not llm_help_emitted:
-            line_parts.append("# HELP llm_calls_total Total LLM API calls by source (chat|profile|automation|trigger_compile). NOTE: populated by Phase 1.2 emission helper; currently 0 placeholders.")
+            line_parts.append("# HELP llm_calls_total Total LLM API calls by source (chat|profile|automation|trigger_compile).")
             line_parts.append("# TYPE llm_calls_total counter")
             llm_help_emitted = True
         line_parts.append(f'llm_calls_total{{source="{source}"}} {count}')

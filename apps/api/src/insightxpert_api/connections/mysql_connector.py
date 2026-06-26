@@ -14,22 +14,15 @@ and ``connect_timeout`` to match the configured timeout.
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import create_engine, text
 
+from ..db.connector import QueryResult
 from ..db.dialects.forbidden_sql import FORBIDDEN_SQL_RE
 from .types import MySQLConnection
 
 _FORBIDDEN_SQL = FORBIDDEN_SQL_RE
-
-
-@dataclass(frozen=True)
-class QueryResult:
-    columns: list[str]
-    rows: list[tuple[Any, ...]]
-    execution_time_ms: int
 
 
 class MySQLConnector:
@@ -75,7 +68,7 @@ class MySQLConnector:
             columns = list(cur.keys())
         return QueryResult(
             columns=columns,
-            rows=[tuple(r) for r in rows],
+            rows=[list(r) for r in rows],
             execution_time_ms=int((time.monotonic() - start) * 1000),
         )
 

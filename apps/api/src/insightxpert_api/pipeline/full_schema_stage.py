@@ -53,18 +53,17 @@ class FullSchemaStage:
 
         # Emit an informational status chunk so the FE timeline can label the
         # run as full-schema (linker stage is intentionally absent).
-        if ctx.emitter is not None:
-            table_count = len(schema.tables)
-            column_count = sum(len(t.columns) for t in schema.tables)
-            await ctx.emitter.emit(
-                ChunkType.STATUS,
-                StatusPayload(
-                    message=(
-                        "pipeline_mode=full_schema — linker bypassed "
-                        f"({table_count} tables, {column_count} columns)"
-                    )
-                ),
-            )
+        table_count = len(schema.tables)
+        column_count = sum(len(t.columns) for t in schema.tables)
+        await ctx.emit(
+            ChunkType.STATUS,
+            StatusPayload(
+                message=(
+                    "pipeline_mode=full_schema — linker bypassed "
+                    f"({table_count} tables, {column_count} columns)"
+                )
+            ),
+        )
         return {"schema_text": schema_text}
 
     def _extract_schema(self, session_id: str, db_id: str) -> "DatabaseSchema":

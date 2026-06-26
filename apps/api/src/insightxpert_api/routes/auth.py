@@ -8,11 +8,11 @@ import time
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, EmailStr, Field
 
-from ..auth.current_user import CurrentUser, get_current_user
+from ..auth.current_user import CurrentUser, bump_session_cache, get_current_user, get_optional_current_user
 from ..auth.rate_limit import check_auth_rate_limit
 from ..auth.session import SessionSigner
 from ..config import Settings, get_settings
-from ..users import service
+from ..users import repository as users_repo, service
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
@@ -116,7 +116,15 @@ async def register(
 
 
 @router.post("/logout")
-async def logout(response: Response, settings: Settings = Depends(get_settings)) -> dict[str, str]:
+async def logout(
+    response: Response,
+    settings: Settings = Depends(get_settings),
+    cu: CurrentUser | None = Depends(get_optional_current_user),
+) -> dict[str, str]:
+    if cu is not None:
+        now = int(time.time())
+        users_repo.update_user(cu.id, {"sessions_valid_after": now, "updated_at": now})
+        bump_session_cache(cu.id)
     response.delete_cookie(
         settings.session_cookie_name,
         path="/",

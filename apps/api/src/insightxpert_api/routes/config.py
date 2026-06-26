@@ -11,7 +11,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel
 
-from ..auth.dependencies import get_current_user, require_admin
+from ..auth.current_user import get_current_user, require_admin
 from ..config import Settings, get_settings
 from ..metrics.pricing import PRICING
 from .client_config import _FEATURES  # in-process feature flags, shared with client-config

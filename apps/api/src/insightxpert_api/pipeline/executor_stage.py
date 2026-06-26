@@ -38,18 +38,16 @@ class SqlExecutorStage:
             ctx.state["error"] = f"database_not_found: {db_id}"
             return None
 
-        if ctx.emitter is not None:
-            await ctx.emitter.emit(ChunkType.SQL_EXECUTING, SQLExecutingPayload(sql=sql))
+        await ctx.emit(ChunkType.SQL_EXECUTING, SQLExecutingPayload(sql=sql))
 
         try:
             result = DatabaseConnector(ref, row_limit=self._row_limit).execute(sql)
         except Exception as exc:
             ctx.state["error"] = f"sql_execution_failed: {exc}"
-            if ctx.emitter is not None:
-                await ctx.emitter.emit(
-                    ChunkType.ERROR,
-                    ErrorPayload(code="sql_execution_failed", detail=str(exc)),
-                )
+            await ctx.emit(
+                ChunkType.ERROR,
+                ErrorPayload(code="sql_execution_failed", detail=str(exc)),
+            )
             return None
 
         payload = RowsReturnedPayload(
@@ -58,8 +56,7 @@ class SqlExecutorStage:
             rows=result.rows,
             execution_time_ms=result.execution_time_ms,
         )
-        if ctx.emitter is not None:
-            await ctx.emitter.emit(ChunkType.ROWS_RETURNED, payload)
+        await ctx.emit(ChunkType.ROWS_RETURNED, payload)
         ctx.state["rows"] = {
             "columns": result.columns,
             "rows": result.rows,
