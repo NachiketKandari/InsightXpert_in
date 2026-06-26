@@ -241,11 +241,9 @@ class ProfilerStage:
     async def _emit(
         ctx: PipelineContext, db_id: str, profile: DatabaseProfile, *, from_cache: bool
     ) -> None:
-        if ctx.emitter is None:
-            return
         table_count = len(profile.tables)
         column_count = sum(len(t.columns) for t in profile.tables)
-        await ctx.emitter.emit(
+        await ctx.emit(
             ChunkType.PROFILE_LOADED,
             ProfileLoadedPayload(
                 db_id=db_id,

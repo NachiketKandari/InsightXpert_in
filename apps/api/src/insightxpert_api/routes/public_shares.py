@@ -11,14 +11,9 @@ from fastapi import APIRouter, HTTPException, Response
 from ..shared_snapshots import repository as snap_repo
 from ..shared_snapshots.dto import SharedSnapshotMessage, SharedSnapshotPublic
 
+from .utils import ts
 
 router = APIRouter(prefix="/api/v1/public", tags=["public_shares"])
-
-
-def _ts(raw: int | None) -> int:
-    """Convert epoch-seconds integer to milliseconds for JS. Zero/null -> now."""
-    val = raw or 0
-    return (val * 1000) if val > 0 else int(time.time() * 1000)
 
 
 def _is_visible(row: dict, now: int) -> bool:
@@ -47,11 +42,11 @@ def get_public_share(token: str, response: Response) -> SharedSnapshotPublic:
     msgs = payload.get("messages", [])
     for m in msgs:
         if "created_at" in m:
-            m["created_at"] = _ts(m["created_at"])
+            m["created_at"] = ts(m["created_at"])
     return SharedSnapshotPublic(
         title=payload.get("title"),
         dataset_name=payload.get("dataset_name"),
         messages=[SharedSnapshotMessage(**m) for m in msgs],
-        created_at=_ts(row["created_at"]),
+        created_at=ts(row["created_at"]),
         expires_at=row["expires_at"],
     )

@@ -12,39 +12,18 @@ duplicating the OpenAI-style <-> Gemini native message translation logic.
 
 from __future__ import annotations
 
-import asyncio
-import os
 from collections.abc import AsyncIterator
 
 from google import genai
 
+from ..observability import increment_llm_calls
 from ..vendored.agents_core.llm.base import LLMResponse
 from ..vendored.agents_core.llm.gemini import GeminiProvider as _VendoredGemini
+from ._semaphore import get_llm_semaphore, reset_llm_semaphore
 
-# --------------------------------------------------------------------------
-# Phase 1.4 — global LLM concurrency cap.
-# A single bursty user must not be able to drive Gemini into 429 for every
-# other user. One semaphore at module scope, shared across every GeminiLLM
-# instance so per-turn adapters all funnel through the same cap. Lazy-init
-# so async tests can reset without monkeypatching asyncio internals.
-# --------------------------------------------------------------------------
-
-_LLM_SEMAPHORE: asyncio.Semaphore | None = None
-
-
-def _llm_semaphore() -> asyncio.Semaphore:
-    global _LLM_SEMAPHORE
-    if _LLM_SEMAPHORE is None:
-        cap = int(os.environ.get("LLM_MAX_CONCURRENCY", "3") or 3)
-        _LLM_SEMAPHORE = asyncio.Semaphore(max(1, cap))
-    return _LLM_SEMAPHORE
-
-
-# TEST-ONLY
-def _reset_llm_semaphore(n: int) -> None:
-    """Test hook — reset the module-level LLM semaphore."""
-    global _LLM_SEMAPHORE
-    _LLM_SEMAPHORE = asyncio.Semaphore(max(1, int(n)))
+# Backward-compat re-exports — tests and internal callers use these names.
+_llm_semaphore = get_llm_semaphore
+_reset_llm_semaphore = reset_llm_semaphore
 
 
 class GeminiLLM:
@@ -99,6 +78,7 @@ class GeminiLLM:
         # ``metrics`` chunk.
         self.input_tokens_used += int(resp.input_tokens or 0)
         self.output_tokens_used += int(resp.output_tokens or 0)
+        increment_llm_calls("chat")
         return resp
 
     # ------------------------------------------------------------------
@@ -135,6 +115,7 @@ class GeminiLLM:
             config={"temperature": temperature, "max_output_tokens": max_tokens},
         )
         self._record_usage(resp)
+        increment_llm_calls("profile")
         return resp.text or ""
 
     async def async_generate(
@@ -151,6 +132,7 @@ class GeminiLLM:
                 config={"temperature": temperature, "max_output_tokens": max_tokens},
             )
         self._record_usage(resp)
+        increment_llm_calls("profile")
         return resp.text or ""
 
     async def async_generate_stream(
@@ -186,6 +168,7 @@ class GeminiLLM:
                     yield text
             if last_chunk is not None:
                 self._record_usage(last_chunk)
+        increment_llm_calls("chat")
 
     def embed(self, text: str) -> list[float]:
         resp = self._client.models.embed_content(model=self._embed_model, contents=text)

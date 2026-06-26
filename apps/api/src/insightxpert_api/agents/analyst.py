@@ -59,10 +59,11 @@ Any keyword args from the vendored call-site that our adapter doesn't need
 from __future__ import annotations
 
 import asyncio
-import logging
 import time
 from collections.abc import AsyncGenerator
 from typing import Any
+
+from ..logging import get_logger
 
 from ..pipeline import default_pipeline
 from ..pipeline.stage import PipelineContext
@@ -73,7 +74,7 @@ from ..sse.chunks import ChunkType
 from ..sse.emitter import EventEmitter
 from ..vendored.agents_core.api.models import ChatChunk  # flat vendored shape
 
-logger = logging.getLogger("insightxpert_api.agents.analyst")
+logger = get_logger("insightxpert_api.agents.analyst")
 
 
 def _answer_text(envelope_chunk: EnvelopeChatChunk) -> str:

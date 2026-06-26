@@ -12,6 +12,7 @@ ephemeral.
 
 from __future__ import annotations
 
+import json as _json
 import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -86,6 +87,30 @@ def configure_logging(env: str) -> None:
 def get_logger(name: str) -> structlog.stdlib.BoundLogger:
     """Return a bound logger tagged with ``name``."""
     return structlog.get_logger(name)
+
+
+def configure_vendored_logging() -> None:
+    """Replace stdout handler formatters with _UnifyingFormatter for JSON output."""
+    root = logging.getLogger()
+    for handler in root.handlers:
+        if isinstance(handler, logging.StreamHandler):
+            if not isinstance(handler.formatter, _ConsoleFormatter):
+                handler.setFormatter(_UnifyingFormatter())
+
+
+class _UnifyingFormatter(logging.Formatter):
+    """Unified log format: pass through structlog JSON, wrap plain messages."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        msg = record.getMessage()
+        if msg.startswith("{"):
+            return msg
+        return _json.dumps({
+            "event": msg,
+            "level": record.levelname.lower(),
+            "logger": record.name,
+            "timestamp": self.formatTime(record, "%Y-%m-%dT%H:%M:%S.%fZ"),
+        }, ensure_ascii=False)
 
 
 class _ConsoleFormatter(logging.Formatter):

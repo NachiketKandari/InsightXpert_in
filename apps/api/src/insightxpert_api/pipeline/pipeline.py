@@ -32,10 +32,9 @@ class Pipeline:
             start = time.perf_counter()
             log.info("stage.start", stage=stage.name, session_id=ctx.session_id,
                      conversation_id=ctx.conversation_id)
-            if ctx.emitter is not None:
-                await ctx.emitter.emit(
-                    ChunkType.STATUS, StatusPayload(message=f"{stage.name}…")
-                )
+            await ctx.emit(
+                ChunkType.STATUS, StatusPayload(message=f"{stage.name}…")
+            )
             try:
                 current = await stage.run(ctx, current)
             except Exception as exc:
@@ -47,11 +46,10 @@ class Pipeline:
                     error=str(exc),
                     error_type=type(exc).__name__,
                 )
-                if ctx.emitter is not None:
-                    await ctx.emitter.emit(
-                        ChunkType.ERROR,
-                        ErrorPayload(code=f"{stage.name}_failed", detail=str(exc)),
-                    )
+                await ctx.emit(
+                    ChunkType.ERROR,
+                    ErrorPayload(code=f"{stage.name}_failed", detail=str(exc)),
+                )
                 raise
             elapsed_ms = int((time.perf_counter() - start) * 1000)
             log.info("stage.end", stage=stage.name, ms=elapsed_ms)

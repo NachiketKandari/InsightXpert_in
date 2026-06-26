@@ -35,14 +35,12 @@ class SqlValidatorStage:
             sqlglot.parse_one(sql, dialect=sqlglot_dialect)
         except Exception as exc:  # sqlglot raises SqlglotError subclasses
             ctx.state["error"] = f"sql_validation_failed: {exc}"
-            if ctx.emitter is not None:
-                await ctx.emitter.emit(
-                    ChunkType.ERROR,
-                    ErrorPayload(code="sql_validation_failed", detail=str(exc)),
-                )
+            await ctx.emit(
+                ChunkType.ERROR,
+                ErrorPayload(code="sql_validation_failed", detail=str(exc)),
+            )
             return None
         # Clear any stale error from a prior iteration.
         ctx.state.pop("error", None)
-        if ctx.emitter is not None:
-            await ctx.emitter.emit(ChunkType.STATUS, StatusPayload(message="SQL valid"))
+        await ctx.emit(ChunkType.STATUS, StatusPayload(message="SQL valid"))
         return sql

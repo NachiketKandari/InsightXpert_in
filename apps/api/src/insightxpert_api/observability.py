@@ -30,8 +30,7 @@ sse_evicted_total: int = 0
 # TODO(group-a): increment these at each LLM call site once emission helper lands.
 # ---------------------------------------------------------------------------
 
-#: LLM call counters keyed by source label. Populated with 0-placeholders so
-#: /metrics always emits these series even before Group A wires the call sites.
+#: LLM call counters keyed by source label. Wired at llm/gemini.py and llm/deepseek.py call sites.
 llm_calls_total: dict[str, int] = {
     "chat": 0,
     "profile": 0,

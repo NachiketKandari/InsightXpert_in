@@ -98,6 +98,16 @@ def get_current_user(
     )
 
 
+def get_optional_current_user(
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> CurrentUser | None:
+    try:
+        return get_current_user(request, settings)
+    except Exception:
+        return None
+
+
 def require_admin(cu: CurrentUser = Depends(get_current_user)) -> CurrentUser:
     if cu.role != "admin":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="forbidden")

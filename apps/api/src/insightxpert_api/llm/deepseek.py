@@ -10,38 +10,21 @@ required for those calls even when the chat provider is DeepSeek.
 
 from __future__ import annotations
 
-import asyncio
-import os
 from collections.abc import AsyncIterator
 
 from google import genai
 from openai import AsyncOpenAI
 
+from ..observability import increment_llm_calls
 from ..vendored.agents_core.llm.base import LLMResponse
 from ..vendored.agents_core.llm.deepseek import DeepSeekProvider as _VendoredDeepSeek
+from ._semaphore import get_llm_semaphore, reset_llm_semaphore
 
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 
-# --------------------------------------------------------------------------
-# Global LLM concurrency cap — mirror of llm/gemini.py's semaphore.
-# Both modules share the same env var and the same mechanism.
-# --------------------------------------------------------------------------
-
-_LLM_SEMAPHORE: asyncio.Semaphore | None = None
-
-
-def _llm_semaphore() -> asyncio.Semaphore:
-    global _LLM_SEMAPHORE
-    if _LLM_SEMAPHORE is None:
-        cap = int(os.environ.get("LLM_MAX_CONCURRENCY", "3") or 3)
-        _LLM_SEMAPHORE = asyncio.Semaphore(max(1, cap))
-    return _LLM_SEMAPHORE
-
-
-# TEST-ONLY
-def _reset_llm_semaphore(n: int) -> None:
-    global _LLM_SEMAPHORE
-    _LLM_SEMAPHORE = asyncio.Semaphore(max(1, int(n)))
+# Backward-compat re-exports — tests and internal callers use these names.
+_llm_semaphore = get_llm_semaphore
+_reset_llm_semaphore = reset_llm_semaphore
 
 
 class DeepSeekLLM:
@@ -89,6 +72,7 @@ class DeepSeekLLM:
             )
         self.input_tokens_used += int(resp.input_tokens or 0)
         self.output_tokens_used += int(resp.output_tokens or 0)
+        increment_llm_calls("chat")
         return resp
 
     # ------------------------------------------------------------------
@@ -122,6 +106,7 @@ class DeepSeekLLM:
         if usage:
             self.input_tokens_used += usage.prompt_tokens or 0
             self.output_tokens_used += usage.completion_tokens or 0
+        increment_llm_calls("profile")
         return response.choices[0].message.content or ""
 
     async def async_generate_stream(
@@ -159,6 +144,7 @@ class DeepSeekLLM:
                 if hasattr(chunk, "usage") and chunk.usage is not None:
                     self.input_tokens_used += chunk.usage.prompt_tokens or 0
                     self.output_tokens_used += chunk.usage.completion_tokens or 0
+        increment_llm_calls("chat")
 
     def embed(self, text: str) -> list[float]:
         if not self._embed_client:

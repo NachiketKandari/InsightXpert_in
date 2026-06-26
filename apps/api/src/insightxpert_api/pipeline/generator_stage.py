@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import re
 from pathlib import Path
 
 from jinja2 import Template
@@ -10,9 +9,7 @@ from jinja2 import Template
 from ..db.dialects import get_adapter
 from ..llm import LLMProvider
 from ..sse.chunks import ChunkType, SQLGeneratedPayload
-from .stage import PipelineContext
-
-_FENCED_SQL = re.compile(r"```sql\s*(.*?)\s*```", re.IGNORECASE | re.DOTALL)
+from .stage import PipelineContext, _FENCED_SQL, clean_sql
 
 # Directory that holds our own (non-vendored) prompt overrides.
 _OWN_PROMPTS_DIR = Path(__file__).resolve().parents[1] / "prompts"
@@ -60,10 +57,9 @@ class SqlGeneratorStage:
     async def run(self, ctx: PipelineContext, _: object) -> str:
         if ctx.state.get("bypass_sql_generation"):
             sql = ctx.state.get("sql", "")
-            if ctx.emitter is not None:
-                await ctx.emitter.emit(
-                    ChunkType.SQL_GENERATED, SQLGeneratedPayload(sql=sql, iteration=0)
-                )
+            await ctx.emit(
+                ChunkType.SQL_GENERATED, SQLGeneratedPayload(sql=sql, iteration=0)
+            )
             return sql
 
         dialect: str = ctx.state.get("db_dialect", "sqlite")
@@ -79,10 +75,9 @@ class SqlGeneratorStage:
         )
         resp = await asyncio.wait_for(self._llm.async_generate(prompt), timeout=60.0)
         m = _FENCED_SQL.search(resp)
-        sql = (m.group(1) if m else resp).strip().rstrip(";").strip()
-        if ctx.emitter is not None:
-            await ctx.emitter.emit(
-                ChunkType.SQL_GENERATED, SQLGeneratedPayload(sql=sql, iteration=0)
-            )
+        sql = clean_sql(m.group(1) if m else resp)
+        await ctx.emit(
+            ChunkType.SQL_GENERATED, SQLGeneratedPayload(sql=sql, iteration=0)
+        )
         ctx.state["sql"] = sql
         return sql

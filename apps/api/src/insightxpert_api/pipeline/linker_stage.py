@@ -44,7 +44,7 @@ from ..vendored.pipeline_core.generator.schema_formatter import SchemaFormatter
 from ..vendored.pipeline_core.linker.linking_utils import add_join_paths, union_fields
 from ..vendored.pipeline_core.linker.literal_matcher import LiteralMatcher
 from ..vendored.pipeline_core.linker.trial_query import TrialQueryGenerator
-from .stage import PipelineContext
+from .stage import PipelineContext, clean_sql
 
 if TYPE_CHECKING:
     from ..vendored.pipeline_core.models.profile import DatabaseProfile
@@ -99,8 +99,7 @@ class SchemaLinkerStage:
             if jg.exists():
                 join_graph_path = str(jg)
 
-        await self._emit(
-            ctx,
+        await ctx.emit(
             ChunkType.SCHEMA_LINKING_STARTED,
             SchemaLinkingStartedPayload(question=question, db_id=db_id),
         )
@@ -114,9 +113,8 @@ class SchemaLinkerStage:
         )
         raw = await asyncio.wait_for(self._llm.async_generate(prompt), timeout=90.0)
 
-        candidates = [m.strip().rstrip(";").strip() for m in _FENCE_RE.findall(raw)]
-        await self._emit(
-            ctx,
+        candidates = [clean_sql(m) for m in _FENCE_RE.findall(raw)]
+        await ctx.emit(
             ChunkType.CANDIDATE_SQLS_GENERATED,
             CandidateSQLsGeneratedPayload(candidates=candidates),
         )
@@ -145,7 +143,7 @@ class SchemaLinkerStage:
                 linked_columns=sorted(f"{t}.{c}" for t, c in columns),
                 column_sources=serialized_sources,
             )
-            await self._emit(ctx, ChunkType.LINKED_SCHEMA_FINAL, final_payload)
+            await ctx.emit( ChunkType.LINKED_SCHEMA_FINAL, final_payload)
 
             result = {
                 "schema_text": schema_text,
@@ -185,8 +183,7 @@ class SchemaLinkerStage:
                 tables.add(t)
                 columns.add((t, c))
                 column_sources[(t, c)].add("literal_lsh")
-        await self._emit(
-            ctx,
+        await ctx.emit(
             ChunkType.LITERALS_EXTRACTED,
             LiteralsExtractedPayload(
                 literals=sorted(all_literals), matches=literal_matches
@@ -212,8 +209,7 @@ class SchemaLinkerStage:
                                 )
             except Exception:  # pragma: no cover — best-effort
                 pass
-        await self._emit(
-            ctx,
+        await ctx.emit(
             ChunkType.SEMANTIC_MATCHES,
             SemanticMatchesPayload(matches=semantic),
         )
@@ -251,8 +247,7 @@ class SchemaLinkerStage:
                             kind="declared",
                         )
                     )
-        await self._emit(
-            ctx,
+        await ctx.emit(
             ChunkType.JOIN_PATHS_ADDED,
             JoinPathsAddedPayload(edges=edges),
         )
@@ -269,7 +264,7 @@ class SchemaLinkerStage:
             linked_columns=sorted(f"{t}.{c}" for t, c in columns),
             column_sources=serialized_sources,
         )
-        await self._emit(ctx, ChunkType.LINKED_SCHEMA_FINAL, final_payload)
+        await ctx.emit( ChunkType.LINKED_SCHEMA_FINAL, final_payload)
 
         result = {
             "schema_text": schema_text,
@@ -328,12 +323,6 @@ class SchemaLinkerStage:
         """
         from ..vendored.pipeline_core.linker.linking_utils import render_pruned_schema
         return render_pruned_schema(tables, columns, schema, profile, use_quirks=True)
-
-    @staticmethod
-    async def _emit(ctx: PipelineContext, chunk_type: ChunkType, payload: Any) -> None:
-        if ctx.emitter is None:
-            return
-        await ctx.emitter.emit(chunk_type, payload)
 
 
 def _load_lsh(path: str | None) -> Any:

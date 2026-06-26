@@ -109,11 +109,10 @@ class AnswerSynthesizerStage:
                     if not delta:
                         continue
                     chunks.append(delta)
-                    if ctx.emitter is not None:
-                        await ctx.emitter.emit(
-                            ChunkType.answer_delta,
-                            AnswerDeltaPayload(text=delta),
-                        )
+                    await ctx.emit(
+                        ChunkType.answer_delta,
+                        AnswerDeltaPayload(text=delta),
+                    )
             answer = "".join(chunks).strip()
             if not answer:
                 # Empty stream — treat as failure for fallback purposes.

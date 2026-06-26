@@ -7,12 +7,12 @@ execute it. Emits ``sql_generated`` (iteration=N) for every refinement.
 from __future__ import annotations
 
 import asyncio
-import re
 from pathlib import Path
 
 from jinja2 import Template
 
 from ..db.connector import DatabaseConnector
+from ..db.dialects import get_adapter
 from ..llm import LLMProvider
 from ..services.database_service import DatabaseService
 from ..sse.chunks import (
@@ -21,9 +21,7 @@ from ..sse.chunks import (
     SQLExecutingPayload,
     SQLGeneratedPayload,
 )
-from .stage import PipelineContext
-
-_FENCED_SQL = re.compile(r"```sql\s*(.*?)\s*```", re.IGNORECASE | re.DOTALL)
+from .stage import PipelineContext, _FENCED_SQL, clean_sql
 
 
 class SqlRefinerStage:
@@ -68,25 +66,24 @@ class SqlRefinerStage:
             )
             resp = await asyncio.wait_for(self._llm.async_generate(prompt), timeout=60.0)
             m = _FENCED_SQL.search(resp)
-            new_sql = (m.group(1) if m else resp).strip().rstrip(";").strip()
+            new_sql = clean_sql(m.group(1) if m else resp)
             ctx.state["sql"] = new_sql
-            if ctx.emitter is not None:
-                await ctx.emitter.emit(
-                    ChunkType.SQL_GENERATED,
-                    SQLGeneratedPayload(sql=new_sql, iteration=i),
-                )
+            await ctx.emit(
+                ChunkType.SQL_GENERATED,
+                SQLGeneratedPayload(sql=new_sql, iteration=i),
+            )
             # Inline validate + execute
+            dialect = ctx.state.get("db_dialect", "sqlite")
+            adapter = get_adapter(dialect)
             try:
                 import sqlglot
-                sqlglot.parse_one(new_sql, dialect="sqlite")
+
+                sqlglot.parse_one(new_sql, dialect=adapter.sqlglot_dialect)
             except Exception as exc:
                 ctx.state["error"] = f"sql_validation_failed: {exc}"
                 continue
 
-            if ctx.emitter is not None:
-                await ctx.emitter.emit(
-                    ChunkType.SQL_EXECUTING, SQLExecutingPayload(sql=new_sql)
-                )
+            await ctx.emit(ChunkType.SQL_EXECUTING, SQLExecutingPayload(sql=new_sql))
             try:
                 result = DatabaseConnector(ref).execute(new_sql)
             except Exception as exc:
@@ -99,15 +96,14 @@ class SqlRefinerStage:
                 "rows": result.rows,
                 "execution_time_ms": result.execution_time_ms,
             }
-            if ctx.emitter is not None:
-                await ctx.emitter.emit(
-                    ChunkType.ROWS_RETURNED,
-                    RowsReturnedPayload(
-                        columns=result.columns,
-                        row_count=len(result.rows),
-                        rows=result.rows,
-                        execution_time_ms=result.execution_time_ms,
-                    ),
-                )
+            await ctx.emit(
+                ChunkType.ROWS_RETURNED,
+                RowsReturnedPayload(
+                    columns=result.columns,
+                    row_count=len(result.rows),
+                    rows=result.rows,
+                    execution_time_ms=result.execution_time_ms,
+                ),
+            )
             return new_sql
         return ctx.state.get("sql")

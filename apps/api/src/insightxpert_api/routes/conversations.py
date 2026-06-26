@@ -27,20 +27,14 @@ from ..auth.current_user import CurrentUser, get_current_user
 from ..db.engine import get_engine
 from ..orchestration.table import conversations, messages
 
+from .utils import ts
+
 router = APIRouter(prefix="/api/v1/conversations", tags=["conversations"])
 
 
 class ConversationPatch(BaseModel):
     title: str | None = None
     starred: bool | None = None
-
-
-def _ts(raw: Any) -> int:
-    """Convert epoch-seconds integer to milliseconds for JS. Zero/null -> now."""
-    import time as _time
-
-    val = raw or 0
-    return (val * 1000) if val > 0 else int(_time.time() * 1000)
 
 
 def _row_to_summary(row: Any) -> dict[str, Any]:
@@ -50,8 +44,8 @@ def _row_to_summary(row: Any) -> dict[str, Any]:
         "title": row.title,
         "starred": bool(row.is_starred),
         "db_id": row.db_id,
-        "created_at": _ts(row.created_at),
-        "updated_at": _ts(row.updated_at),
+        "created_at": ts(row.created_at),
+        "updated_at": ts(row.updated_at),
         "messages": [],
     }
 
@@ -132,7 +126,7 @@ def _detail(user_id: str, conversation_id: str) -> dict[str, Any] | None:
                 "input_tokens": m.tokens_in,
                 "output_tokens": m.tokens_out,
                 "generation_time_ms": m.generation_time_ms,
-                "created_at": _ts(m.created_at),
+                "created_at": ts(m.created_at),
             }
         )
     out["messages"] = parsed

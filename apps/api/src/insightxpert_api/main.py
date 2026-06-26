@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 
 from .config import get_settings
-from .logging import configure_logging, get_logger
+from .logging import configure_logging, configure_vendored_logging, get_logger
 from .routes import (
     admin_audit,
     admin_conversations,
@@ -108,6 +108,7 @@ async def _sse_idle_reaper(app: FastAPI) -> None:
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     configure_logging(settings.app_env)
+    configure_vendored_logging()
     log = get_logger("api")
     log.info("api.starting", env=settings.app_env, port=settings.port)
 
