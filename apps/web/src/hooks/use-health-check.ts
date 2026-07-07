@@ -16,7 +16,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { SSE_BASE_URL } from "@/lib/constants";
 
-const HEALTH_URL = `${SSE_BASE_URL || "http://localhost:8080"}/api/v1/health`;
+const HEALTH_URL = SSE_BASE_URL
+  ? `${SSE_BASE_URL}/api/v1/health`
+  : `/api/v1/health`;
 const FETCH_TIMEOUT_MS = 2_000;
 const HEALTHY_POLL_MS = 120_000;
 const UNHEALTHY_POLL_MS = 30_000;
