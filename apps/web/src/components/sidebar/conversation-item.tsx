@@ -11,6 +11,7 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { useChatStore } from "@/stores/chat-store";
+import { useIsMobile } from "@/hooks/use-media-query";
 import type { Conversation } from "@/types/chat";
 import { cn, relativeTime, formatDate } from "@/lib/utils";
 
@@ -24,6 +25,8 @@ export const ConversationItem = React.memo(function ConversationItem({
   isActive,
 }: ConversationItemProps) {
   const setActiveConversation = useChatStore((s) => s.setActiveConversation);
+  const setLeftSidebar = useChatStore((s) => s.setLeftSidebar);
+  const isMobile = useIsMobile();
   const deleteConversation = useChatStore((s) => s.deleteConversation);
   const renameConversation = useChatStore((s) => s.renameConversation);
 
@@ -104,7 +107,11 @@ export const ConversationItem = React.memo(function ConversationItem({
     >
       <button
         type="button"
-        onClick={() => setActiveConversation(conversation.id)}
+        onClick={() => {
+          setActiveConversation(conversation.id);
+          // Mobile sidebar is an overlay sheet — dismiss it on selection.
+          if (isMobile) setLeftSidebar(false);
+        }}
         aria-label={`Open conversation: ${conversation.title}`}
         aria-current={isActive ? "true" : undefined}
         className="flex flex-1 min-w-0 items-center gap-2 rounded-md text-left cursor-pointer focus-visible:outline-2 focus-visible:outline-primary"

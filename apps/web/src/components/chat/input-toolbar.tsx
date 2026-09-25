@@ -189,7 +189,7 @@ export function InputToolbar({
             <TooltipTrigger asChild>
               <DropdownMenuTrigger asChild>
                 <button
-                  className="flex items-center justify-center size-7 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors outline-none"
+                  className="flex items-center justify-center size-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors outline-none focus-visible:outline-2 focus-visible:outline-primary"
                   aria-label="More options"
                 >
                   <Plus className="size-4" />

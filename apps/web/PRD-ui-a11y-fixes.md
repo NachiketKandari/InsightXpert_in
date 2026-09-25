@@ -63,6 +63,13 @@ npx playwright cli -s=v console
 Pass: `noName=0` on history rows, show-password tabbable, `console Errors:0`, no DialogContent warning.
 
 ## Phase 2 — Perf + mobile usability
+### Status: DONE (2026-09-25, verified)
+Changes made in `apps/web/src`:
+1. `components/sidebar/conversation-list.tsx` — virtualized with existing `@tanstack/react-virtual` (same pattern as `components/admin/virtualized-table.tsx`): flattened Today/Older groups into header+item rows, `estimateSize` 28/52 + `measureElement`, `overscan 8`, `role=list/listitem`, scrolls active convo into view. `components/layout/left-sidebar.tsx` renders the list in its own scroll container (search path unchanged in `ScrollArea`).
+2. Tab stops: 120 convos now render a bounded window (<40 focusables, asserted in test) instead of 174.
+3. Touch: sidebar search/close `size-7→size-8` (28→32px), composer "More options" `size-7→size-8`, search clear-X was a ~14px hit area → `size-7` button + focus ring. Mic/send already 32px; model/Auto pills (~24px) meet the WCAG 2.2 AA 24px floor — left dense by design.
+4. Mobile: selecting a conversation, New Chat, and opening Sample questions now dismiss the overlay sheet (`useIsMobile` + `setLeftSidebar(false)`). Sheet already had focus trap/`Escape`/sr-only title via `app-shell.tsx:51-56`.
+Verification: `tsc` clean; eslint no new issues (1 pre-existing `set-state-in-effect` in untouched search effect); `vitest` 26/26 incl. new `conversation-list.phase2.test.tsx` (bounded render, headers, tab stops) + `vitest.setup.ts` mocks for `matchMedia`/`ResizeObserver`; `npm run build` succeeds (all routes). Full authed browser pass deferred (prod `Secure` cookie blocks local-http login; covered by component tests).
 Goal: history scales, touch targets sane, mobile nav predictable.
 
 1. Virtualize `ConversationList` (`conversation-list.tsx:71-90`) with existing `@tanstack/react-virtual`; keep Today/Older groups as sticky headers; fallback to pagination (e.g. 50 + "Show more") if virtualization conflicts with grouping. Add `aria-setsize/posinset` or listbox semantics if trivial.

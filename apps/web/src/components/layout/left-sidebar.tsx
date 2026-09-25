@@ -10,6 +10,7 @@ import { ConversationList } from "@/components/sidebar/conversation-list";
 import { SearchResults } from "@/components/sidebar/search-results";
 import { UserMenu } from "./user-menu";
 import { useChatStore } from "@/stores/chat-store";
+import { useIsMobile } from "@/hooks/use-media-query";
 import { apiFetch } from "@/lib/api";
 import type { SearchResult } from "@/types/chat";
 import {
@@ -21,6 +22,8 @@ import {
 export function LeftSidebar() {
   const clearActiveConversation = useChatStore((s) => s.clearActiveConversation);
   const toggleLeftSidebar = useChatStore((s) => s.toggleLeftSidebar);
+  const setLeftSidebar = useChatStore((s) => s.setLeftSidebar);
+  const isMobile = useIsMobile();
   const setSampleQuestionsOpen = useChatStore((s) => s.setSampleQuestionsOpen);
   const selectedDbId = useChatStore((s) => s.selectedDbId);
 
@@ -88,7 +91,7 @@ export function LeftSidebar() {
               <Button
                 variant="ghost"
                 size="icon"
-                className="size-7"
+                className="size-8"
                 onClick={handleOpenSearch}
                 aria-label="Search chats"
               >
@@ -102,7 +105,7 @@ export function LeftSidebar() {
               <Button
                 variant="ghost"
                 size="icon"
-                className="size-7"
+                className="size-8"
                 onClick={toggleLeftSidebar}
                 aria-label="Close sidebar"
               >
@@ -135,7 +138,7 @@ export function LeftSidebar() {
                   <button
                     type="button"
                     onClick={handleCloseSearch}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                    className="absolute right-1 top-1/2 -translate-y-1/2 inline-flex items-center justify-center size-7 rounded-md text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-2 focus-visible:outline-primary"
                     aria-label="Clear search"
                   >
                     <X className="size-3.5" />
@@ -157,7 +160,10 @@ export function LeftSidebar() {
                 <Button
                   variant="outline"
                   className="w-full justify-start gap-2"
-                  onClick={() => clearActiveConversation()}
+                  onClick={() => {
+                    clearActiveConversation();
+                    if (isMobile) setLeftSidebar(false);
+                  }}
                 >
                   <Plus className="size-4" />
                   New Chat
@@ -171,7 +177,10 @@ export function LeftSidebar() {
                   <Button
                     variant="ghost"
                     className="w-full justify-start gap-2 text-xs text-muted-foreground hover:text-foreground"
-                    onClick={() => setSampleQuestionsOpen(true)}
+                    onClick={() => {
+                      setSampleQuestionsOpen(true);
+                      if (isMobile) setLeftSidebar(false);
+                    }}
                   >
                     <ListChecks className="size-3.5" />
                     Sample questions
@@ -185,17 +194,17 @@ export function LeftSidebar() {
         </>
       )}
 
-      <ScrollArea className="flex-1 min-h-0">
-        {isSearchActive ? (
+      {isSearchActive ? (
+        <ScrollArea className="flex-1 min-h-0">
           <SearchResults
             results={searchResults}
             query={searchQuery}
             isLoading={isSearching}
           />
-        ) : (
-          <ConversationList />
-        )}
-      </ScrollArea>
+        </ScrollArea>
+      ) : (
+        <ConversationList />
+      )}
 
       {/* User profile at sidebar bottom — like Claude / ChatGPT */}
       <UserMenu />
