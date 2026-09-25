@@ -5,8 +5,14 @@ from pathlib import Path
 
 import pytest
 
+requires_real_gemini = pytest.mark.skipif(
+    not os.environ.get("GEMINI_API_KEY_REAL"),
+    reason="needs a real Gemini API key (GEMINI_API_KEY_REAL)",
+)
 
-@pytest.mark.gemini  # skipped in CI without API key
+
+@pytest.mark.gemini  # filtering marker; live-LLM calls gated via GEMINI_API_KEY_REAL
+@requires_real_gemini
 def test_seed_script_writes_sample_questions(fresh_db):
     """End-to-end: seed-bundled-profiles.py populates sample_questions for a bundled DB.
 

@@ -29,6 +29,7 @@ def test_client_config_shape(client: TestClient):
         "conversation_export",
         "agent_process_sidebar",
         "clarification_enabled",
+        "enrichment_enabled",
         "stats_context_injection",
         "onboarding_enabled",
     }

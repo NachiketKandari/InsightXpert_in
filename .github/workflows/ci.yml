@@ -1,6 +1,7 @@
-# DECISION(D-045): No CI/CD remote yet (local-only git). This workflow is
-# scaffolded (push+PR trigger, SQLite+Postgres matrix, uv+pytest) but
-# unverified — no GitHub remote exists. Single-developer pre-launch workflow.
+# CI gate for pushes/PRs — SQLite + Postgres (pgvector) matrix, uv + pytest.
+# Bundled sample DBs are pulled from the public `bundled-dbs` GitHub release
+# (gzipped assets) so the DB-dependent integration tests run here too.
+# Refresh the assets with: gh release upload bundled-dbs <file>.sqlite.gz --clobber
 name: CI
 
 on:
@@ -20,8 +21,8 @@ jobs:
 
     services:
       postgres:
-        # Only spun up; harmless (but idle) when matrix.db == sqlite.
-        image: postgres:16
+        # pgvector image required: migration 2026_04_27_0003 runs CREATE EXTENSION vector.
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_PASSWORD: test
           POSTGRES_DB: insightxpert
@@ -49,6 +50,16 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Fetch bundled sample DBs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p Databases/_shared
+          gh release download bundled-dbs --repo "$GITHUB_REPOSITORY" \
+            --pattern '*.sqlite.gz' --dir Databases/_shared --clobber
+          gunzip -f Databases/_shared/*.sqlite.gz
+          ls -la Databases/_shared
 
       - uses: astral-sh/setup-uv@v4
         with:

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Fetch bundled BIRD sample SQLite DBs into apps/api/Databases/_shared/.
 # Dev: rsync from the local Private/InsightXpert reference repo.
-# CI/Docker: override SOURCE_DIR with a GCS sync or artifact download.
+# CI: ci.yml downloads the gzipped `bundled-dbs` GitHub release assets instead.
 
 set -euo pipefail
 
