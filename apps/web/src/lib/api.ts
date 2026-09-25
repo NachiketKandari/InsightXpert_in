@@ -10,9 +10,12 @@ export interface ApiFetchOptions extends RequestInit {
 function handleUnauthorized(res: Response): void {
   if (res.status === 401 && typeof window !== "undefined") {
     // Don't redirect if we're already on an auth page — avoids redirect loops.
+    // Normalize trailing slash because vercel.json trailingSlash:true serves
+    // both /login and /login/.
     const { pathname } = window.location;
+    const p = pathname.length > 1 && pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
     const onAuthPage =
-      pathname === "/login" || pathname === "/change-password";
+      p === "/login" || p === "/register" || p === "/change-password";
     if (!onAuthPage) {
       const next = encodeURIComponent(
         window.location.pathname + window.location.search,

@@ -55,9 +55,12 @@ export function startProfileStream(
       if (!res.ok) {
         if (res.status === 401 && typeof window !== "undefined") {
           // Mirror `lib/api.ts:handleUnauthorized` for SSE since we bypass apiFetch.
+          const pathname = window.location.pathname;
+          const p = pathname.length > 1 && pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
           const onAuthPage =
-            window.location.pathname === "/login" ||
-            window.location.pathname === "/change-password";
+            p === "/login" ||
+            p === "/register" ||
+            p === "/change-password";
           if (!onAuthPage) {
             const next = encodeURIComponent(
               window.location.pathname + window.location.search,
