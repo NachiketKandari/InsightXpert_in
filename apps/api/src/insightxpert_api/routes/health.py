@@ -6,6 +6,14 @@ status struct.  Readers see either the previous or current state — never a
 partially-written one — because Python's GIL guarantees reference
 assignments are atomic.
 
+Flapping guard: the checker only reports ``db_reachable=False`` after
+``_FAIL_THRESHOLD`` consecutive failed pings.  A single slow ping (e.g. a
+Supabase pooler hiccup taking >2s) must NOT flip the endpoint to 503 — the
+frontend renders a "Backend unavailable" banner on any non-2xx health
+response, so a one-off slow probe would show that banner in every connected
+browser even though the app itself is healthy.  One successful ping
+immediately restores ``db_reachable=True``.
+
 The checker starts in the app ``lifespan`` so the first request already has
 a warm result.
 """
@@ -24,6 +32,7 @@ router = APIRouter(prefix="/api/v1", tags=["health"])
 
 _DB_CHECK_TIMEOUT = 2.0  # seconds — shorter than statement_timeout (30s)
 _TICK_INTERVAL = 5.0     # seconds between background DB pings
+_FAIL_THRESHOLD = 2      # consecutive failed pings before reporting "degraded"
 
 
 # ---------------------------------------------------------------------------
@@ -78,6 +87,7 @@ async def run_health_checker() -> None:
 
     # First probe — blocks until the initial status is known.
     ok, latency = await _probe()
+    failures = 0 if ok else 1
     _state = _HealthState(db_reachable=ok, db_latency_ms=latency)
 
     while True:
@@ -86,7 +96,15 @@ async def run_health_checker() -> None:
         except asyncio.CancelledError:
             break
         ok, latency = await _probe()
-        _state = _HealthState(db_reachable=ok, db_latency_ms=latency)
+        if ok:
+            failures = 0
+            _state = _HealthState(db_reachable=True, db_latency_ms=latency)
+        else:
+            failures += 1
+            # Debounce single-ping blips: keep the previous verdict (and its
+            # latency reading) until failures persist across ticks.
+            if failures >= _FAIL_THRESHOLD:
+                _state = _HealthState(db_reachable=False, db_latency_ms=0.0)
 
 
 # ---------------------------------------------------------------------------
