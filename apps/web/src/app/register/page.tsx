@@ -111,8 +111,7 @@ function RegisterForm() {
                 <button
                   type="button"
                   onClick={togglePassword}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                  tabIndex={-1}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-2 focus-visible:outline-primary rounded-md p-0.5"
                   aria-label={showPassword ? "Hide password" : "Show password"}
                 >
                   {showPassword ? (

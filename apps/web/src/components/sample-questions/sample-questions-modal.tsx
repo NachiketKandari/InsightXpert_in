@@ -5,6 +5,7 @@ import { Search, Copy, Check, MessageSquareText, RefreshCw, Sparkles, AlertTrian
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -151,6 +152,9 @@ export function SampleQuestionsModal({ open, onOpenChange, dbId }: SampleQuestio
             <DialogTitle className="text-sm font-semibold tracking-wide">
               {headerTitle}
             </DialogTitle>
+            <DialogDescription className="sr-only">
+              Browse and search sample questions, then select one to fill the chat input.
+            </DialogDescription>
             {!isPending && !isFailed && (
               <Badge variant="secondary" className="text-[10px] font-medium">
                 {totalVisible} questions
@@ -237,8 +241,9 @@ export function SampleQuestionsModal({ open, onOpenChange, dbId }: SampleQuestio
                           </span>
                           <button
                             onClick={(e) => handleCopy(q, key, e)}
-                            className="shrink-0 size-7 flex items-center justify-center rounded-md opacity-0 group-hover:opacity-100 hover:bg-accent transition-all cursor-pointer"
+                            aria-label={`Copy question: ${q.slice(0, 60)}`}
                             title="Copy to clipboard"
+                            className="shrink-0 size-7 flex items-center justify-center rounded-md opacity-100 lg:opacity-0 lg:group-hover:opacity-100 lg:group-focus-within:opacity-100 focus-visible:opacity-100 hover:bg-accent transition-all cursor-pointer focus-visible:outline-2 focus-visible:outline-primary"
                           >
                             {copiedIndex === key ? (
                               <Check className="size-3.5 text-green-500" />

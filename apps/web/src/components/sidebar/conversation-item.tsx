@@ -74,17 +74,19 @@ export const ConversationItem = React.memo(function ConversationItem({
         />
         <button
           type="button"
-          className="inline-flex items-center justify-center size-5 rounded-md shrink-0 hover:bg-accent-foreground/10"
+          className="inline-flex items-center justify-center size-5 rounded-md shrink-0 hover:bg-accent-foreground/10 focus-visible:outline-2 focus-visible:outline-primary"
           onClick={handleConfirmRename}
           title="Confirm"
+          aria-label="Confirm rename"
         >
           <Check className="size-3 text-emerald-500" />
         </button>
         <button
           type="button"
-          className="inline-flex items-center justify-center size-5 rounded-md shrink-0 hover:bg-accent-foreground/10"
+          className="inline-flex items-center justify-center size-5 rounded-md shrink-0 hover:bg-accent-foreground/10 focus-visible:outline-2 focus-visible:outline-primary"
           onClick={handleCancelRename}
           title="Cancel"
+          aria-label="Cancel rename"
         >
           <X className="size-3 text-muted-foreground" />
         </button>
@@ -94,25 +96,26 @@ export const ConversationItem = React.memo(function ConversationItem({
 
   return (
     <div
-      role="button"
-      tabIndex={0}
-      onClick={() => setActiveConversation(conversation.id)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") setActiveConversation(conversation.id);
-      }}
       className={cn(
-        "group flex items-center gap-2 w-full rounded-md px-2.5 py-2 text-left transition-colors cursor-pointer",
-        "hover:bg-accent/50",
+        "group flex items-center gap-2 w-full rounded-md px-2.5 py-2 text-left transition-colors",
+        "hover:bg-accent/50 focus-within:bg-accent/50",
         isActive && "bg-accent/60 border-l-2 border-cyan-accent"
       )}
     >
+      <button
+        type="button"
+        onClick={() => setActiveConversation(conversation.id)}
+        aria-label={`Open conversation: ${conversation.title}`}
+        aria-current={isActive ? "true" : undefined}
+        className="flex flex-1 min-w-0 items-center gap-2 rounded-md text-left cursor-pointer focus-visible:outline-2 focus-visible:outline-primary"
+      >
       <MessageSquare className="size-3.5 shrink-0 text-muted-foreground" />
       <div className="flex-1 min-w-0">
         <div className="flex items-baseline gap-1.5">
           <p className="text-sm truncate flex-1 min-w-0" title={conversation.title}>
             {conversation.title}
           </p>
-          <span className="text-[10px] text-muted-foreground/50 shrink-0">
+          <span className="text-xs text-muted-foreground shrink-0">
             {conversation.updatedAt > 86400000 ? (() => {
               const startOfToday = new Date();
               startOfToday.setHours(0, 0, 0, 0);
@@ -123,17 +126,18 @@ export const ConversationItem = React.memo(function ConversationItem({
           </span>
         </div>
       </div>
+      </button>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <button
             type="button"
+            aria-label={`Conversation actions for ${conversation.title}`}
+            title="Conversation actions"
             className={cn(
               "inline-flex items-center justify-center size-7 rounded-md shrink-0",
               "text-muted-foreground hover:text-foreground hover:bg-accent-foreground/10",
-              "opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-all"
+              "opacity-100 lg:opacity-0 lg:group-hover:opacity-100 lg:group-focus-within:opacity-100 focus-visible:opacity-100 transition-all focus-visible:outline-2 focus-visible:outline-primary"
             )}
-            onClick={(e) => e.stopPropagation()}
-            onKeyDown={(e) => e.stopPropagation()}
           >
             <MoreHorizontal className="size-4" />
           </button>

@@ -15,6 +15,7 @@ import { DataTable } from "@/components/chunks/data-table";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -134,6 +135,9 @@ export function DatasetViewer({ open, onOpenChange, tableName = "transactions", 
               <DialogTitle className="text-sm font-semibold tracking-wide">
                 {datasetName}
               </DialogTitle>
+              <DialogDescription className="sr-only">
+                Preview dataset rows in read-only mode.
+              </DialogDescription>
               <Badge variant="secondary" className="text-[10px] font-medium">
                 Read-only
               </Badge>

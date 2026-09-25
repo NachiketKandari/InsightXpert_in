@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -111,6 +112,9 @@ export function VisibilityMenu({
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{label}</DialogTitle>
+            <DialogDescription className="sr-only">
+              Choose who can see this database: private, shared, or public.
+            </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4">
