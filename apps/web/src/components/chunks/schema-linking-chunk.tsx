@@ -395,7 +395,7 @@ export function LinkedSchemaFinalChunk({
                               <SourceBadge key={`${s}-${i}`} source={s} />
                             ))
                           ) : (
-                            <span className="text-[10px] text-muted-foreground/60">
+                            <span className="text-xs text-muted-foreground">
                               —
                             </span>
                           )}

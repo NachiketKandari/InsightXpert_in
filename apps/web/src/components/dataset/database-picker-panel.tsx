@@ -103,7 +103,7 @@ export function DatabasePickerPanel() {
                     </Link>
                   )}
                 </div>
-                <div className="text-[10px] uppercase tracking-wider text-muted-foreground/60">
+                <div className="text-xs uppercase tracking-wider text-muted-foreground">
                   {db.source}
                 </div>
               </div>

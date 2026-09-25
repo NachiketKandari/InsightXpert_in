@@ -43,7 +43,7 @@ export const CitationLink = React.memo(function CitationLink({
               {trace.final_answer.length > 200 ? "\u2026" : ""}
             </p>
           )}
-          <p className="text-[10px] text-muted-foreground/70">
+          <p className="text-xs text-muted-foreground">
             Click for full trace
           </p>
         </div>

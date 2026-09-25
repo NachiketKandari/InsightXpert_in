@@ -137,7 +137,7 @@ export function MessageActions({
         )}
 
         {role === "user" && timestamp && (
-          <span className="text-[10px] text-muted-foreground/60 select-none ml-0.5">
+          <span className="text-xs text-muted-foreground select-none ml-0.5">
             {(() => {
               const startOfToday = new Date();
               startOfToday.setHours(0, 0, 0, 0);

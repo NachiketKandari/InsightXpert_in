@@ -109,7 +109,7 @@ export function DataTable({
         </table>
       </div>
       {maxHeight !== "none" && rows.length > 0 && (
-        <p className="text-[10px] text-muted-foreground/60 mt-1 text-right">
+        <p className="text-xs text-muted-foreground mt-1 text-right">
           {rows.length} row{rows.length !== 1 ? "s" : ""}
         </p>
       )}

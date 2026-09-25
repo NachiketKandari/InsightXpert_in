@@ -63,7 +63,7 @@ function VoiceWaveButton({ onClick }: { onClick: () => void }) {
       <TooltipTrigger asChild>
         <button
           onClick={onClick}
-          className="relative flex items-center justify-center h-8 w-8 shrink-0 rounded-lg bg-red-500/10 hover:bg-red-500/20 transition-colors outline-none"
+          className="relative flex items-center justify-center h-8 w-8 shrink-0 rounded-lg bg-red-500/10 hover:bg-red-500/20 transition-colors outline-none focus-visible:outline-2 focus-visible:outline-primary"
           aria-label="Stop recording"
         >
           <div className="voice-wave flex items-end gap-[3px] h-4">

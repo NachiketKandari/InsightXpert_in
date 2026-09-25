@@ -64,6 +64,7 @@ function LoginForm() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
+      <h1 className="sr-only">Sign in to InsightXpert</h1>
       <Card className="w-full max-w-sm glass border-border">
         <CardHeader className="text-center">
           <CardTitle className="text-2xl flex items-center justify-center gap-2">

@@ -136,7 +136,7 @@ export function DocsDialog() {
                         <button
                           onClick={() => setActivePath(doc.path)}
                           className={cn(
-                            "flex items-center gap-1.5 w-full text-left text-sm px-2 py-1.5 rounded-md transition-colors",
+                            "flex items-center gap-1.5 w-full text-left text-sm px-2 py-1.5 rounded-md transition-colors outline-none focus-visible:outline-2 focus-visible:outline-primary",
                             activePath === doc.path
                               ? "bg-primary/10 text-primary font-medium"
                               : "text-muted-foreground hover:text-foreground hover:bg-muted"

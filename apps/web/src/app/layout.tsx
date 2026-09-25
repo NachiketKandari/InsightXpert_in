@@ -23,7 +23,10 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: "InsightXpert - AI Data Analyst",
+  title: {
+    template: "%s — InsightXpert",
+    default: "InsightXpert - AI Data Analyst",
+  },
   description:
     "Conversational analytics for any database. Ask questions in natural language and get answers backed by SQL.",
   icons: {

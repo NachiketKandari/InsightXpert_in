@@ -44,6 +44,12 @@ export const AppShell = React.memo(function AppShell({ children }: { children: R
 
   return (
     <div className="flex flex-col h-dvh overflow-hidden bg-background">
+      <a
+        href="#main-chat"
+        className="sr-only focus:not-sr-only focus:absolute focus:z-[60] focus:top-2 focus:left-2 focus:rounded-md focus:bg-primary focus:px-3 focus:py-2 focus:text-sm focus:text-primary-foreground"
+      >
+        Skip to chat
+      </a>
       <Header />
 
       <div className="flex flex-1 overflow-hidden">
@@ -71,7 +77,7 @@ export const AppShell = React.memo(function AppShell({ children }: { children: R
           </AnimatePresence>
         )}
 
-        <main className="relative flex-1 min-w-0 overflow-hidden">
+        <main id="main-chat" tabIndex={-1} className="relative flex-1 min-w-0 overflow-hidden outline-none">
           {/* Floating button to re-open left sidebar when closed */}
           {!isMobile && !leftOpen && (
             <Tooltip>
@@ -79,7 +85,7 @@ export const AppShell = React.memo(function AppShell({ children }: { children: R
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="absolute left-2 top-1/2 -translate-y-1/2 z-10 size-8 opacity-60 hover:opacity-100 transition-opacity"
+                  className="absolute left-2 top-1/2 -translate-y-1/2 z-10 size-8 opacity-60 hover:opacity-100 focus-visible:opacity-100 transition-opacity"
                   onClick={toggleLeftSidebar}
                   aria-label="Open chat history"
                 >

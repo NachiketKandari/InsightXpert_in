@@ -71,6 +71,7 @@ function RegisterForm() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
+      <h1 className="sr-only">Create your InsightXpert account</h1>
       <Card className="w-full max-w-sm glass border-border">
         <CardHeader className="text-center">
           <CardTitle className="text-2xl flex items-center justify-center gap-2">

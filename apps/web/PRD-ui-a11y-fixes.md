@@ -81,6 +81,14 @@ Goal: history scales, touch targets sane, mobile nav predictable.
 Acceptance: with admin seed (100+ convos), `focusable` drops by >70%, scroll stays smooth, `390x844` resize keeps composer `~340px` visible and sidebar doesn't trap main.
 
 ## Phase 3 — Polish / SEO
+### Status: DONE (2026-09-25, verified)
+Changes in `apps/web/src`:
+1. Auth headings/titles: sr-only `h1` on login (`app/login/page.tsx`) + register (`app/register/page.tsx`); `app/layout.tsx` title → `{ template: "%s — InsightXpert", default }`; new server `app/login/layout.tsx` (`Sign in`) + `app/register/layout.tsx` (`Create account`). Verified live: `Sign in — InsightXpert` / `Create account — InsightXpert` with correct `h1`s.
+2. Skip link: `app-shell.tsx` — `Skip to chat` (visible on focus) → `main#main-chat[tabIndex=-1]`.
+3. Focus rings: `user-menu.tsx` trigger, `app-shell.tsx` reopen-sidebar button (`focus-visible:opacity-100`), `input-toolbar.tsx` voice-stop button, `docs-dialog.tsx` nav buttons (`Button` base already had rings).
+4. Contrast: 6 worst `text-[10px] text-muted-foreground/60|/70` spots → `text-xs text-muted-foreground` (`message-actions`, `database-picker-panel`, `dataset-selector`, `schema-linking-chunk`, `data-table`, `citation-link`). Remaining 10px hits are badges/labels with solid backgrounds — design-system follow-up, not blocking.
+5. Register `autocomplete` already correct (`email`/`new-password`) — no change.
+Verification: `tsc` clean, `vitest` 26/26, `next build` passes (fixed missing default export in new route layouts), Playwright vs local dev for titles/h1.
 1. Add real `h1` (sr-only ok) to login/register; keep visual `CardTitle`.
 2. `layout.tsx:25-28` → `title: { template: "%s — InsightXpert", default: "InsightXpert - AI Data Analyst" }`; set per-page `metadata.title` (`Sign in`, `Create account`, chat DB name).
 3. Ensure `:focus-visible` rings on all custom buttons (especially `size-7` icon buttons and DB cards).

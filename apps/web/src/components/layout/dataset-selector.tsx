@@ -144,7 +144,7 @@ export function DatasetSelector() {
                 <span className="size-3.5 shrink-0" />
               )}
               <span className="flex-1 truncate text-sm font-mono">{db.db_id}</span>
-              <span className="text-[10px] uppercase text-muted-foreground/70 shrink-0">
+              <span className="text-xs uppercase text-muted-foreground shrink-0">
                 {db.source}
               </span>
             </DropdownMenuItem>

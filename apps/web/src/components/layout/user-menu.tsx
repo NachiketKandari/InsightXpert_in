@@ -73,7 +73,7 @@ export const UserMenu = React.memo(function UserMenu() {
         <Tooltip>
           <TooltipTrigger asChild>
             <DropdownMenuTrigger asChild>
-              <button className="flex items-center gap-2 px-4 py-3 w-full cursor-pointer hover:bg-accent/50 dark:hover:bg-accent/30 transition-colors outline-none">
+              <button className="flex items-center gap-2 px-4 py-3 w-full cursor-pointer hover:bg-accent/50 dark:hover:bg-accent/30 transition-colors outline-none focus-visible:outline-2 focus-visible:outline-primary">
                 <Avatar size="default">
                   <AvatarFallback className="bg-primary/15 text-primary dark:bg-cyan-accent/15 dark:text-cyan-accent text-xs font-semibold">
                     {initials}
