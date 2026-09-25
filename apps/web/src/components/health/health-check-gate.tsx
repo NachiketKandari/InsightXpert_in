@@ -6,9 +6,10 @@
 // devs can keep seeing the app while the backend bounces.
 //
 // Trade-offs (Step 4 of the fix brief):
-// - We poll /api/v1/health every 30s when green, 15s when red (see
-//   use-health-check.ts). That keeps ECONNREFUSED noise in the Next dev
-//   terminal to occasional probes instead of every-request retries.
+// - We poll /api/v1/health on a slow cadence when green and a faster one when
+//   red (see use-health-check.ts for the exact intervals). That keeps
+//   ECONNREFUSED noise in the Next dev terminal to occasional probes instead
+//   of every-request retries.
 // - A 3s initial grace window avoids flashing the banner during hot reload /
 //   cold start when the first probe hasn't resolved yet.
 // - Manual "Retry now" button uses an explicit `checking` state (rather than
