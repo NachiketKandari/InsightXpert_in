@@ -39,7 +39,15 @@ export function ChatPanel() {
   const currentDb = databases.find((d) => d.db_id === selectedDbId);
   const isUnprofiled = selectedDbId && currentDb && !currentDb.has_profile;
 
-  const dbKindHint: "bundled" | "uploaded" | "postgres" | "libsql" | "none" | "unknown" =
+  const dbKindHint:
+    | "bundled"
+    | "uploaded"
+    | "postgres"
+    | "mysql"
+    | "libsql"
+    | "oracle"
+    | "none"
+    | "unknown" =
     !selectedDbId
       ? "none"
       : !currentDb
@@ -48,8 +56,12 @@ export function ChatPanel() {
       ? "uploaded"
       : currentDb.source === "postgres"
       ? "postgres"
+      : currentDb.source === "mysql"
+      ? "mysql"
       : currentDb.source === "libsql"
       ? "libsql"
+      : currentDb.source === "oracle"
+      ? "oracle"
       : "bundled";
 
   const handleSend = useCallback(

@@ -6,7 +6,7 @@
 
 import { apiFetch } from "@/lib/api";
 
-export type ConnectionKind = "postgres" | "mysql" | "libsql";
+export type ConnectionKind = "postgres" | "mysql" | "libsql" | "oracle";
 
 export interface PostgresConfig {
   host: string;
@@ -33,17 +33,42 @@ export interface LibsqlConfig {
   auth_token: string;
 }
 
-export type ConnectionConfig = PostgresConfig | MySQLConfig | LibsqlConfig;
+export interface OracleConfig {
+  host: string;
+  port: number;
+  service_name: string;
+  /** Owner/schema to introspect. Empty = the login user's own schema. */
+  schema: string;
+  username: string;
+  password: string;
+}
+
+export type ConnectionConfig =
+  | PostgresConfig
+  | MySQLConfig
+  | LibsqlConfig
+  | OracleConfig;
 
 export interface ConnectionRequest {
   db_id: string;
   kind: ConnectionKind;
   config: ConnectionConfig;
+  /** Table-picker allowlist (oracle only). Omitted/empty = all tables. */
+  selected_tables?: string[] | null;
 }
 
 export interface ConnectionTestResponse {
   ok: true;
   tables: string[];
+  /** Oracle only: per-table row counts, column counts, unsupported columns. */
+  details?: Record<
+    string,
+    {
+      row_count: number | null;
+      column_count: number;
+      unsupported_columns: string[];
+    }
+  >;
 }
 
 export interface ConnectionListItem {
@@ -59,14 +84,17 @@ export interface ConnectionListItem {
  */
 export async function testConnection(
   body: ConnectionRequest,
-): Promise<{ ok: true; tables: string[] } | { ok: false; error: string }> {
+): Promise<
+  | { ok: true; tables: string[]; details?: ConnectionTestResponse["details"] }
+  | { ok: false; error: string }
+> {
   const res = await apiFetch("/api/v1/connections/test", {
     method: "POST",
     body: JSON.stringify(body),
   });
   if (res.ok) {
     const data = (await res.json()) as ConnectionTestResponse;
-    return { ok: true, tables: data.tables };
+    return { ok: true, tables: data.tables, details: data.details };
   }
   let detail = "Connection failed";
   try {

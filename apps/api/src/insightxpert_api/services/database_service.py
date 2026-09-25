@@ -37,6 +37,10 @@ class DatabaseRef:
     dialect: str = "sqlite"
     connection_url: str | None = None
     connection_url_env_var: str | None = None
+    # Table-picker allowlist for BYO-DB connections (oracle). None = all tables.
+    selected_tables: list[str] | None = None
+    # Schema/owner to introspect for server-side-owned dialects (oracle).
+    owner: str | None = None
 
     def __repr__(self) -> str:
         url = self.connection_url
@@ -169,7 +173,7 @@ class DatabaseService:
                     conn.execute(
                         text(
                             "SELECT db_id, kind, connection_config_encrypted "
-                            "FROM databases WHERE kind IN ('postgres', 'libsql', 'sqlite_external', 'mysql')"
+                            "FROM databases WHERE kind IN ('postgres', 'libsql', 'sqlite_external', 'mysql', 'oracle')"
                         )
                     )
                     .mappings()
@@ -190,7 +194,7 @@ class DatabaseService:
         import json as _json
 
         from ..connections.encryption import decrypt
-        from ..connections.types import MySQLConnection, PostgresConnection
+        from ..connections.types import MySQLConnection, OracleConnection, PostgresConnection
 
         refs: list[DatabaseRef] = []
         for row in self._fetch_non_sqlite_rows():
@@ -210,9 +214,18 @@ class DatabaseService:
                 if kind_val == "postgres":
                     cfg = PostgresConnection(**cfg_dict)
                     url = cfg.to_dsn()
+                    selected = None
+                    owner = None
                 elif kind_val == "mysql":
                     cfg = MySQLConnection(**cfg_dict)
                     url = cfg.to_dsn()
+                    selected = None
+                    owner = None
+                elif kind_val == "oracle":
+                    cfg = OracleConnection(**cfg_dict)
+                    url = cfg.to_dsn()
+                    selected = list(cfg.selected_tables or []) or None
+                    owner = cfg.effective_schema()
                 else:
                     _log.warning(
                         "non_sqlite_db_unknown_kind",
@@ -235,6 +248,8 @@ class DatabaseService:
                     local_path=None,
                     dialect=kind_val,
                     connection_url=url,
+                    selected_tables=selected,
+                    owner=owner,
                 )
             )
         return refs
@@ -287,6 +302,9 @@ class DatabaseService:
             * ``postgres`` → decrypts ``connection_config_encrypted``, builds a
               :class:`PostgresConnection`, returns a
               :class:`PostgresConnector`.
+            * ``oracle`` → decrypts ``connection_config_encrypted``, builds an
+              :class:`OracleConnection`, returns an
+              :class:`OracleConnector`.
             * ``libsql`` / ``sqlite_external`` → reserved for the Turso plan;
               raises ``NotImplementedError`` at dispatch time.
 
@@ -325,6 +343,17 @@ class DatabaseService:
                 return None
             cfg = MySQLConnection(**_json.loads(decrypt(encrypted)))
             return _resolve(kind="mysql", config=cfg)
+
+        if kind == "oracle":
+            from ..connections.encryption import decrypt
+            from ..connections.types import OracleConnection
+            import json as _json
+
+            encrypted = (row or {}).get("connection_config_encrypted")
+            if not encrypted:
+                return None
+            cfg = OracleConnection(**_json.loads(decrypt(encrypted)))
+            return _resolve(kind="oracle", config=cfg)
 
         # libsql / sqlite_external — surface the NotImplemented from the
         # central dispatch so the error message is consistent.

@@ -23,7 +23,7 @@ from .dto import SharedSnapshotMessage, SharedSnapshotMeta, SharedSnapshotPayloa
 # 90 days, in seconds. Default expiry on every snapshot.
 _DEFAULT_TTL_SECONDS = 90 * 86400
 
-_DISALLOWED_KINDS = {"postgres", "libsql", "sqlite_external"}
+_DISALLOWED_KINDS = {"postgres", "libsql", "sqlite_external", "oracle"}
 
 
 class ShareError(Exception):
@@ -56,7 +56,7 @@ def _classify_db(db_id: str | None, owner_user_id: str) -> str:
     Bundled = no row in ``databases`` (filesystem-only) OR
               ``kind="sqlite_file"`` with ``owner_user_id IS NULL``.
     Uploaded = ``kind="sqlite_file"`` and ``owner_user_id == user``.
-    Refused = ``kind`` in ``_DISALLOWED_KINDS`` (postgres / libsql / sqlite_external).
+    Refused = ``kind`` in ``_DISALLOWED_KINDS`` (postgres / libsql / sqlite_external / oracle).
     """
     if db_id is None:
         return "none"

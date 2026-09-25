@@ -29,8 +29,19 @@ import {
   type ConnectionKind,
   type LibsqlConfig,
   type MySQLConfig,
+  type OracleConfig,
   type PostgresConfig,
 } from "@/lib/connections/api";
+import {
+  clearVisible,
+  filterTables,
+  formatRowCount,
+  isUnsupported,
+  selectableTables,
+  selectAllVisible,
+  toggleSelection,
+  type TableDetailsMap,
+} from "@/lib/connections/tables";
 import { useChatStore } from "@/stores/chat-store";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -76,6 +87,15 @@ const DEFAULT_MYSQL: MySQLConfig = {
 
 const DEFAULT_LIBSQL: LibsqlConfig = { url: "", auth_token: "" };
 
+const DEFAULT_ORACLE: OracleConfig = {
+  host: "",
+  port: 1521,
+  service_name: "",
+  schema: "",
+  username: "",
+  password: "",
+};
+
 export function ConnectDbDialog({
   open,
   onOpenChange,
@@ -86,10 +106,16 @@ export function ConnectDbDialog({
   const [pg, setPg] = useState<PostgresConfig>(DEFAULT_POSTGRES);
   const [mysql, setMysql] = useState<MySQLConfig>(DEFAULT_MYSQL);
   const [libsql, setLibsql] = useState<LibsqlConfig>(DEFAULT_LIBSQL);
+  const [oracle, setOracle] = useState<OracleConfig>(DEFAULT_ORACLE);
   const [testing, setTesting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [tested, setTested] = useState(false);
   const [tables, setTables] = useState<string[]>([]);
+  const [tableDetails, setTableDetails] = useState<TableDetailsMap | undefined>(
+    undefined,
+  );
+  const [tableQuery, setTableQuery] = useState("");
+  const [selected, setSelected] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const setSelectedDbId = useChatStore((s) => s.setSelectedDbId);
@@ -101,10 +127,14 @@ export function ConnectDbDialog({
     setPg(DEFAULT_POSTGRES);
     setMysql(DEFAULT_MYSQL);
     setLibsql(DEFAULT_LIBSQL);
+    setOracle(DEFAULT_ORACLE);
     setTesting(false);
     setSaving(false);
     setTested(false);
     setTables([]);
+    setTableDetails(undefined);
+    setTableQuery("");
+    setSelected([]);
     setError(null);
   }, []);
 
@@ -122,6 +152,9 @@ export function ConnectDbDialog({
     if (tested) {
       setTested(false);
       setTables([]);
+      setTableDetails(undefined);
+      setTableQuery("");
+      setSelected([]);
     }
   }, [tested]);
 
@@ -139,31 +172,61 @@ export function ConnectDbDialog({
       mysql.username.length > 0 &&
       mysql.password.length > 0 &&
       mysql.port > 0
+    : kind === "oracle"
+    ? oracle.host.length > 0 &&
+      oracle.service_name.length > 0 &&
+      oracle.username.length > 0 &&
+      oracle.password.length > 0 &&
+      oracle.port > 0
     : libsql.url.length > 0 && libsql.auth_token.length > 0;
 
   const canTest = dbIdValid && configReady && !testing && !saving;
-  const canSave = canTest && tested;
+  // Oracle additionally requires at least one selectable table picked.
+  const canSave = canTest && tested && (kind !== "oracle" || selected.length > 0);
 
-  const requestBody = () => ({
-    db_id: dbId,
-    kind,
-    config: kind === "postgres" ? pg : kind === "mysql" ? mysql : libsql,
-  });
+  const requestBody = (forSave: boolean) => {
+    const config =
+      kind === "postgres"
+        ? pg
+        : kind === "mysql"
+        ? mysql
+        : kind === "oracle"
+        ? oracle
+        : libsql;
+    // A full "select all" is stored as null (all tables, future-proof);
+    // a partial selection is stored as an explicit allowlist.
+    const selectable =
+      kind === "oracle" && tested ? selectableTables(tables, tableDetails) : [];
+    const selected_tables =
+      kind === "oracle" && forSave
+        ? selected.length >= selectable.length
+          ? null
+          : selected
+        : undefined;
+    return { db_id: dbId, kind, config, selected_tables };
+  };
 
   const handleTest = async () => {
     setError(null);
     setTesting(true);
     try {
-      const result = await testConnection(requestBody());
+      const result = await testConnection(requestBody(false));
       if (result.ok) {
         setTested(true);
         setTables(result.tables);
+        if (kind === "oracle") {
+          setTableDetails(result.details ?? {});
+          // Default to everything selectable (select-all).
+          setSelected(selectableTables(result.tables, result.details));
+        }
         toast.success(
           `Connection OK — found ${result.tables.length} table${result.tables.length === 1 ? "" : "s"}`,
         );
       } else {
         setTested(false);
         setTables([]);
+        setTableDetails(undefined);
+        setSelected([]);
         setError(result.error);
       }
     } finally {
@@ -175,7 +238,7 @@ export function ConnectDbDialog({
     setError(null);
     setSaving(true);
     try {
-      const result = await createConnection(requestBody());
+      const result = await createConnection(requestBody(true));
       if (result.ok) {
         toast.success(`Connected as "${result.db_id}"`);
         setSelectedDbId(result.db_id);
@@ -199,10 +262,10 @@ export function ConnectDbDialog({
             Connect a database
           </DialogTitle>
           <DialogDescription>
-            Point InsightXpert at your existing Postgres, MySQL, or libSQL/Turso
-            database. Credentials are encrypted at rest. Queries run in
-            read-only mode (we strongly recommend a read-only role on your
-            side too).
+            Point InsightXpert at your existing Postgres, MySQL, Oracle, or
+            libSQL/Turso database. Credentials are encrypted at rest. Queries
+            run in read-only mode (we strongly recommend a read-only role on
+            your side too).
           </DialogDescription>
         </DialogHeader>
 
@@ -234,9 +297,10 @@ export function ConnectDbDialog({
               invalidateTest();
             }}
           >
-            <TabsList className="grid w-full grid-cols-3">
+            <TabsList className="grid w-full grid-cols-4">
               <TabsTrigger value="postgres">Postgres</TabsTrigger>
               <TabsTrigger value="mysql">MySQL</TabsTrigger>
+              <TabsTrigger value="oracle">Oracle</TabsTrigger>
               <TabsTrigger value="libsql">libSQL</TabsTrigger>
             </TabsList>
 
@@ -469,6 +533,100 @@ export function ConnectDbDialog({
               </div>
             </TabsContent>
 
+            <TabsContent value="oracle" className="space-y-3 pt-3">
+              <div className="grid grid-cols-3 gap-3">
+                <div className="col-span-2 space-y-1.5">
+                  <Label htmlFor="ora-host">Host</Label>
+                  <Input
+                    id="ora-host"
+                    value={oracle.host}
+                    onChange={(e) => {
+                      setOracle({ ...oracle, host: e.target.value });
+                      invalidateTest();
+                    }}
+                    placeholder="db.example.com"
+                    disabled={testing || saving}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="ora-port">Port</Label>
+                  <Input
+                    id="ora-port"
+                    type="number"
+                    value={oracle.port}
+                    onChange={(e) => {
+                      setOracle({ ...oracle, port: Number(e.target.value) || 0 });
+                      invalidateTest();
+                    }}
+                    disabled={testing || saving}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="ora-service">Service name</Label>
+                  <Input
+                    id="ora-service"
+                    value={oracle.service_name}
+                    onChange={(e) => {
+                      setOracle({ ...oracle, service_name: e.target.value });
+                      invalidateTest();
+                    }}
+                    placeholder="ORCLPDB"
+                    disabled={testing || saving}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="ora-schema">Schema (optional)</Label>
+                  <Input
+                    id="ora-schema"
+                    value={oracle.schema}
+                    onChange={(e) => {
+                      setOracle({ ...oracle, schema: e.target.value });
+                      invalidateTest();
+                    }}
+                    placeholder="defaults to your user"
+                    disabled={testing || saving}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="ora-user">Username</Label>
+                  <Input
+                    id="ora-user"
+                    value={oracle.username}
+                    onChange={(e) => {
+                      setOracle({ ...oracle, username: e.target.value });
+                      invalidateTest();
+                    }}
+                    autoComplete="off"
+                    disabled={testing || saving}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="ora-pass">Password</Label>
+                  <Input
+                    id="ora-pass"
+                    type="password"
+                    value={oracle.password}
+                    onChange={(e) => {
+                      setOracle({ ...oracle, password: e.target.value });
+                      invalidateTest();
+                    }}
+                    autoComplete="new-password"
+                    disabled={testing || saving}
+                  />
+                </div>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Thin-mode connection, no Oracle client needed. Test the
+                connection, then pick which tables to expose below.
+              </p>
+            </TabsContent>
+
             <TabsContent value="libsql" className="space-y-3 pt-3">
               <div className="space-y-1.5">
                 <Label htmlFor="ls-url">libSQL URL</Label>
@@ -511,7 +669,7 @@ export function ConnectDbDialog({
             </div>
           )}
 
-          {tested && tables.length > 0 && (
+          {tested && tables.length > 0 && kind !== "oracle" && (
             <div className="rounded-md border border-emerald-500/30 bg-emerald-500/10 p-2.5 text-xs">
               <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-400 font-medium">
                 <CheckCircle2 className="size-3.5" />
@@ -523,6 +681,24 @@ export function ConnectDbDialog({
                 {tables.length > 50 ? `, …+${tables.length - 50} more` : ""}
               </div>
             </div>
+          )}
+
+          {tested && kind === "oracle" && tables.length > 0 && (
+            <OracleTablePicker
+              tables={tables}
+              details={tableDetails}
+              query={tableQuery}
+              onQueryChange={setTableQuery}
+              selected={selected}
+              onToggle={(name) => setSelected((prev) => toggleSelection(prev, name))}
+              onSelectAll={(visible) =>
+                setSelected((prev) => selectAllVisible(prev, visible))
+              }
+              onClear={(visible) =>
+                setSelected((prev) => clearVisible(prev, visible))
+              }
+              disabled={testing || saving}
+            />
           )}
         </div>
 
@@ -561,5 +737,133 @@ export function ConnectDbDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+interface OracleTablePickerProps {
+  tables: string[];
+  details: TableDetailsMap | undefined;
+  query: string;
+  onQueryChange: (q: string) => void;
+  selected: string[];
+  onToggle: (name: string) => void;
+  onSelectAll: (visible: string[]) => void;
+  onClear: (visible: string[]) => void;
+  disabled: boolean;
+}
+
+/**
+ * Table picker for Oracle connections — the whole DB is imported, but the
+ * user chooses which tables to expose. Search filters client-side, Select
+ * all / Clear operate on the visible (filtered) rows, and tables with
+ * Phase-1-unsupported column types (BLOB/RAW) are shown disabled with the
+ * reason. Row counts are exact COUNT(*) values from the test response
+ * ("—" when a count timed out); result-set fetching stays capped at the
+ * server row limit regardless.
+ */
+function OracleTablePicker({
+  tables,
+  details,
+  query,
+  onQueryChange,
+  selected,
+  onToggle,
+  onSelectAll,
+  onClear,
+  disabled,
+}: OracleTablePickerProps) {
+  const visible = filterTables(tables, query);
+  const visibleSelectable = visible.filter((t) => !isUnsupported(details, t));
+  const allVisibleSelected =
+    visibleSelectable.length > 0 &&
+    visibleSelectable.every((t) => selected.includes(t));
+
+  return (
+    <div className="rounded-md border border-emerald-500/30 bg-emerald-500/10 p-2.5 text-xs">
+      <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-400 font-medium">
+        <CheckCircle2 className="size-3.5" />
+        Connection verified — pick tables ({selected.length} of {tables.length}{" "}
+        selected)
+      </div>
+
+      <div className="mt-2 flex items-center gap-2">
+        <Input
+          value={query}
+          onChange={(e) => onQueryChange(e.target.value)}
+          placeholder="Search tables…"
+          className="h-7 text-xs"
+          disabled={disabled}
+          aria-label="Search tables"
+        />
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-7 shrink-0 text-xs"
+          onClick={() => onSelectAll(visibleSelectable)}
+          disabled={disabled || allVisibleSelected}
+        >
+          Select all
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 shrink-0 text-xs"
+          onClick={() => onClear(visible)}
+          disabled={disabled || selected.length === 0}
+        >
+          Clear
+        </Button>
+      </div>
+
+      <div className="mt-1.5 max-h-44 overflow-auto rounded border border-border/60 bg-background/60">
+        {visible.length === 0 && (
+          <div className="px-2.5 py-3 text-[11px] text-muted-foreground">
+            No tables match “{query}”.
+          </div>
+        )}
+        {visible.map((name) => {
+          const blocked = isUnsupported(details, name);
+          const info = details?.[name];
+          return (
+            <label
+              key={name}
+              className={`flex items-center gap-2 px-2.5 py-1.5 text-[11px] ${
+                blocked
+                  ? "cursor-not-allowed opacity-50"
+                  : "cursor-pointer hover:bg-accent/50"
+              }`}
+              title={
+                blocked
+                  ? `Unsupported in v1: ${(info?.unsupported_columns ?? []).join(", ")}`
+                  : undefined
+              }
+            >
+              <input
+                type="checkbox"
+                checked={selected.includes(name)}
+                disabled={disabled || blocked}
+                onChange={() => onToggle(name)}
+                className="size-3.5 shrink-0 accent-primary"
+                aria-label={`Select table ${name}`}
+              />
+              <span className="flex-1 truncate font-mono">{name}</span>
+              {blocked ? (
+                <span className="shrink-0 text-destructive">BLOB/RAW</span>
+              ) : (
+                <span className="shrink-0 text-muted-foreground">
+                  {formatRowCount(info?.row_count ?? null)}
+                  {info !== undefined ? ` · ${info.column_count} cols` : ""}
+                </span>
+              )}
+            </label>
+          );
+        })}
+      </div>
+      {selected.length === 0 && (
+        <p className="mt-1.5 text-[11px] text-muted-foreground">
+          Select at least one table to save this connection.
+        </p>
+      )}
+    </div>
   );
 }

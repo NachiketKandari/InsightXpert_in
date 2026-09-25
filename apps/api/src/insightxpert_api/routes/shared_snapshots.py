@@ -74,7 +74,7 @@ def create_share(
     except snap_service.PostgresShareRefused:
         raise HTTPException(
             status_code=403,
-            detail="sharing chats bound to live database connections (postgres/libsql) is refused in v1",
+            detail="sharing chats bound to live database connections (postgres/libsql/oracle) is refused in v1",
         )
 
 

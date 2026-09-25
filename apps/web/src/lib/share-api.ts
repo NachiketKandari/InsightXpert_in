@@ -50,7 +50,7 @@ export async function createShare(
   if (res.status === 409) return { ok: false, error: { kind: "uploaded_consent_required" } };
   if (res.status === 403) {
     const text = (await res.text()).toLowerCase();
-    if (text.includes("postgres") || text.includes("libsql")) {
+    if (text.includes("postgres") || text.includes("libsql") || text.includes("oracle")) {
       return { ok: false, error: { kind: "postgres_refused" } };
     }
     if (text.includes("disabled")) {

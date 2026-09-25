@@ -65,6 +65,17 @@ class DatabaseConnector:
         if self._adapter.forbidden_sql_re.search(sql):
             raise ForbiddenSQLError("write statements are not allowed")
 
+        # BYO-DB table picker allowlist (oracle connections): the saved
+        # selection is enforced on every execution path that funnels through
+        # this connector (/sql/execute, automations, executor stage).
+        selected = getattr(self._ref, "selected_tables", None)
+        if selected:
+            from ..vendored.agents_core.sql_guard import validate_tables
+
+            error = validate_tables(sql, set(selected))
+            if error:
+                raise ForbiddenSQLError(error)
+
         # Multi-statement check — strip single-line (--) and block (/* */)
         # comments, then reject if more than one statement remains.
         stripped = _strip_sql_comments(sql)
@@ -111,10 +122,10 @@ def resolve_connector(
     """Pick the right connector for a registry row.
 
     Args:
-        kind: One of ``'sqlite_file'``, ``'postgres'``, ``'libsql'``,
-            ``'sqlite_external'``.
+        kind: One of ``'sqlite_file'``, ``'postgres'``, ``'mysql'``,
+            ``'oracle'``, ``'libsql'``, ``'sqlite_external'``.
         config: A typed connection config (e.g. ``PostgresConnection``) for
-            non-sqlite_file kinds. Required for postgres / libsql.
+            non-sqlite_file kinds. Required for postgres / mysql / oracle.
         db_path: Local filesystem path for ``sqlite_file``.
 
     Raises:
@@ -144,6 +155,13 @@ def resolve_connector(
         if not isinstance(config, MySQLConnection):
             raise ValueError("mysql dispatch requires a MySQLConnection config")
         return MySQLConnector(config)
+    if kind == "oracle":
+        from ..connections.oracle_connector import OracleConnector
+        from ..connections.types import OracleConnection
+
+        if not isinstance(config, OracleConnection):
+            raise ValueError("oracle dispatch requires an OracleConnection config")
+        return OracleConnector(config)
     if kind in ("libsql", "sqlite_external"):
         raise NotImplementedError(
             f"connector kind '{kind}' is reserved but not yet wired (Turso cutover plan)"

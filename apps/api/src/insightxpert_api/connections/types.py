@@ -78,3 +78,38 @@ class LibsqlConnection(_RedactingMixin, BaseModel):
         return v
 
 
+class OracleConnection(_RedactingMixin, BaseModel):
+    kind: Literal["oracle"] = "oracle"
+    host: str
+    port: int = 1521
+    service_name: str
+    # Owner/schema to introspect. Empty = the login user's own schema
+    # (resolved server-side to username.upper()).
+    schema_: str = Field(default="", alias="schema")
+    username: str
+    password: str
+    # Subset of discovered tables to expose. None/empty = all tables.
+    # Populated by the connect dialog's table picker; enforced at query time.
+    selected_tables: list[str] | None = None
+
+    model_config = {"populate_by_name": True}
+
+    @field_validator("service_name")
+    @classmethod
+    def _non_empty_service(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("service_name must not be empty")
+        return v
+
+    def effective_schema(self) -> str:
+        """Schema/owner to introspect: explicit ``schema`` or own schema."""
+        return self.schema_.strip().upper() or self.username.strip().upper()
+
+    def to_dsn(self) -> str:
+        pw = quote(self.password, safe="")
+        return (
+            f"oracle+oracledb://{quote(self.username, safe='')}:{pw}"
+            f"@{self.host}:{self.port}/{quote(self.service_name, safe='')}"
+        )
+
+

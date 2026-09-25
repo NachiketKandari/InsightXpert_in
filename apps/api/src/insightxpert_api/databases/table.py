@@ -31,11 +31,14 @@ databases_table = Table(
     Column("pipeline_mode_default", String(32), nullable=True),
     # BYO-DB connector: 'sqlite_file' (bundled / uploaded on-disk SQLite),
     # 'libsql' (Turso URL we own — post-v1), 'sqlite_external' (libSQL URL the
-    # user owns — post-v1), 'postgres' (BYO Postgres). The connector dispatch
-    # in db/connector.py uses this column to pick the right backend.
+    # user owns — post-v1), 'postgres' / 'mysql' / 'oracle' (BYO). The
+    # connector dispatch in db/connector.py uses this column to pick the
+    # right backend.
     Column("kind", String(32), nullable=False, server_default="sqlite_file"),
     # Encrypted JSON config blob (Fernet). Shape depends on `kind`:
     #   postgres → {host,port,database,username,password,ssl_mode,schema}
+    #   mysql    → {host,port,database,username,password,ssl_enabled,charset}
+    #   oracle   → {host,port,service_name,schema,username,password,selected_tables}
     #   libsql   → {url, auth_token}
     # Decrypted only at query time via connections.encryption.decrypt.
     Column("connection_config_encrypted", String, nullable=True),
@@ -44,7 +47,7 @@ databases_table = Table(
         name="databases_visibility_check",
     ),
     CheckConstraint(
-        "kind IN ('sqlite_file','libsql','sqlite_external','postgres','mysql')",
+        "kind IN ('sqlite_file','libsql','sqlite_external','postgres','mysql','oracle')",
         name="databases_kind_check",
     ),
 )

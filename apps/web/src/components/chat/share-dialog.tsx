@@ -15,7 +15,15 @@ import { useCreateShare, useRevokeShare, useShare } from "@/hooks/use-share";
 
 export interface ShareDialogProps {
   conversationId: string;
-  dbKindHint: "bundled" | "uploaded" | "postgres" | "libsql" | "none" | "unknown";
+  dbKindHint:
+    | "bundled"
+    | "uploaded"
+    | "postgres"
+    | "mysql"
+    | "libsql"
+    | "oracle"
+    | "none"
+    | "unknown";
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
@@ -46,6 +54,9 @@ export function ShareDialog({
     : null;
 
   const isPostgres = dbKindHint === "postgres";
+  // Live-DB chats (postgres today, oracle going forward) cannot be shared —
+  // the backend refuses them. Show the same pre-emptive notice for both.
+  const isLiveDb = isPostgres || dbKindHint === "oracle";
   const isUploaded = dbKindHint === "uploaded";
 
   async function handleCreate() {
@@ -94,14 +105,14 @@ export function ShareDialog({
           </DialogDescription>
         </DialogHeader>
 
-        {isPostgres && (
+        {isLiveDb && (
           <p data-testid="share-postgres-block" className="text-sm text-red-600">
-            This chat is bound to a live Postgres connection. Sharing live-DB
+            This chat is bound to a live database connection. Sharing live-DB
             chats is disabled in this version.
           </p>
         )}
 
-        {!isPostgres && isUploaded && !existing && (
+        {!isLiveDb && isUploaded && !existing && (
           <label className="flex items-start gap-2 text-sm cursor-pointer">
             <input
               type="checkbox"

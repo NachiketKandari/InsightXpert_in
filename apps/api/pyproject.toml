@@ -33,7 +33,8 @@ dependencies = [
   "cryptography>=42.0",
   "pgvector>=0.3.0",
   "websockets>=13.0",
-	"prometheus-client>=0.21",
+  "prometheus-client>=0.21",
+  "oracledb>=2.0",
 ]
 
 [dependency-groups]
