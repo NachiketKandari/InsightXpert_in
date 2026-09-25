@@ -26,7 +26,7 @@ class DeepSeekProvider:
     Messages and tools are already in OpenAI format — no conversion needed.
     """
 
-    def __init__(self, api_key: str, model: str = "deepseek-v4-flash") -> None:
+    def __init__(self, api_key: str, model: str = "deepseek-flash") -> None:
         self._model = model
         self._client = AsyncOpenAI(api_key=api_key, base_url=DEEPSEEK_BASE_URL)
         logger.debug("DeepSeekProvider initialized (model=%s)", model)

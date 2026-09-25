@@ -57,7 +57,7 @@ class DeepSeekLLM:
     def __init__(
         self,
         api_key: str,
-        model: str = "deepseek-v4-flash",
+        model: str = "deepseek-flash",
         embed_api_key: str = "",
         embed_model: str = "gemini-embedding-001",
     ) -> None:

@@ -24,7 +24,7 @@ interface SettingsState {
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
   currentProvider: "deepseek",
-  currentModel: "deepseek-v4-flash",
+  currentModel: "deepseek-flash",
   providers: [],
   loading: false,
   // Default to "auto" — the FE pre-routes via POST /api/v1/chat/route.

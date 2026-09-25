@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.5-flash"
     deepseek_api_key: str = ""
-    deepseek_model: str = "deepseek-v4-flash"
+    deepseek_model: str = "deepseek-flash"
     ollama_model: str = "llama3.1"
     ollama_base_url: str = "http://localhost:11434"
 

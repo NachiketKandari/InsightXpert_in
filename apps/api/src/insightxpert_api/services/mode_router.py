@@ -61,9 +61,9 @@ def _reset_mode_router_clients() -> None:
 # this regardless of ``settings.gemini_chat_model`` because the router runs on
 # the critical-path before any pipeline activity is visible to the user, and
 # spending the user's chosen-model latency budget here would defeat the point.
-# When the provider is DeepSeek, we use deepseek-v4-flash with JSON mode instead.
+# When the provider is DeepSeek, we use deepseek-flash with JSON mode instead.
 _ROUTER_MODEL_GEMINI = "gemini-3.1-flash-lite-preview"
-_ROUTER_MODEL_DEEPSEEK = "deepseek-v4-flash"
+_ROUTER_MODEL_DEEPSEEK = "deepseek-flash"
 
 class RouteDecision(BaseModel):
     mode: Mode
@@ -81,7 +81,7 @@ def _fallback(reason: str = "fallback (router error)") -> RouteDecision:
 
 
 async def _classify_via_deepseek(prompt: str, settings: Settings) -> str:
-    """Classify using DeepSeek V4 Flash with JSON mode."""
+    """Classify using DeepSeek Flash with JSON mode."""
     global _deepseek_client
     if _deepseek_client is None:
         from openai import AsyncOpenAI
@@ -129,7 +129,7 @@ async def classify_mode(
     fall back to ``agentic``.
 
     Uses the configured ``llm_provider`` for the classification call:
-      - ``"deepseek"`` → deepseek-v4-flash with JSON mode
+      - ``"deepseek"`` → deepseek-flash with JSON mode
       - ``"gemini"`` or anything else → gemini-3.1-flash-lite-preview
     """
     prompt = _TEMPLATE.render(question=question, db_id=db_id)

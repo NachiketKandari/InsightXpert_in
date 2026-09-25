@@ -100,7 +100,7 @@ class Settings(BaseSettings):
     gemini_embed_model: str = "gemini-embedding-001"
 
     deepseek_api_key: str = ""
-    deepseek_chat_model: str = "deepseek-v4-flash"
+    deepseek_chat_model: str = "deepseek-flash"
 
     # --- voice / speech-to-text -------------------------------------------
     # Deepgram Nova-3 streaming. Empty → /api/transcribe closes with 4002.
