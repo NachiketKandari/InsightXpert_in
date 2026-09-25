@@ -41,6 +41,10 @@ export interface OracleConfig {
   schema: string;
   username: string;
   password: string;
+  /** Raw alternative to host/port/service_name: a full `(DESCRIPTION=…)`
+   *  TNS descriptor or an easy-connect `host[:port][/service]` string.
+   *  Empty = use the fields above. */
+  connection_string: string;
 }
 
 export type ConnectionConfig =

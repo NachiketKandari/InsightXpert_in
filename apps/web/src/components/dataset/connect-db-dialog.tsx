@@ -94,7 +94,10 @@ const DEFAULT_ORACLE: OracleConfig = {
   schema: "",
   username: "",
   password: "",
+  connection_string: "",
 };
+
+type OracleInputMode = "fields" | "connection_string";
 
 export function ConnectDbDialog({
   open,
@@ -107,6 +110,7 @@ export function ConnectDbDialog({
   const [mysql, setMysql] = useState<MySQLConfig>(DEFAULT_MYSQL);
   const [libsql, setLibsql] = useState<LibsqlConfig>(DEFAULT_LIBSQL);
   const [oracle, setOracle] = useState<OracleConfig>(DEFAULT_ORACLE);
+  const [oracleMode, setOracleMode] = useState<OracleInputMode>("fields");
   const [testing, setTesting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [tested, setTested] = useState(false);
@@ -128,6 +132,7 @@ export function ConnectDbDialog({
     setMysql(DEFAULT_MYSQL);
     setLibsql(DEFAULT_LIBSQL);
     setOracle(DEFAULT_ORACLE);
+    setOracleMode("fields");
     setTesting(false);
     setSaving(false);
     setTested(false);
@@ -173,11 +178,15 @@ export function ConnectDbDialog({
       mysql.password.length > 0 &&
       mysql.port > 0
     : kind === "oracle"
-    ? oracle.host.length > 0 &&
-      oracle.service_name.length > 0 &&
-      oracle.username.length > 0 &&
-      oracle.password.length > 0 &&
-      oracle.port > 0
+    ? oracleMode === "connection_string"
+      ? oracle.connection_string.trim().length > 0 &&
+        oracle.username.length > 0 &&
+        oracle.password.length > 0
+      : oracle.host.length > 0 &&
+        oracle.service_name.length > 0 &&
+        oracle.username.length > 0 &&
+        oracle.password.length > 0 &&
+        oracle.port > 0
     : libsql.url.length > 0 && libsql.auth_token.length > 0;
 
   const canTest = dbIdValid && configReady && !testing && !saving;
@@ -185,13 +194,20 @@ export function ConnectDbDialog({
   const canSave = canTest && tested && (kind !== "oracle" || selected.length > 0);
 
   const requestBody = (forSave: boolean) => {
+    // Oracle connection-string mode sends the raw string with blank
+    // host/service_name (the backend requires exactly one mode); fields
+    // mode omits the string.
+    const oracleConfig: OracleConfig =
+      kind === "oracle" && oracleMode === "connection_string"
+        ? { ...oracle, host: "", port: 1521, service_name: "" }
+        : { ...oracle, connection_string: "" };
     const config =
       kind === "postgres"
         ? pg
         : kind === "mysql"
         ? mysql
         : kind === "oracle"
-        ? oracle
+        ? oracleConfig
         : libsql;
     // A full "select all" is stored as null (all tables, future-proof);
     // a partial selection is stored as an explicit allowlist.
@@ -534,6 +550,102 @@ export function ConnectDbDialog({
             </TabsContent>
 
             <TabsContent value="oracle" className="space-y-3 pt-3">
+              <div className="flex gap-1 rounded-md border border-border/60 p-0.5 text-xs">
+                <Button
+                  variant={oracleMode === "fields" ? "secondary" : "ghost"}
+                  size="sm"
+                  className="h-7 flex-1 text-xs"
+                  onClick={() => {
+                    setOracleMode("fields");
+                    invalidateTest();
+                  }}
+                  disabled={testing || saving}
+                >
+                  Fields
+                </Button>
+                <Button
+                  variant={oracleMode === "connection_string" ? "secondary" : "ghost"}
+                  size="sm"
+                  className="h-7 flex-1 text-xs"
+                  onClick={() => {
+                    setOracleMode("connection_string");
+                    invalidateTest();
+                  }}
+                  disabled={testing || saving}
+                >
+                  Connection string
+                </Button>
+              </div>
+
+              {oracleMode === "connection_string" ? (
+                <>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="ora-connstr">Connection string</Label>
+                    <textarea
+                      id="ora-connstr"
+                      value={oracle.connection_string}
+                      onChange={(e) => {
+                        setOracle({ ...oracle, connection_string: e.target.value });
+                        invalidateTest();
+                      }}
+                      placeholder="(DESCRIPTION=(ADDRESS=(PROTOCOL=TCP)(HOST=db.example.com)(PORT=1521))(CONNECT_DATA=(SERVICE_NAME=ORCLPDB)))"
+                      rows={3}
+                      disabled={testing || saving}
+                      className="w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-xs placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    />
+                    <p className="text-[11px] text-muted-foreground">
+                      A full TNS descriptor, or easy-connect like{" "}
+                      <span className="font-mono">db.example.com:1521/ORCLPDB</span>.
+                      Put credentials in the fields below, not the string.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="ora-cs-user">Username</Label>
+                      <Input
+                        id="ora-cs-user"
+                        value={oracle.username}
+                        onChange={(e) => {
+                          setOracle({ ...oracle, username: e.target.value });
+                          invalidateTest();
+                        }}
+                        autoComplete="off"
+                        disabled={testing || saving}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="ora-cs-pass">Password</Label>
+                      <Input
+                        id="ora-cs-pass"
+                        type="password"
+                        value={oracle.password}
+                        onChange={(e) => {
+                          setOracle({ ...oracle, password: e.target.value });
+                          invalidateTest();
+                        }}
+                        autoComplete="new-password"
+                        disabled={testing || saving}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label htmlFor="ora-cs-schema">Schema (optional)</Label>
+                    <Input
+                      id="ora-cs-schema"
+                      value={oracle.schema}
+                      onChange={(e) => {
+                        setOracle({ ...oracle, schema: e.target.value });
+                        invalidateTest();
+                      }}
+                      placeholder="defaults to your user"
+                      disabled={testing || saving}
+                    />
+                  </div>
+                </>
+              ) : (
+              <>
               <div className="grid grid-cols-3 gap-3">
                 <div className="col-span-2 space-y-1.5">
                   <Label htmlFor="ora-host">Host</Label>
@@ -625,6 +737,8 @@ export function ConnectDbDialog({
                 Thin-mode connection, no Oracle client needed. Test the
                 connection, then pick which tables to expose below.
               </p>
+              </>
+              )}
             </TabsContent>
 
             <TabsContent value="libsql" className="space-y-3 pt-3">

@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import contextlib
 from typing import Any
-from urllib.parse import unquote
 
 from . import DIALECTS
 from .base import ProfilingQueryPack
@@ -45,28 +44,22 @@ class OracleAdapter:
     def open_readonly(self, ref: Any) -> Any:
         import oracledb
 
+        from .oracle_url import split_oracle_url
+
         url = getattr(ref, "connection_url", None)
         if not url:
             raise ValueError(f"Oracle ref {ref.db_id!r} missing connection_url")
-        from urllib.parse import urlparse
-
-        parsed = urlparse(url)
-        user = unquote(parsed.username or "")
-        password = unquote(parsed.password or "")
-        service = (parsed.path or "").lstrip("/")
-        if not parsed.hostname or not service:
-            raise ValueError(
-                f"Oracle ref {ref.db_id!r} has an unparsable connection URL"
-            )
-        dsn = f"{parsed.hostname}:{parsed.port or 1521}/{unquote(service)}"
+        try:
+            user, password, dsn = split_oracle_url(url)
+        except ValueError as e:
+            raise ValueError(f"Oracle ref {ref.db_id!r} has an unparsable connection URL") from e
         conn = oracledb.connect(user=user, password=password, dsn=dsn)
         with contextlib.suppress(Exception):
             conn.call_timeout = 30_000
         # Permissions / driver quirks must not break reads — the regex
         # guard in DatabaseConnector remains in force.
-        with contextlib.suppress(Exception):
-            with conn.cursor() as cur:
-                cur.execute("SET TRANSACTION READ ONLY")
+        with contextlib.suppress(Exception), conn.cursor() as cur:
+            cur.execute("SET TRANSACTION READ ONLY")
         return conn
 
     def teardown_readonly(self, conn: Any) -> None:

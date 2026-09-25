@@ -98,16 +98,33 @@ class OracleConnector:
             else None
         )
         try:
+            import oracledb  # driver must exist for either path
+        except ModuleNotFoundError as e:
+            raise RuntimeError(
+                "oracle support is not installed (missing 'oracledb' package)"
+            ) from e
+        if config.uses_descriptor():
+            # Full TNS descriptors cannot be expressed as a SQLAlchemy URL
+            # (the dialect would treat the blob as a TNS alias), so connect
+            # through a creator callable instead. Pooling still applies.
+            dsn = config.direct_dsn()
+            user, password = config.username, config.password
+            self._engine = create_engine(
+                "oracle+oracledb://",
+                creator=lambda: oracledb.connect(
+                    user=user, password=password, dsn=dsn
+                ),
+                pool_size=2,
+                max_overflow=0,
+                pool_pre_ping=True,
+            )
+        else:
             self._engine = create_engine(
                 config.to_dsn(),
                 pool_size=2,
                 max_overflow=0,
                 pool_pre_ping=True,
             )
-        except ModuleNotFoundError as e:
-            raise RuntimeError(
-                "oracle support is not installed (missing 'oracledb' package)"
-            ) from e
 
     # -- query ----------------------------------------------------------
 

@@ -15,6 +15,7 @@ Repo: `insightxpert.in` (BYO-DB "Connect a database" feature)
 | BLOB/RAW | Tables containing `BLOB`/`BFILE`/`RAW`/`LONG RAW` columns are **rejected in Phase 1** (disabled in picker + 400 on save) |
 | Verification | **Mock-only tests** sufficient for merge; must not break existing functionality |
 | Service name | `service_name` form (covers PDBs, XE, Autonomous DB). SID-only legacy DBs are out of scope |
+| Connection string | Oracle tab offers **Fields | Connection string** toggle: full `(DESCRIPTION=…)` TNS descriptor or easy-connect `host[:port][/service]`; credentials stay in their fields (embedded `user/pass@` rejected). Descriptor mode connects via a SQLAlchemy `creator` callable; fields/easy mode via `?service_name=` DSN |
 | Schema | Optional `schema` field, defaults to the login user's own schema; system schemas (`SYS`, `SYSTEM`, `APEX_*`, …) refused |
 
 ## 2. What was built
@@ -70,3 +71,4 @@ Repo: `insightxpert.in` (BYO-DB "Connect a database" feature)
 3. SID-only connections, TCPS/wallet, and multi-schema single-connection introspection are out of scope.
 4. `mysql` share-refusal gap noted (mysql not in `_DISALLOWED_KINDS`) — left unchanged intentionally; consider a separate fix.
 5. No alembic migration for the kind CHECK (matches `mysql` precedent); environments whose `databases` schema was built from metadata get the constraint via `table.py`.
+6. Follow-up fix shipped: `to_dsn()` initially placed the service name in the URL path, which the `oracle+oracledb` dialect interprets as **SID** — now uses the `?service_name=` query form; descriptors travel via a `?descriptor=` marker URL parsed by `db/dialects/oracle_url.py` (SQLAlchemy never sees the raw blob).

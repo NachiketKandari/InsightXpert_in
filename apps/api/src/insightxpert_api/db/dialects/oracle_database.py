@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import contextlib
 from typing import Any
-from urllib.parse import unquote, urlparse
 
 from ...vendored.pipeline_core.db import Database
+from .oracle_url import split_oracle_url
 
 
 class OracleDatabase(Database):
@@ -22,23 +22,19 @@ class OracleDatabase(Database):
         url = getattr(ref, "connection_url", None)
         if not url:
             raise ValueError(f"Oracle ref {ref.db_id!r} missing connection_url")
-        parsed = urlparse(url)
-        user = unquote(parsed.username or "")
-        password = unquote(parsed.password or "")
-        service = (parsed.path or "").lstrip("/")
-        if not parsed.hostname or not service:
+        try:
+            user, password, dsn = split_oracle_url(url)
+        except ValueError as e:
             raise ValueError(
                 f"Oracle ref {ref.db_id!r} has an unparsable connection URL"
-            )
+            ) from e
         self.db_id = ref.db_id
         self.owner = self._owner_for(ref, user)
-        dsn = f"{parsed.hostname}:{parsed.port or 1521}/{unquote(service)}"
         self._conn = oracledb.connect(user=user, password=password, dsn=dsn)
         with contextlib.suppress(Exception):
             self._conn.call_timeout = 120_000
-        with contextlib.suppress(Exception):
-            with self._conn.cursor() as cur:
-                cur.execute("SET TRANSACTION READ ONLY")
+        with contextlib.suppress(Exception), self._conn.cursor() as cur:
+            cur.execute("SET TRANSACTION READ ONLY")
 
     @staticmethod
     def _owner_for(ref: Any, user: str) -> str:

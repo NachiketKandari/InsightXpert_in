@@ -34,8 +34,11 @@ def _oracle_config(**overrides):
 def test_oracle_dsn_shape():
     cfg = _oracle_config()
     dsn = cfg.to_dsn()
+    # Service names go in the ?service_name= query form — the URL path
+    # segment means SID to this dialect.
     assert dsn.startswith("oracle+oracledb://ro_user:")
-    assert "@db.example.com:1521/ORCLPDB" in dsn
+    assert "@db.example.com:1521/" in dsn
+    assert "service_name=ORCLPDB" in dsn
     assert "s3cret" in dsn  # DSN itself carries the secret (never logged)
 
 
@@ -46,12 +49,98 @@ def test_oracle_redacts_password_in_repr():
 
 
 def test_oracle_rejects_empty_service_name():
-    from insightxpert_api.connections.types import OracleConnection
-
     with pytest.raises(ValueError, match="service_name"):
-        OracleConnection(
-            host="h", service_name="  ", username="u", password="p"
+        _oracle_config(service_name="  ")
+
+
+def test_oracle_rejects_empty_host_in_fields_mode():
+    with pytest.raises(ValueError, match="host"):
+        _oracle_config(host="  ")
+
+
+def test_oracle_connection_string_easy_connect():
+    cfg = _oracle_config(
+        host="", service_name="", connection_string="db.example.com:1522/ORCLPDB"
+    )
+    assert cfg.direct_dsn() == "db.example.com:1522/ORCLPDB"
+    dsn = cfg.to_dsn()
+    assert "service_name=ORCLPDB" in dsn
+    assert "@db.example.com:1522/" in dsn
+
+
+def test_oracle_connection_string_easy_defaults_port():
+    cfg = _oracle_config(
+        host="", service_name="", connection_string="db.example.com/ORCL"
+    )
+    assert cfg.direct_dsn() == "db.example.com:1521/ORCL"
+
+
+def test_oracle_connection_string_rejects_embedded_creds():
+    with pytest.raises(ValueError, match="must not contain credentials"):
+        _oracle_config(
+            host="",
+            service_name="",
+            connection_string="scott/tiger@db.example.com:1521/ORCL",
         )
+
+
+def test_oracle_connection_string_requires_service():
+    with pytest.raises(ValueError, match="host:1521/SERVICE"):
+        _oracle_config(
+            host="", service_name="", connection_string="db.example.com:1521"
+        )
+
+
+_DESC = (
+    "(DESCRIPTION=(ADDRESS=(PROTOCOL=TCP)(HOST=db.example.com)(PORT=1521))"
+    "(CONNECT_DATA=(SERVICE_NAME=ORCLPDB)))"
+)
+
+
+def test_oracle_connection_string_descriptor():
+    cfg = _oracle_config(host="", service_name="", connection_string=_DESC)
+    assert cfg.uses_descriptor()
+    assert cfg.direct_dsn() == _DESC
+    marker = cfg.to_dsn()
+    assert "oracle-descriptor" in marker
+    # The adapter helper recovers the exact descriptor from the marker URL.
+    from insightxpert_api.db.dialects.oracle_url import split_oracle_url
+
+    user, password, dsn = split_oracle_url(marker)
+    assert (user, password, dsn) == ("ro_user", "s3cret", _DESC)
+
+
+def test_oracle_connection_string_rejects_bad_descriptor():
+    with pytest.raises(ValueError, match="DESCRIPTION"):
+        _oracle_config(host="", service_name="", connection_string="(FOO=bar)")
+
+
+def test_oracle_connection_string_exclusive_with_fields():
+    with pytest.raises(ValueError, match="not both"):
+        _oracle_config(connection_string="db.example.com/ORCL")
+
+
+def test_split_oracle_url_service_name_form():
+    from insightxpert_api.db.dialects.oracle_url import split_oracle_url
+
+    user, password, dsn = split_oracle_url(_oracle_config().to_dsn())
+    assert (user, password, dsn) == ("ro_user", "s3cret", "db.example.com:1521/ORCLPDB")
+
+
+def test_oracle_connector_descriptor_uses_creator():
+    from insightxpert_api.connections.oracle_connector import OracleConnector
+
+    cfg = _oracle_config(host="", service_name="", connection_string=_DESC)
+    with patch(
+        "insightxpert_api.connections.oracle_connector.create_engine"
+    ) as ce:
+        conn = OracleConnector(cfg)
+        try:
+            ((url,), kwargs) = (ce.call_args.args, ce.call_args.kwargs)
+            assert url == "oracle+oracledb://"
+            assert callable(kwargs.get("creator"))
+        finally:
+            conn.dispose()
 
 
 def test_oracle_effective_schema_defaults_to_user():
