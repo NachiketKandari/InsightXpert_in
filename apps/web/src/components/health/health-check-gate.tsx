@@ -20,7 +20,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Loader2, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
-import { useHealthCheck } from "@/hooks/use-health-check";
+import { UNHEALTHY_POLL_MS, useHealthCheck } from "@/hooks/use-health-check";
 import { Button } from "@/components/ui/button";
 
 const GRACE_MS = 3_000;
@@ -47,6 +47,20 @@ export function HealthCheckGate({ children }: { children: React.ReactNode }) {
     }
     prevDataRef.current = data;
   }, [data]);
+
+  // Polling pauses while the tab is hidden (`refetchIntervalInBackground:
+  // false`) and the app disables refetch-on-focus globally, so a verdict from
+  // before a background stint could sit stale after the user returns. Re-probe
+  // whenever the tab becomes visible again so a stale banner clears promptly.
+  useEffect(() => {
+    function onVisibilityChange() {
+      if (document.visibilityState === "visible") {
+        void refetch();
+      }
+    }
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", onVisibilityChange);
+  }, [refetch]);
 
   async function handleRetry() {
     if (checking) return;
@@ -78,7 +92,7 @@ export function HealthCheckGate({ children }: { children: React.ReactNode }) {
             <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden />
             <span className="flex-1">
               <strong className="font-semibold">Backend unavailable.</strong>{" "}
-              Retrying every 15s. Some actions will fail until it&apos;s back.
+              Retrying every {UNHEALTHY_POLL_MS / 1000}s. Some actions will fail until it&apos;s back.
             </span>
             {(isFetching || checking) ? (
               <Loader2 className="h-4 w-4 animate-spin" aria-label="Retrying" />
