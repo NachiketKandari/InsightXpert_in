@@ -39,7 +39,7 @@ import { useSettingsStore } from "@/stores/settings-store";
 import { useChatStore } from "@/stores/chat-store";
 import { useClientConfig } from "@/hooks/use-client-config";
 import { useCurrentUser } from "@/hooks/use-current-user";
-import { PROVIDER_LABELS, formatModelName } from "@/lib/model-utils";
+import { providerLabel, formatModelName } from "@/lib/model-utils";
 import { CsvUploadDialog } from "@/components/dataset/csv-upload-dialog";
 import { PdfUploadDialog } from "@/components/dataset/pdf-upload-dialog";
 import type { VoiceState } from "@/hooks/use-voice-input";
@@ -117,7 +117,7 @@ export function InputToolbar({
     if (showModelSwitching) fetchConfig();
   }, [showModelSwitching, fetchConfig]);
 
-  const providerLabel = PROVIDER_LABELS[currentProvider] ?? currentProvider;
+  const providerLabelText = providerLabel(currentProvider);
   const displayModel = formatModelName(currentModel, currentProvider);
 
   const handleModelSelect = (provider: string, model: string) => {
@@ -319,7 +319,7 @@ export function InputToolbar({
                     disabled={loading}
                   >
                     <span className="truncate">
-                      {providerLabel} {displayModel}
+                      {providerLabelText} {displayModel}
                     </span>
                     <ChevronDown className="size-3 opacity-50 shrink-0" />
                   </button>
@@ -335,7 +335,7 @@ export function InputToolbar({
               {providers.map((p) => (
                 <DropdownMenuSub key={p.provider}>
                   <DropdownMenuSubTrigger>
-                    {PROVIDER_LABELS[p.provider] ?? p.provider}
+                    {providerLabel(p.provider)}
                   </DropdownMenuSubTrigger>
                   <DropdownMenuSubContent>
                     <DropdownMenuRadioGroup
