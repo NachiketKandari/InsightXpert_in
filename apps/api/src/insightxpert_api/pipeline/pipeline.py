@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+import traceback
 from typing import Any
 
 from ..logging import get_logger
@@ -46,6 +47,7 @@ class Pipeline:
                     ms=elapsed_ms,
                     error=str(exc),
                     error_type=type(exc).__name__,
+                    traceback=traceback.format_exc(),
                 )
                 if ctx.emitter is not None:
                     await ctx.emitter.emit(

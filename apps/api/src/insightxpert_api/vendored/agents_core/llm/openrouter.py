@@ -88,7 +88,13 @@ class OpenRouterProvider:
         response = await self._client.chat.completions.create(**kwargs)
         ms = (time.time() - start) * 1000
 
-        choice = response.choices[0]
+        # OpenRouter may return choices=None (e.g. filtered/empty completion).
+        choices = response.choices or []
+        if not choices:
+            parsed = LLMResponse(content="", tool_calls=[], input_tokens=0, output_tokens=0)
+            log_llm_response(logger, ms, parsed)
+            return parsed
+        choice = choices[0]
         content = choice.message.content
         tool_calls: list[ToolCall] = []
         if choice.message.tool_calls:

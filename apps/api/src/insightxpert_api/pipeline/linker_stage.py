@@ -113,6 +113,11 @@ class SchemaLinkerStage:
             single_sql=single_sql,
         )
         raw = await asyncio.wait_for(self._llm.async_generate(prompt), timeout=90.0)
+        # Defensive: some gateways return non-string payloads (None / content
+        # blocks) on filtered or empty completions. Coerce so regex parsing
+        # below never raises TypeError.
+        if not isinstance(raw, str):
+            raw = ""
 
         candidates = [m.strip().rstrip(";").strip() for m in _FENCE_RE.findall(raw)]
         await self._emit(

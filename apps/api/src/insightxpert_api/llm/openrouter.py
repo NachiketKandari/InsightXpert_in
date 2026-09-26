@@ -121,7 +121,18 @@ class OpenRouterLLM:
         if usage:
             self.input_tokens_used += usage.prompt_tokens or 0
             self.output_tokens_used += usage.completion_tokens or 0
-        return response.choices[0].message.content or ""
+        # OpenRouter may return choices=None (e.g. filtered/empty completion).
+        choices = response.choices or []
+        if not choices:
+            return ""
+        content = choices[0].message.content
+        # Some providers return content blocks instead of a plain string.
+        if isinstance(content, list):
+            content = "".join(
+                b.get("text", "") if isinstance(b, dict) else getattr(b, "text", "") or ""
+                for b in content
+            )
+        return content or ""
 
     async def async_generate_stream(
         self,
