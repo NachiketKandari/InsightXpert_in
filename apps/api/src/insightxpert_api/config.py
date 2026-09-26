@@ -102,6 +102,14 @@ class Settings(BaseSettings):
     deepseek_api_key: str = ""
     deepseek_chat_model: str = "deepseek-flash"
 
+    # OpenRouter (OpenAI-compatible gateway, 100+ models). Model is env-driven
+    # so free-tier rotation doesn't require code changes.
+    openrouter_api_key: str = ""
+    openrouter_chat_model: str = "nvidia/nemotron-3-ultra-550b-a55b:free"
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    openrouter_site_url: str = ""
+    openrouter_app_name: str = "InsightXpert"
+
     # --- voice / speech-to-text -------------------------------------------
     # Deepgram Nova-3 streaming. Empty → /api/transcribe closes with 4002.
     deepgram_api_key: str = ""

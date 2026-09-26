@@ -61,6 +61,9 @@ PRICING: dict[str, ModelPricing] = {
     # DeepSeek V4 Pro — ~3× more expensive than Flash. Currently 75% off until
     # 2026-05-31 via a limited-time discount.
     "deepseek-v4-pro": ModelPricing(input_per_1m=0.42, output_per_1m=0.84),
+    # OpenRouter free-tier models — $0 in/out. Cost tracking stays truthful
+    # ($0) instead of falling back to flash pricing.
+    "nvidia/nemotron-3-ultra-550b-a55b:free": ModelPricing(input_per_1m=0.0, output_per_1m=0.0),
 }
 
 # Fallback when a model isn't in the registry — keeps cost tracking from

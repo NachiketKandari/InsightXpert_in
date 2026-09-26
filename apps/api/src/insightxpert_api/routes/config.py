@@ -24,20 +24,25 @@ _CHAT_MODELS: dict[str, list[str]] = {}
 for _name in sorted(PRICING):
     if "embedding" in _name:
         continue
-    # Group by provider prefix: gemini-* or deepseek-*
+    # Group by provider prefix: gemini-* or deepseek-* or openrouter (<org>/<model>).
     if _name.startswith("gemini"):
         _CHAT_MODELS.setdefault("gemini", []).append(_name)
     elif _name.startswith("deepseek"):
         _CHAT_MODELS.setdefault("deepseek", []).append(_name)
-# Ensure both providers have at least an empty list so the picker doesn't 500.
+    elif "/" in _name or _name.startswith("nvidia/") or _name.startswith("openrouter"):
+        _CHAT_MODELS.setdefault("openrouter", []).append(_name)
+# Ensure all providers have at least an empty list so the picker doesn't 500.
 _CHAT_MODELS.setdefault("gemini", [])
 _CHAT_MODELS.setdefault("deepseek", [])
+_CHAT_MODELS.setdefault("openrouter", [])
 
 
 def _current_model(settings: Settings) -> str:
     """Active chat model for the configured provider."""
     if settings.llm_provider == "deepseek":
         return settings.deepseek_chat_model
+    if settings.llm_provider == "openrouter":
+        return settings.openrouter_chat_model
     return settings.gemini_chat_model
 
 
@@ -94,10 +99,12 @@ async def switch_model(
 
     # In-process override only — Settings is the cached singleton from
     # get_settings(); mutating the field here flips every site that reads
-    # settings.{gemini,deepseek}_chat_model on next access. Lost on restart
+    # settings.{gemini,deepseek,openrouter}_chat_model on next access. Lost on restart
     # by design.
     if body.provider == "deepseek":
         settings.deepseek_chat_model = body.model
+    elif body.provider == "openrouter":
+        settings.openrouter_chat_model = body.model
     else:
         settings.gemini_chat_model = body.model
     settings.llm_provider = body.provider
