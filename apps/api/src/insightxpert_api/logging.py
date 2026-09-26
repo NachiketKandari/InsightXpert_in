@@ -13,17 +13,30 @@ ephemeral.
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta, timezone
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 import structlog
+
+# All app log timestamps use IST (UTC+5:30) so on-call reads wall-clock time
+# directly. Raw infra logs (uvicorn access lines, httpx) stay UTC.
+IST = timezone(timedelta(hours=5, minutes=30))
+
+
+def _ist_timestamper(
+    _: object, __: str, event_dict: structlog.types.EventDict
+) -> structlog.types.EventDict:
+    """structlog processor — stamp ``timestamp`` in IST ISO-8601."""
+    event_dict.setdefault("timestamp", datetime.now(IST).isoformat())
+    return event_dict
 
 
 def configure_logging(env: str) -> None:
     shared_processors: list[structlog.types.Processor] = [
         structlog.contextvars.merge_contextvars,
         structlog.processors.add_log_level,
-        structlog.processors.TimeStamper(fmt="iso", utc=True),
+        _ist_timestamper,
         structlog.processors.StackInfoRenderer(),
     ]
 
@@ -106,8 +119,9 @@ class _JSONFileFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         import json
+        from datetime import datetime
         return json.dumps({
-            "ts": self.formatTime(record, "%Y-%m-%dT%H:%M:%S.%fZ"),
+            "ts": datetime.fromtimestamp(record.created, IST).isoformat(),
             "level": record.levelname,
             "logger": record.name,
             "msg": record.getMessage(),
