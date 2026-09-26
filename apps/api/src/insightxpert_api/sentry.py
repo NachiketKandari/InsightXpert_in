@@ -55,6 +55,11 @@ def init_sentry(settings: Settings) -> bool:
         send_default_pii=settings.sentry_send_default_pii,
         traces_sample_rate=settings.sentry_traces_sample_rate,
         profiles_sample_rate=settings.sentry_profiles_sample_rate,
+        # Auto-enabled integrations are OFF: sentry's OpenAI integration
+        # crashes on null-choice completions (OpenRouter free-tier returns
+        # choices=None on filtered/empty responses — see stage.error
+        # 2026-09-26). We instrument only what we need below.
+        auto_enabling_integrations=False,
         integrations=[
             FastApiIntegration(transaction_style="endpoint"),
             StarletteIntegration(transaction_style="endpoint"),

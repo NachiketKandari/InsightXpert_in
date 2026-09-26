@@ -112,7 +112,7 @@ class SchemaLinkerStage:
             schema_text=schema_text_full,
             single_sql=single_sql,
         )
-        raw = await asyncio.wait_for(self._llm.async_generate(prompt), timeout=90.0)
+        raw = await asyncio.wait_for(self._llm.async_generate(prompt), timeout=150.0)
         # Defensive: some gateways return non-string payloads (None / content
         # blocks) on filtered or empty completions. Coerce so regex parsing
         # below never raises TypeError.

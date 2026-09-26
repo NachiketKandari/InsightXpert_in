@@ -63,7 +63,9 @@ class OpenRouterLLM:
         self._client = AsyncOpenAI(
             api_key=api_key,
             base_url=base_url,
-            timeout=120.0,
+            # Free-tier 500B+ models queue + stream slowly; must exceed the
+            # stage-level wait_for timeouts (150s) so those govern instead.
+            timeout=180.0,
             default_headers=default_headers or None,
         )
         self._model = model

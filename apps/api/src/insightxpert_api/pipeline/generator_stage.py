@@ -77,7 +77,9 @@ class SqlGeneratorStage:
             schema_text=ctx.state["schema_text"],
             few_shot_example=few_shot_example,
         )
-        resp = await asyncio.wait_for(self._llm.async_generate(prompt), timeout=60.0)
+        # Free-tier large models (e.g. 550B MoE via OpenRouter) queue + stream
+        # slowly — 60s is too tight and produced TimeoutErrors in prod.
+        resp = await asyncio.wait_for(self._llm.async_generate(prompt), timeout=150.0)
         m = _FENCED_SQL.search(resp)
         sql = (m.group(1) if m else resp).strip().rstrip(";").strip()
         if ctx.emitter is not None:
