@@ -29,7 +29,7 @@ export function createSSEStream(
   message: string,
   conversationId: string | null,
   callbacks: SSECallbacks,
-  agentMode: AgentMode = "auto",
+  agentMode: AgentMode = "basic",
   options: SSEOptions = {},
   token?: string | null,
 ): AbortController {

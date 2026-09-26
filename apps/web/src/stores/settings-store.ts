@@ -27,10 +27,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   currentModel: "deepseek-flash",
   providers: [],
   loading: false,
-  // Default to "auto" — the FE pre-routes via POST /api/v1/chat/route.
-  // The classifier picks basic vs. agentic per question. Users can override
-  // via the dropdown.
-  agentMode: "auto" as AgentMode,
+  // Default to "basic" — direct single-pass path, no classifier hop.
+  // Users can opt into "auto" (server-routed) via the dropdown.
+  agentMode: "basic" as AgentMode,
   pipelineMode: "auto" as PipelineMode,
 
   fetchConfig: async () => {

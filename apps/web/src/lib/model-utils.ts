@@ -17,9 +17,21 @@ export function providerLabel(provider: string): string {
     .replace(/\b[a-z]/g, (c) => c.toUpperCase());
 }
 
-/** Strip provider prefix and title-case: "gemini-2.5-flash" -> "2.5 Flash" */
+/** Display name for a model id: "gemini-2.5-flash" -> "2.5 Flash".
+ * OpenRouter-style ids ("org/model:variant") render without the vendor
+ * prefix or variant suffix: "nvidia/nemotron-3-ultra:free" -> "Nemotron 3 Ultra".
+ */
 export function formatModelName(model: string, provider: string): string {
   let name = model;
+  let freeTier = false;
+  // Strip OpenRouter vendor prefix ("org/") and variant suffix (":free").
+  if (name.includes("/")) {
+    name = name.slice(name.lastIndexOf("/") + 1);
+  }
+  if (name.includes(":")) {
+    freeTier = name.slice(name.indexOf(":") + 1).toLowerCase() === "free";
+    name = name.slice(0, name.indexOf(":"));
+  }
   // Strip provider prefix (e.g. "gemini-", "ollama/")
   const prefixes = [provider + "-", provider + "/"];
   for (const p of prefixes) {
@@ -29,7 +41,8 @@ export function formatModelName(model: string, provider: string): string {
     }
   }
   // Replace hyphens/underscores with spaces and title-case each word
-  return name
+  const pretty = name
     .replace(/[-_]/g, " ")
     .replace(/\b[a-z]/g, (c) => c.toUpperCase());
+  return freeTier ? `${pretty} (Free)` : pretty;
 }

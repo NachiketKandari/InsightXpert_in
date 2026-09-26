@@ -129,7 +129,8 @@ export function InputToolbar({
   const showPhase = isStreaming && !!currentAgentPhase;
   const activeKey = showPhase ? currentAgentPhase! : agentMode;
 
-  // Three-state toggle. `auto` is the LLM-routed default. `deep_think` deferred.
+  // Three-state toggle. `basic` is the default; `auto` routes via the
+  // server classifier. `deep_think` deferred.
   const modeConfig = {
     auto: {
       label: "Auto",
@@ -224,12 +225,12 @@ export function InputToolbar({
             </DropdownMenuLabel>
             <DropdownMenuItem onSelect={() => setAgentMode("auto")}>
               <Sparkles className="size-4 text-violet-500" />
-              Auto (recommended)
+              Auto
               {agentMode === "auto" && <Check className="size-3.5 ml-auto text-emerald-500" />}
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => setAgentMode("basic")}>
               <Sparkles className="size-4" />
-              Basic (fast)
+              Basic (default)
               {agentMode === "basic" && <Check className="size-3.5 ml-auto text-emerald-500" />}
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => setAgentMode("agentic")}>
@@ -289,12 +290,12 @@ export function InputToolbar({
               <DropdownMenuSeparator />
               <DropdownMenuItem onSelect={() => setAgentMode("auto")}>
                 <Sparkles className="size-4 text-violet-500" />
-                Auto (recommended)
+                Auto
                 {agentMode === "auto" && <Check className="size-3.5 ml-auto text-emerald-500" />}
               </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => setAgentMode("basic")}>
                 <Sparkles className="size-4 text-amber-500" />
-                Basic (fast)
+                Basic (default)
                 {agentMode === "basic" && <Check className="size-3.5 ml-auto text-emerald-500" />}
               </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => setAgentMode("agentic")}>
